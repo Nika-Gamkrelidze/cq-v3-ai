@@ -27,3 +27,4 @@ deletes the volume).
 - `backend/db`  — schema + seed
 - `frontend/`   — placeholder now; Next.js portal + dashboard later
 - `deploy/`     — nginx config, webhook listener, deploy script, systemd unit
+
