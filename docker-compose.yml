@@ -32,17 +32,24 @@ services:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
 
-  web:
-    image: nginx:alpine
-    container_name: cq-web
+  caddy:
+    image: caddy:2-alpine
+    container_name: cq-caddy
     depends_on:
       - api
     ports:
       - "80:80"
+      - "443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ./frontend/public:/usr/share/nginx/html:ro,z
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - ./frontend/public:/srv:ro,z
+      - caddy_data:/data
+      - caddy_config:/config
     restart: unless-stopped
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
