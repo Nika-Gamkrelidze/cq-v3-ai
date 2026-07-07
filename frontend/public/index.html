@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CQ v3 AI</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0b0b0f; color: #e8e8ea;
+    }
+    .card {
+      width: min(90vw, 460px); padding: 40px; border-radius: 16px;
+      background: #16161c; border: 1px solid #26262e;
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.02em; }
+    p.sub { margin: 0 0 28px; color: #9a9aa5; font-size: 14px; }
+    .row { display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0; border-top: 1px solid #26262e; font-size: 15px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    .ok { background: #34d399; } .bad { background: #f87171; } .wait { background: #fbbf24; }
+    .val { color: #9a9aa5; }
+    code { color: #c4b5fd; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>CQ v3 AI</h1>
+    <p class="sub">Call-quality analysis service</p>
+    <div class="row"><span>Frontend (nginx)</span><span class="val"><span class="dot ok"></span>serving</span></div>
+    <div class="row"><span>API</span><span class="val" id="api"><span class="dot wait"></span>checking…</span></div>
+    <div class="row"><span>Database</span><span class="val" id="db"><span class="dot wait"></span>checking…</span></div>
+    <div class="row"><span>Ingest endpoint</span><span class="val"><code>POST /api/calls</code></span></div>
+  </div>
+  <script>
+    fetch('/api/health').then(r => r.json()).then(d => {
+      const ok = d.status === 'ok';
+      document.getElementById('api').innerHTML =
+        '<span class="dot ' + (ok ? 'ok' : 'bad') + '"></span>' + (ok ? 'up' : 'degraded');
+      const dbc = d.database === 'connected';
+      document.getElementById('db').innerHTML =
+        '<span class="dot ' + (dbc ? 'ok' : 'bad') + '"></span>' + (d.database || 'unknown');
+    }).catch(() => {
+      document.getElementById('api').innerHTML = '<span class="dot bad"></span>unreachable';
+      document.getElementById('db').innerHTML = '<span class="dot bad"></span>unknown';
+    });
+  </script>
+</body>
+</html>
