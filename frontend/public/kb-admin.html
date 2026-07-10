@@ -356,8 +356,20 @@
     // bulk
     $('bulkDelete').addEventListener('click', () => bulk('delete'));
     $('bulkReembed').addEventListener('click', () => bulk('reembed'));
+    function promptTags() {
+      return new Promise(resolve => {
+        const bg = showModal(`<h3>${t('kba.bulk.retag')}</h3>
+          <label>${t('kba.doc.tags')}</label><input id="rt_input" placeholder="a, b" />
+          <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="rt_ok">${t('kba.save')}</button></div>`);
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(null));
+        bg.querySelector('#rt_ok').addEventListener('click', () => done($('rt_input').value));
+        $('rt_input').addEventListener('keydown', e => { if (e.key === 'Enter') done($('rt_input').value); });
+        $('rt_input').focus();
+      });
+    }
     $('bulkRetag').addEventListener('click', async () => {
-      const tags = prompt('Tags (comma-separated):'); if (tags===null) return;
+      const tags = await promptTags(); if (tags===null) return;
       bulk('retag', tags.split(',').map(s=>s.trim()).filter(Boolean));
     });
     async function bulk(action, tags) {
