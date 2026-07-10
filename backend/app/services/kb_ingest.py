@@ -183,6 +183,9 @@ async def reembed_document(doc_id: str, client_id: str) -> int:
     if not rows:
         return 0
     vectors = await embeddings.embed_texts([r["content"] for r in rows])
+    if len(vectors) != len(rows):
+        raise IngestError(
+            f"embedding count mismatch: got {len(vectors)} vectors for {len(rows)} chunks")
     async with pool().acquire() as conn:
         async with conn.transaction():
             for r, vec in zip(rows, vectors):

@@ -6,6 +6,8 @@ version and flips the active flag atomically.
 """
 import json
 
+import asyncpg
+
 from ..db import pool
 from .scoring import normalize_dimensions
 
@@ -51,20 +53,28 @@ async def save_config(client_id: str, dimensions, rubric: str, updated_by: str) 
         for d in dims:
             d["weight"] = equal
     weights = {d["key"]: d["weight"] for d in dims}
-    async with pool().acquire() as conn:
-        async with conn.transaction():
-            next_ver = await conn.fetchval(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM scoring_configs WHERE client_id = $1",
-                client_id)
-            await conn.execute(
-                "UPDATE scoring_configs SET is_active = false WHERE client_id = $1 AND is_active",
-                client_id)
-            await conn.execute(
-                """
-                INSERT INTO scoring_configs
-                    (client_id, version, dimensions, weights, rubric, is_active, updated_at, updated_by)
-                VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,true,now(),$6)
-                """,
-                client_id, next_ver, json.dumps(dims), json.dumps(weights),
-                (rubric or "").strip() or None, updated_by)
+    # Retry on a version collision from a concurrent save for the same tenant
+    # (both readers computed the same MAX(version)+1 -> UNIQUE(client_id, version)).
+    for _attempt in range(3):
+        try:
+            async with pool().acquire() as conn:
+                async with conn.transaction():
+                    next_ver = await conn.fetchval(
+                        "SELECT COALESCE(MAX(version), 0) + 1 FROM scoring_configs WHERE client_id = $1",
+                        client_id)
+                    await conn.execute(
+                        "UPDATE scoring_configs SET is_active = false WHERE client_id = $1 AND is_active",
+                        client_id)
+                    await conn.execute(
+                        """
+                        INSERT INTO scoring_configs
+                            (client_id, version, dimensions, weights, rubric, is_active, updated_at, updated_by)
+                        VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,true,now(),$6)
+                        """,
+                        client_id, next_ver, json.dumps(dims), json.dumps(weights),
+                        (rubric or "").strip() or None, updated_by)
+            break
+        except asyncpg.UniqueViolationError:
+            if _attempt == 2:
+                raise
     return await get_active_config(client_id)

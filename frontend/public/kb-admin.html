@@ -265,8 +265,10 @@
       if ($('fType').value.trim()) p.set('doc_type', $('fType').value.trim());
       if ($('fTag').value.trim()) p.set('tag', $('fTag').value.trim());
       if ($('fSearch').value.trim()) p.set('q', $('fSearch').value.trim());
-      const r = await fetch(`${K()}/documents?${p}`, { headers: H() }); const d = await r.json();
-      page.total = d.total;
+      const r = await fetch(`${K()}/documents?${p}`, { headers: H() });
+      const d = r.ok ? await r.json() : { total: 0, documents: [] };
+      if (!Array.isArray(d.documents)) d.documents = [];
+      page.total = d.total || 0;
       if (!d.documents.length) { $('docList').innerHTML = `<div class="empty">${t('kba.nodocs')}</div>`; $('docPager').innerHTML=''; return; }
       $('docList').innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th>${t('kba.doc.tags')}</th>
@@ -320,7 +322,9 @@
       });
     }
     async function openChunks(id) {
-      const chunks = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() }).then(r=>r.json());
+      const cr = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() });
+      const chunks = cr.ok ? await cr.json() : [];
+      if (!Array.isArray(chunks)) { CQ.toast(t('toast.error')||'Error', 'err'); return; }
       const bg = showModal(`<h3>${t('kba.chunks')} (${chunks.length})</h3><div id="chList"></div>`);
       const render = list => { bg.querySelector('#chList').innerHTML = list.map(c => `<div class="fc-claim" style="border-left-color:${c.has_embedding?'var(--ok)':'var(--alert)'}">
         <div class="inline" style="justify-content:space-between"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>

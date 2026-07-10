@@ -196,8 +196,10 @@
       if (act==='del') { if(!(await CQ.confirm(t('btn.delete')+'?', {ok:t('btn.delete')}))) return;
         await fetch(`${API}/kb/documents/${id}`, { method:'DELETE', headers: authH() }); CQ.toast(t('toast.deleted'), 'ok'); loadDocs(); return; }
       if (act==='chunks') {
-        const r = await fetch(`${API}/kb/documents/${id}/chunks`, { headers: authH() }); const chunks = await r.json();
-        $('dsub-'+id).innerHTML = `<pre class="tx">${chunks.map((c,i)=>`[${c.chunk_index??i}] ${esc(c.content)}`).join('\n\n') || '(no chunks)'}</pre>`;
+        const r = await fetch(`${API}/kb/documents/${id}/chunks`, { headers: authH() });
+        const chunks = r.ok ? await r.json() : [];
+        const arr = Array.isArray(chunks) ? chunks : [];
+        $('dsub-'+id).innerHTML = `<pre class="tx">${arr.map((c,i)=>`[${c.chunk_index??i}] ${esc(c.content)}`).join('\n\n') || '(no chunks)'}</pre>`;
       }
     }
 

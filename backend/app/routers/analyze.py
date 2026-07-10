@@ -65,7 +65,7 @@ async def analyze_audio(file: UploadFile = File(...),
     except Exception as exc:  # noqa: BLE001
         await fail(f"Transcription failed: {exc}")
 
-    transcript = stt["text"]
+    transcript = (stt.get("text") or "")
     language = stt.get("language_code")
 
     async with pool().acquire() as conn:

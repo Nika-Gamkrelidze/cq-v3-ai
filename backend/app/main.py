@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+import asyncpg
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
@@ -33,6 +35,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(asyncpg.DataError)
+async def _data_error_handler(request: Request, exc: asyncpg.DataError):
+    # A DataError always means the client sent a malformed query value (e.g. a
+    # non-UUID id in the path/body). Return 400 instead of a 500.
+    return JSONResponse(status_code=400, content={"detail": "Invalid identifier or value"})
+
 
 app.include_router(calls.router)
 app.include_router(analyze.router)
