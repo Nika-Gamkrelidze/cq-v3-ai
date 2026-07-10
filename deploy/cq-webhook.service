@@ -1,15 +1,19 @@
 [Unit]
-Description=CQ v3 AI deploy webhook
+Description=CQ v3 push-to-deploy webhook (cqdeploy, cqv3 stack)
 After=network.target docker.service
+Wants=docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=/root/cq-v3-ai
-EnvironmentFile=/etc/cq-webhook.env
-Environment=REPO_DIR=/root/cq-v3-ai
+User=cqdeploy
+Group=cqdeploy
+WorkingDirectory=/home/cqdeploy/cq-v3-ai
+EnvironmentFile=/home/cqdeploy/.cq_webhook_secret
+Environment=REPO_DIR=/home/cqdeploy/cq-v3-ai
 Environment=DEPLOY_BRANCH=main
 Environment=WEBHOOK_PORT=9000
-ExecStart=/usr/bin/python3.11 /root/cq-v3-ai/deploy/webhook.py
+Environment=DEPLOY_LOG=/home/cqdeploy/cq-v3-ai/deploy/webhook.log
+ExecStart=/usr/bin/python3.11 /home/cqdeploy/cq-v3-ai/deploy/webhook.py
 Restart=always
 RestartSec=3
 

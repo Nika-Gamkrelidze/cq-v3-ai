@@ -13,7 +13,7 @@ PORT = int(os.environ.get("WEBHOOK_PORT", "9000"))
 BRANCH = os.environ.get("DEPLOY_BRANCH", "main")
 REPO_DIR = os.environ.get("REPO_DIR", os.getcwd())
 DEPLOY = os.path.join(REPO_DIR, "deploy", "deploy.sh")
-LOG = os.environ.get("DEPLOY_LOG", "/var/log/cq-deploy.log")
+LOG = os.environ.get("DEPLOY_LOG", os.path.join(REPO_DIR, "deploy", "webhook.log"))
 
 
 def valid_signature(body: bytes, sig_header: str) -> bool:

@@ -1,21 +1,12 @@
 #!/usr/bin/env bash
-# Safe redeploy: pull latest, rebuild images, recreate containers.
-# The Postgres 'pgdata' volume is NOT touched, so DB data survives every deploy.
+# Push-to-deploy: fast-forward main and rebuild the cqv3 stack.
+# Idempotent DB migrations run on API startup (services/migrate.py); the pgdata
+# and hf_cache volumes are NEVER touched, so all data survives every deploy.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd /home/cqdeploy/cq-v3-ai
 
 echo "=== deploy $(date -Is) ==="
-git fetch --all --prune
-git reset --hard "origin/${DEPLOY_BRANCH:-main}"
-
-docker compose up -d --build
-
-echo "waiting for db to accept connections..."
-until docker compose exec -T db pg_isready -U cq -d cq >/dev/null 2>&1; do sleep 1; done
-
-# Idempotent schema apply — every statement is IF NOT EXISTS, so this only
-# ADDS new tables/indexes and never drops or alters existing data.
-docker compose exec -T db psql -U cq -d cq < backend/db/schema.sql
-
+git pull --ff-only origin "${DEPLOY_BRANCH:-main}"
+docker compose -p cqv3 up -d --build
 docker image prune -f >/dev/null 2>&1 || true
 echo "=== deploy done $(date -Is) ==="
