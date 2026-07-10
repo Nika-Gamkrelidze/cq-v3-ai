@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Console</title>
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <script src="brand.js"></script>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main>
+    <div id="app" class="hidden">
+      <div class="tabs">
+        <div class="tab active" data-tab="tenants" data-i18n="adm.tenants"></div>
+        <div class="tab" data-tab="embeddings" data-i18n="adm.embeddings"></div>
+        <div class="tab" data-tab="anon" data-i18n="adm.anon"></div>
+        <div class="tab" data-tab="integrations" data-i18n="adm.integrations"></div>
+      </div>
+
+      <!-- TENANTS -->
+      <section class="panel active" id="panel-tenants">
+        <div class="card">
+          <h3 data-i18n="adm.createtenant"></h3>
+          <div class="row">
+            <div><label data-i18n="f.name"></label><input id="t_name" placeholder="Acme Bank" /></div>
+            <div><label data-i18n="f.industry"></label><input id="t_industry" placeholder="banking" /></div>
+            <div><label data-i18n="f.region"></label><input id="t_region" placeholder="ge" /></div>
+          </div>
+          <div class="actions"><button class="primary" id="createTenantBtn" data-i18n="btn.create"></button></div>
+          <div class="msg" id="createTenantMsg"></div>
+        </div>
+        <div class="card">
+          <div class="inline" style="justify-content:space-between"><h3 style="margin:0" data-i18n="adm.tenants"></h3>
+            <button class="ghost" id="reloadTenants" data-i18n="btn.refresh"></button></div>
+          <div id="tenantList" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- EMBEDDINGS -->
+      <section class="panel" id="panel-embeddings">
+        <div class="card">
+          <h3 data-i18n="adm.embprov"></h3>
+          <div class="row">
+            <div><label data-i18n="f.provider"></label>
+              <select id="e_provider"><option value="tei">tei (self-hosted BGE-M3)</option><option value="openai">openai</option></select></div>
+            <div><label data-i18n="f.dimension"></label><input id="e_dim" type="number" /></div>
+          </div>
+          <label data-i18n="f.model"></label><input id="e_model" placeholder="BAAI/bge-m3" />
+          <label data-i18n="f.baseurl"></label><input id="e_base_url" placeholder="http://embeddings:80" />
+          <label data-i18n="f.openaikey"></label><input id="e_api_key" type="password" />
+          <div class="hint" id="e_hint"></div>
+          <div class="actions">
+            <button class="primary" id="saveEmb" data-i18n="btn.save"></button>
+            <button class="ghost" id="testEmb" data-i18n="btn.test"></button>
+          </div>
+          <div class="hint" data-i18n="adm.embnote"></div>
+          <div id="embTest"></div><div class="msg" id="embMsg"></div>
+        </div>
+      </section>
+
+      <!-- ANONYMOUS -->
+      <section class="panel" id="panel-anon">
+        <div class="card">
+          <h3 data-i18n="adm.anonheading"></h3>
+          <label class="inline" style="gap:8px"><input type="checkbox" id="a_enabled" /> <span data-i18n="adm.allowanon"></span></label>
+          <div class="row" style="margin-top:12px">
+            <div><label data-i18n="adm.maxanalyses"></label><input id="a_analyses" type="number" /></div>
+            <div><label data-i18n="adm.maxmb"></label><input id="a_mb" type="number" /></div>
+            <div><label data-i18n="adm.maxtts"></label><input id="a_tts" type="number" /></div>
+          </div>
+          <h4 data-i18n="adm.features"></h4>
+          <div class="inline" style="gap:18px">
+            <label class="inline" style="gap:6px"><input type="checkbox" id="f_analyze" /> <span data-i18n="feat.analyze"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="f_tts" /> <span data-i18n="feat.tts"></span></label>
+          </div>
+          <div class="actions"><button class="primary" id="saveAnon" data-i18n="btn.savelimits"></button></div>
+          <div class="msg" id="anonMsg"></div>
+        </div>
+      </section>
+
+      <!-- INTEGRATIONS -->
+      <section class="panel" id="panel-integrations">
+        <div class="card">
+          <h3 data-i18n="adm.intkeys"></h3>
+          <label data-i18n="f.anthropic"></label><input type="password" id="anthropic_api_key" placeholder="sk-ant-…" />
+          <div class="hint" id="anthropicHint"></div>
+          <label data-i18n="f.eleven"></label><input type="password" id="elevenlabs_api_key" />
+          <div class="hint" id="elevenlabsHint"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="adm.models"></h3>
+          <div class="row">
+            <div><label data-i18n="f.claudemodel"></label>
+              <select id="llm_model"><option>claude-opus-4-8</option><option>claude-sonnet-5</option><option>claude-haiku-4-5</option></select></div>
+            <div><label data-i18n="f.sttmodel"></label><input id="stt_model" placeholder="scribe_v1" /></div>
+          </div>
+          <div class="row">
+            <div><label data-i18n="f.ttsmodel"></label><input id="tts_model" placeholder="eleven_multilingual_v2" /></div>
+            <div><label data-i18n="f.voiceid"></label>
+              <div class="inline"><input id="tts_voice_id" style="flex:1" /><button class="ghost" id="voicePreviewBtn" type="button">▶</button></div>
+              <div id="voicePreviewAudio"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="adm.instructions"></h3>
+          <textarea id="analysis_instructions"></textarea>
+          <div class="actions"><button class="primary" id="saveInt" data-i18n="btn.savesettings"></button><button class="ghost" id="testInt" data-i18n="btn.testconn"></button></div>
+          <div class="msg" id="intMsg"></div><div id="intTest"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const API = CQ.API, t = CQ.t;
+    CQ.mountHeader({ tag: 'Console', nav: [
+      { i18n: 'nav.kb', href: 'kb-admin.html' },
+      { i18n: 'nav.logout', href: '#', id: 'logout' },
+      { i18n: 'nav.public', href: 'index.html' },
+    ]});
+    let TOKEN = sessionStorage.getItem('cq_admin_token') || '';
+    const $ = id => document.getElementById(id);
+    const hdr = (extra={}) => ({ 'X-Admin-Token': TOKEN, ...extra });
+    const jhdr = () => hdr({ 'Content-Type': 'application/json' });
+    const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
+    CQ.enhanceSelects();
+
+    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      tb.classList.add('active'); $('panel-' + tb.dataset.tab).classList.add('active');
+    }));
+    document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) loadTenants(); });
+
+    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants()]); }
+
+    // Login happens on the unified sign-in page; this console is token-gated only.
+    async function boot() {
+      if (!TOKEN) { location.replace('tenant.html'); return; }
+      const r = await fetch(`${API}/admin/settings`, { headers: hdr() });
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      $('app').classList.remove('hidden');
+      await loadAll();
+    }
+
+    // integrations
+    const INT_FIELDS = ['llm_model','stt_model','tts_model','tts_voice_id','analysis_instructions'];
+    async function loadIntegrations() {
+      const r = await fetch(`${API}/admin/settings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      INT_FIELDS.forEach(f => { if ($(f)) $(f).value = d[f] ?? ''; }); CQ.syncSelect($('llm_model'));
+      $('anthropicHint').textContent = d.anthropic_api_key_set ? `Key set (${d.anthropic_api_key_hint}).` : 'No key set.';
+      $('elevenlabsHint').textContent = d.elevenlabs_api_key_set ? `Key set (${d.elevenlabs_api_key_hint}).` : 'No key set.';
+    }
+    $('saveInt').addEventListener('click', async () => {
+      const m = $('intMsg'); m.className='msg'; m.textContent='';
+      const patch = {}; INT_FIELDS.forEach(f => patch[f] = $(f).value);
+      if ($('anthropic_api_key').value.trim()) patch.anthropic_api_key = $('anthropic_api_key').value.trim();
+      if ($('elevenlabs_api_key').value.trim()) patch.elevenlabs_api_key = $('elevenlabs_api_key').value.trim();
+      const r = await fetch(`${API}/admin/settings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      if (r.ok) { $('anthropic_api_key').value=''; $('elevenlabs_api_key').value=''; await loadIntegrations(); m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
+      else { const d = await r.json().catch(()=>({})); m.className='msg err'; m.textContent = d.detail || 'Save failed'; }
+    });
+    $('testInt').addEventListener('click', async () => {
+      const box = $('intTest'), b = $('testInt'); box.innerHTML=''; b.disabled=true; b.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
+      try { const r = await fetch(`${API}/admin/test`, { method:'POST', headers: hdr() }); const d = await r.json();
+        const line = (n,x)=>`<div class="test"><b>${n}</b> ${x.ok?'✅':'❌'} ${esc(x.detail||'')}</div>`;
+        box.innerHTML = line('ElevenLabs', d.elevenlabs||{}) + line('Claude', d.claude||{});
+      } catch(e){ box.innerHTML = `<div class="msg err">${e.message}</div>`; }
+      finally { b.disabled=false; b.textContent=t('btn.testconn'); }
+    });
+    let voiceMap = {}, voicesFetched = false;
+    async function fetchVoices(){ if (voicesFetched) return; try { const r = await fetch(`${API}/voices`); if(!r.ok) return;
+      (await r.json()).forEach(v => { if (v.preview_url) voiceMap[v.voice_id] = v.preview_url; }); voicesFetched = true; } catch{} }
+    $('voicePreviewBtn').addEventListener('click', async () => {
+      const box = $('voicePreviewAudio'); box.innerHTML=''; const vid = $('tts_voice_id').value.trim(); if(!vid) return;
+      await fetchVoices();
+      if (voiceMap[vid]) { CQ.player(box, voiceMap[vid], {name:'preview.mp3'}); return; }
+      try { const r = await fetch(`${API}/tts`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:'Hello.', voice_id: vid}) });
+        if (r.ok) CQ.player(box, URL.createObjectURL(await r.blob()), {name:'preview.mp3'}); } catch{}
+    });
+
+    // embeddings
+    async function loadEmbeddings() {
+      const r = await fetch(`${API}/admin/embeddings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      $('e_provider').value = d.provider || 'tei'; CQ.syncSelect($('e_provider'));
+      $('e_model').value = d.model || ''; $('e_base_url').value = d.base_url || '';
+      $('e_dim').value = d.dim || ''; $('e_hint').textContent = d.api_key_set ? `API key set (${d.api_key_hint}).` : 'No API key set.';
+    }
+    $('saveEmb').addEventListener('click', async () => {
+      const m = $('embMsg'); m.className='msg'; m.textContent='';
+      const patch = { provider: $('e_provider').value, model: $('e_model').value, base_url: $('e_base_url').value, dim: parseInt($('e_dim').value)||undefined };
+      if ($('e_api_key').value.trim()) patch.api_key = $('e_api_key').value.trim();
+      const r = await fetch(`${API}/admin/embeddings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      if (r.ok) { $('e_api_key').value=''; await loadEmbeddings(); m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
+      else { m.className='msg err'; m.textContent='Save failed'; }
+    });
+    $('testEmb').addEventListener('click', async () => {
+      const box = $('embTest'), b = $('testEmb'); box.innerHTML=''; b.disabled=true; b.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
+      try { const r = await fetch(`${API}/admin/embeddings/test`, { method:'POST', headers: hdr() }); const d = await r.json();
+        box.innerHTML = `<div class="test">${d.ok?'✅':'❌'} ${esc(d.detail||'')}</div>`; }
+      finally { b.disabled=false; b.textContent=t('btn.test'); }
+    });
+
+    // anonymous
+    async function loadAnon() {
+      const r = await fetch(`${API}/admin/anonymous-limits`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      $('a_enabled').checked = !!d.enabled; $('a_analyses').value = d.max_analyses_per_day ?? 0;
+      $('a_mb').value = d.max_audio_mb ?? 0; $('a_tts').value = d.max_tts_per_day ?? 0;
+      $('f_analyze').checked = !!(d.features||{}).analyze; $('f_tts').checked = !!(d.features||{}).tts;
+    }
+    $('saveAnon').addEventListener('click', async () => {
+      const m = $('anonMsg'); m.className='msg'; m.textContent='';
+      const patch = { enabled: $('a_enabled').checked, max_analyses_per_day: parseInt($('a_analyses').value)||0,
+        max_audio_mb: parseInt($('a_mb').value)||0, max_tts_per_day: parseInt($('a_tts').value)||0,
+        features: { analyze: $('f_analyze').checked, tts: $('f_tts').checked, kb: false } };
+      const r = await fetch(`${API}/admin/anonymous-limits`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : 'Save failed'; if (r.ok) CQ.toast(t('toast.saved'),'ok');
+    });
+
+    // tenants
+    $('reloadTenants').addEventListener('click', loadTenants);
+    $('createTenantBtn').addEventListener('click', async () => {
+      const m = $('createTenantMsg'); m.className='msg'; m.textContent='';
+      const r = await fetch(`${API}/admin/tenants`, { method:'POST', headers: jhdr(),
+        body: JSON.stringify({ name: $('t_name').value.trim(), industry: $('t_industry').value.trim(), region: $('t_region').value.trim() }) });
+      const d = await r.json();
+      if (!r.ok) { m.className='msg err'; m.textContent = d.detail || 'Create failed'; return; }
+      m.className='msg ok'; m.innerHTML = `${t('toast.created')}: <b>${esc(d.name)}</b> · API key: <code>${esc(d.api_key)}</code>`;
+      CQ.toast(t('toast.created'),'ok');
+      $('t_name').value=$('t_industry').value=$('t_region').value=''; loadTenants();
+    });
+    async function loadTenants() {
+      const r = await fetch(`${API}/admin/tenants`, { headers: hdr() }); if (!r.ok) return;
+      const l = await r.json(); const box = $('tenantList');
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.name')}</th><th>${t('th.slug')}</th><th>${t('th.industry')}</th><th>${t('th.active')}</th><th>${t('th.users')}</th><th>${t('th.docs')}</th><th></th></tr></thead><tbody>` +
+        l.map(x => `<tr>
+          <td>${esc(x.name)}</td><td><code>${esc(x.slug)}</code></td><td>${esc(x.industry||'—')}</td>
+          <td><span class="pill ${x.is_active?'on':'off'}">${x.is_active?'●':'○'}</span></td>
+          <td>${x.users}</td><td>${x.documents}</td>
+          <td class="inline"><button class="ghost" data-act="key" data-id="${x.id}">${t('btn.apikey')}</button>
+            <button class="ghost" data-act="users" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.users')}</button>
+            <button class="danger" data-act="del" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.delete')}</button></td>
+        </tr><tr><td colspan="7"><div id="sub-${x.id}"></div></td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => tenantAction(b.dataset.act, b.dataset.id, b.dataset.name)));
+    }
+    async function tenantAction(act, id, name) {
+      const sub = $('sub-' + id);
+      if (act === 'del') {
+        if (!(await CQ.confirm(`${t('btn.delete')} "${esc(name)}"?`, {ok:t('btn.delete')}))) return;
+        await fetch(`${API}/admin/tenants/${id}`, { method:'DELETE', headers: hdr() }); CQ.toast(t('toast.deleted'),'ok'); loadTenants(); return;
+      }
+      if (act === 'key') {
+        const r = await fetch(`${API}/admin/tenants/${id}/key`, { headers: hdr() }); const d = await r.json();
+        sub.innerHTML = `<div class="sub inline" style="justify-content:space-between">
+          <span>${t('btn.apikey')}: <code>${esc(d.api_key||'—')}</code></span>
+          <button class="ghost" id="rot-${id}">${t('btn.rotate')}</button></div>`;
+        $('rot-'+id).addEventListener('click', async () => {
+          if (!(await CQ.confirm(t('btn.rotate')+'?', {ok:t('btn.rotate')}))) return;
+          await fetch(`${API}/admin/tenants/${id}/rotate-key`, { method:'POST', headers: hdr() });
+          CQ.toast('OK','ok'); tenantAction('key', id, name);
+        });
+        return;
+      }
+      if (act === 'users') {
+        const r = await fetch(`${API}/admin/tenants/${id}/users`, { headers: hdr() }); const users = await r.json();
+        sub.innerHTML = `<div class="sub">
+          <h4 style="margin-top:0">${t('btn.users')} · ${esc(name)}</h4>
+          <div id="ulist-${id}">${users.map(u=>`<div class="inline" style="justify-content:space-between;padding:4px 0">
+            <span>${esc(u.username)} <span class="hint">(${esc(u.role)})</span></span>
+            <button class="danger" data-uid="${u.id}">${t('btn.remove')}</button></div>`).join('') || `<span class="hint">—</span>`}</div>
+          <div class="row" style="margin-top:10px">
+            <div><input id="nu-${id}" data-i18n-ph="f.username" /></div>
+            <div><input id="np-${id}" type="password" data-i18n-ph="f.password" /></div>
+            <div style="flex:0"><button class="primary" id="addu-${id}">${t('btn.adduser')}</button></div>
+          </div><div class="msg" id="umsg-${id}"></div></div>`;
+        CQ.applyI18n(sub);
+        sub.querySelectorAll('button[data-uid]').forEach(b => b.addEventListener('click', async () => {
+          if (!(await CQ.confirm(t('btn.remove')+'?', {ok:t('btn.remove')}))) return;
+          await fetch(`${API}/admin/tenants/${id}/users/${b.dataset.uid}`, { method:'DELETE', headers: hdr() });
+          CQ.toast(t('toast.deleted'),'ok'); tenantAction('users', id, name);
+        }));
+        $('addu-'+id).addEventListener('click', async () => {
+          const m = $('umsg-'+id); m.className='msg';
+          const rr = await fetch(`${API}/admin/tenants/${id}/users`, { method:'POST', headers: jhdr(),
+            body: JSON.stringify({ username: $('nu-'+id).value.trim(), password: $('np-'+id).value }) });
+          const dd = await rr.json();
+          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || 'Failed'; }
+          else { CQ.toast(t('toast.created'),'ok'); tenantAction('users', id, name); loadTenants(); }
+        });
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

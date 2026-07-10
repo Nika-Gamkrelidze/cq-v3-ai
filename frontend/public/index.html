@@ -3,49 +3,223 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CQ v3 AI</title>
-  <style>
-    :root { color-scheme: light dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: #0b0b0f; color: #e8e8ea;
-    }
-    .card {
-      width: min(90vw, 460px); padding: 40px; border-radius: 16px;
-      background: #16161c; border: 1px solid #26262e;
-    }
-    h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.02em; }
-    p.sub { margin: 0 0 28px; color: #9a9aa5; font-size: 14px; }
-    .row { display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 0; border-top: 1px solid #26262e; font-size: 15px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-    .ok { background: #34d399; } .bad { background: #f87171; } .wait { background: #fbbf24; }
-    .val { color: #9a9aa5; }
-    code { color: #c4b5fd; }
-  </style>
+  <title>CommuniQ Voice AI — Analyze &amp; Text-to-Speech</title>
+  <meta name="description" content="Transcribe and analyze calls, and turn text into natural speech — including Georgian — powered by CommuniQ." />
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <script src="brand.js"></script>
 </head>
 <body>
-  <div class="card">
-    <h1>CQ v3 AI</h1>
-    <p class="sub">Call-quality analysis service</p>
-    <div class="row"><span>Frontend (nginx)</span><span class="val"><span class="dot ok"></span>serving</span></div>
-    <div class="row"><span>API</span><span class="val" id="api"><span class="dot wait"></span>checking…</span></div>
-    <div class="row"><span>Database</span><span class="val" id="db"><span class="dot wait"></span>checking…</span></div>
-    <div class="row"><span>Ingest endpoint</span><span class="val"><code>POST /api/calls</code></span></div>
-  </div>
+  <div id="cq-header"></div>
+  <main class="narrow">
+    <div class="quota" id="quota"></div>
+    <div style="margin-bottom:22px">
+      <span class="eyebrow" data-i18n="hero.eyebrow"></span>
+      <h1 style="margin:0; font-size:clamp(24px,4vw,32px);" data-i18n="hero.title"></h1>
+      <p class="lead" data-i18n="hero.sub"></p>
+    </div>
+    <div class="tabs">
+      <div class="tab active" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
+      <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
+    </div>
+
+    <!-- TTS -->
+    <section class="panel active" id="panel-tts">
+      <div class="card">
+        <h3 data-i18n="tts.heading"></h3>
+        <div class="row">
+          <div>
+            <label for="langSelect" data-i18n="f.language"></label>
+            <select id="langSelect"></select>
+          </div>
+          <div>
+            <label for="voiceSelect" data-i18n="f.voice"></label>
+            <div class="inline">
+              <div style="flex:1"><select id="voiceSelect"><option value="">Default voice</option></select></div>
+              <button class="ghost" id="previewBtn" title="Preview voice (free sample)" aria-label="Preview voice">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="hint" id="langNote" style="margin-top:8px"></div>
+        <div style="margin-top:14px">
+          <label for="ttsText" data-i18n="f.text"></label>
+          <textarea id="ttsText" data-i18n-ph="tts.text_ph"></textarea>
+        </div>
+        <div class="actions"><button class="primary" id="ttsBtn" data-i18n="btn.synth"></button></div>
+        <div class="err" id="ttsErr"></div>
+        <div id="ttsPlayer"></div>
+      </div>
+    </section>
+
+    <!-- ANALYZE -->
+    <section class="panel" id="panel-analyze">
+      <div class="card">
+        <h3 data-i18n="an.heading"></h3>
+        <label data-i18n="f.audiofile"></label>
+        <div class="drop" id="audioDrop">
+          <input type="file" id="audioFile" accept="audio/*" />
+          <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
+          <div class="drop-sub" data-i18n="drop.sub"></div>
+        </div>
+        <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
+        <div class="err" id="analyzeErr"></div>
+      </div>
+      <div id="analyzeResult"></div>
+    </section>
+  </main>
+
   <script>
-    fetch('/api/health').then(r => r.json()).then(d => {
-      const ok = d.status === 'ok';
-      document.getElementById('api').innerHTML =
-        '<span class="dot ' + (ok ? 'ok' : 'bad') + '"></span>' + (ok ? 'up' : 'degraded');
-      const dbc = d.database === 'connected';
-      document.getElementById('db').innerHTML =
-        '<span class="dot ' + (dbc ? 'ok' : 'bad') + '"></span>' + (d.database || 'unknown');
-    }).catch(() => {
-      document.getElementById('api').innerHTML = '<span class="dot bad"></span>unreachable';
-      document.getElementById('db').innerHTML = '<span class="dot bad"></span>unknown';
+    const API = CQ.API, t = CQ.t;
+    CQ.mountHeader({ tag: 'Voice AI', nav: [{ i18n: 'nav.signin', href: 'tenant.html' }],
+      extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
+    CQ.enhanceSelects();
+
+    fetch(`${API}/health`).then(r => r.json()).then(d => {
+      document.getElementById('statusDot').className = 'dot ' + (d.status === 'ok' ? 'ok' : 'bad');
+    }).catch(() => { document.getElementById('statusDot').className = 'dot bad'; });
+
+    async function loadLimits() {
+      try {
+        const r = await fetch(`${API}/limits`); if (!r.ok) return;
+        const d = await r.json(); const el = document.getElementById('quota');
+        if (!d.anonymous) { el.className = 'quota'; el.innerHTML = ''; return; }
+        if (!d.enabled) { el.className = 'quota warn show';
+          el.innerHTML = `${t('quota.disabled')} <a href="tenant.html">${t('nav.signin')}</a>`; return; }
+        const ra = d.remaining.analyses, rt = d.remaining.tts;
+        const low = (ra != null && ra <= 0) || (rt != null && rt <= 0);
+        el.className = 'quota show' + (low ? ' warn' : '');
+        el.innerHTML = `${t('quota.using')} <b>${ra == null ? '∞' : ra}</b> ${t('quota.analyses')} &amp; <b>${rt == null ? '∞' : rt}</b> ${t('quota.clips')} ${t('quota.left')} `
+          + `<a href="tenant.html">${t('nav.signin')}</a> ${t('quota.more')}`;
+      } catch {}
+    }
+    loadLimits();
+    document.addEventListener('cq:lang', loadLimits);
+
+    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      tb.classList.add('active'); document.getElementById('panel-' + tb.dataset.tab).classList.add('active');
+      if (tb.dataset.tab === 'tts') loadTts();
+    }));
+
+    // dropzone
+    const audioInput = document.getElementById('audioFile'), audioDrop = document.getElementById('audioDrop');
+    audioInput.addEventListener('change', () => { const f = audioInput.files[0];
+      document.getElementById('audioDropTitle').innerHTML = f ? `<span class="drop-file">${f.name}</span>` : t('drop.title'); });
+    ['dragover','dragenter'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.remove('drag'); }));
+    audioDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
+
+    // ---- Analyze ----
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    analyzeBtn.addEventListener('click', async () => {
+      const f = document.getElementById('audioFile').files[0];
+      const err = document.getElementById('analyzeErr'), out = document.getElementById('analyzeResult');
+      err.textContent = ''; out.innerHTML = '';
+      if (!f) { err.textContent = 'Choose an audio file first.'; return; }
+      analyzeBtn.disabled = true; analyzeBtn.innerHTML = '<span class="spinner"></span>' + t('btn.analyze') + '…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/analyze`, { method: 'POST', body: fd });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Request failed');
+        out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { analyzeBtn.disabled = false; analyzeBtn.textContent = t('btn.analyze'); loadLimits(); }
+    });
+
+    function esc(s) { return (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+    function toArr(v) {
+      if (v == null) return [];
+      if (Array.isArray(v)) return v.filter(x => x != null).map(x => typeof x === 'object' ? Object.values(x).filter(Boolean).join(' — ') : String(x)).filter(s => s.trim());
+      if (typeof v === 'object') return Object.values(v).filter(Boolean).map(String);
+      const s = String(v).trim(); return s ? [s] : [];
+    }
+    function list(items) { const a = toArr(items); return a.length ? '<ul class="tight">' + a.map(i => `<li>${esc(i)}</li>`).join('') + '</ul>' : '<span class="muted">—</span>'; }
+    function renderAnalysis(d) {
+      const a = d.analysis || {};
+      const topics = toArr(a.topics).map(x => `<span class="chip">${esc(x)}</span>`).join('') || '<span class="muted">—</span>';
+      return `<div class="card">
+          <div class="row">
+            <div>
+              <h3>${t('res.analysis')}</h3>
+              <div class="kv"><b>${t('res.language')}</b><span>${esc(a.language || d.language || '—')}</span></div>
+              <div class="kv"><b>${t('res.sentiment')}</b><span>${esc(a.sentiment || '—')}</span></div>
+              <div class="kv"><b>${t('res.topics')}</b><span>${topics}</span></div>
+              <div class="kv"><b>${t('res.time')}</b><span class="muted">${d.processing_ms ? (d.processing_ms/1000).toFixed(1)+'s' : '—'}</span></div>
+            </div>
+            <div style="max-width:120px;text-align:center">
+              <label>${t('res.quality')}</label><div class="score">${a.quality_score ?? '—'}</div><span class="muted">/ 100</span>
+            </div>
+          </div>
+          <div style="margin-top:14px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${esc(a.summary)}</p></div>
+          <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div>
+            <div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
+        </div>
+        <div class="card"><h3>${t('res.transcript')}</h3><pre class="transcript">${esc(d.transcript) || t('res.empty')}</pre></div>`;
+    }
+
+    // ---- TTS (single reusable player) ----
+    let ttsLoaded = false, ttsPlayer = null, curSrc = null;
+    const previewMap = {};
+    async function loadTts() {
+      if (ttsLoaded) return;
+      try { const r = await fetch(`${API}/languages`); if (r.ok) {
+        const langs = await r.json(); const sel = document.getElementById('langSelect'); const notes = {};
+        langs.forEach(l => { notes[l.code] = l.note || ''; const o = document.createElement('option'); o.value = l.code; o.textContent = l.name; sel.appendChild(o); });
+        const showNote = () => { document.getElementById('langNote').textContent = notes[sel.value] || ''; };
+        sel.addEventListener('change', showNote); showNote();
+      } } catch {}
+      try { const r = await fetch(`${API}/voices`); if (r.ok) {
+        const voices = await r.json(); const sel = document.getElementById('voiceSelect');
+        voices.forEach(v => { if (v.preview_url) previewMap[v.voice_id] = v.preview_url;
+          const o = document.createElement('option'); o.value = v.voice_id;
+          o.textContent = v.name + (v.category ? ` (${v.category})` : ''); sel.appendChild(o); });
+      } } catch {}
+      ttsLoaded = true;
+    }
+    loadTts();
+
+    function playInto(url, name) {
+      const box = document.getElementById('ttsPlayer');
+      if (curSrc === url && ttsPlayer) { ttsPlayer.toggle(); return; }
+      ttsPlayer = CQ.player(box, url, { name }); curSrc = url;
+    }
+
+    document.getElementById('previewBtn').addEventListener('click', async () => {
+      const err = document.getElementById('ttsErr'); err.textContent = '';
+      const voice_id = document.getElementById('voiceSelect').value;
+      if (!voice_id) { err.textContent = 'Pick a specific voice to preview.'; return; }
+      if (previewMap[voice_id]) { playInto(previewMap[voice_id], 'preview.mp3'); return; }
+      const btn = document.getElementById('previewBtn'); btn.disabled = true; btn.textContent = '…';
+      try {
+        const language_code = document.getElementById('langSelect').value || undefined;
+        const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'Hello.', voice_id, language_code }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Preview failed'); }
+        playInto(URL.createObjectURL(await r.blob()), 'preview.mp3');
+      } catch (e) { err.textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = '▶'; }
+    });
+
+    const ttsBtn = document.getElementById('ttsBtn');
+    ttsBtn.addEventListener('click', async () => {
+      const text = document.getElementById('ttsText').value.trim();
+      const err = document.getElementById('ttsErr'); err.textContent = '';
+      if (!text) { err.textContent = 'Enter some text.'; return; }
+      ttsBtn.disabled = true; ttsBtn.innerHTML = '<span class="spinner"></span>' + t('btn.synth') + '…';
+      try {
+        const voice_id = document.getElementById('voiceSelect').value || undefined;
+        const language_code = document.getElementById('langSelect').value || undefined;
+        const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice_id, language_code }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Request failed'); }
+        playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { ttsBtn.disabled = false; ttsBtn.textContent = t('btn.synth'); loadLimits(); }
     });
   </script>
 </body>

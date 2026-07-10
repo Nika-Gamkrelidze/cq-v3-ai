@@ -4,3 +4,10 @@ asyncpg
 pydantic
 pydantic-settings
 python-dotenv
+python-multipart
+httpx
+anthropic
+pypdf
+python-docx
+pytest
+pytest-asyncio

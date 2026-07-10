@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Sign in</title>
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <script src="brand.js"></script>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main>
+    <!-- unified login -->
+    <div class="gate card" id="gate">
+      <h3 data-i18n="login.heading"></h3>
+      <label for="u" data-i18n="f.username"></label><input type="text" id="u" autocomplete="username" />
+      <label for="p" data-i18n="f.password"></label><input type="password" id="p" autocomplete="current-password" />
+      <div class="actions"><button class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
+      <div class="msg err" id="gateMsg"></div>
+      <div class="hint" data-i18n="login.hint"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="tabs">
+        <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
+        <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
+        <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
+      </div>
+
+      <!-- KB -->
+      <section class="panel active" id="panel-kb">
+        <div class="card">
+          <h3 data-i18n="kb.import"></h3>
+          <div class="subtabs">
+            <div class="subtab active" data-imp="file" data-i18n="imp.file"></div>
+            <div class="subtab" data-imp="text" data-i18n="imp.paste"></div>
+            <div class="subtab" data-imp="csv" data-i18n="imp.csv"></div>
+          </div>
+          <div class="row">
+            <div><label data-i18n="f.category"></label><input id="i_type" placeholder="policy" /></div>
+            <div><label data-i18n="f.title"></label><input id="i_title" /></div>
+            <div><label data-i18n="f.tags"></label><input id="i_tags" placeholder="refunds, billing" /></div>
+          </div>
+          <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+          <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
+          <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+          <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
+          <div class="msg" id="importMsg"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="align-items:flex-end">
+            <div style="flex:2"><label data-i18n="kb.searchlabel"></label><input id="kbq" data-i18n-ph="kb.search_ph" /></div>
+            <div style="flex:0"><button class="ghost" id="kbSearchBtn" data-i18n="btn.search"></button></div>
+          </div>
+          <div id="kbSearchResults"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h3 style="margin:0" data-i18n="kb.documents"></h3>
+            <div><button class="ghost" id="reloadDocs" data-i18n="btn.refresh"></button></div>
+          </div>
+          <div id="docList" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- ANALYZE -->
+      <section class="panel" id="panel-analyze">
+        <div class="card">
+          <h3 data-i18n="an.heading_kb"></h3>
+          <label data-i18n="f.audiofile"></label>
+          <div class="drop" id="audioDrop">
+            <input type="file" id="audio" accept="audio/*" />
+            <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
+            <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+          </div>
+          <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
+          <div class="msg err" id="analyzeErr"></div>
+        </div>
+        <div id="analyzeResult"></div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="panel" id="panel-history">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h3 style="margin:0" data-i18n="hist.heading"></h3><button class="ghost" id="reloadJobs" data-i18n="btn.refresh"></button>
+          </div>
+          <div id="jobList" style="margin-top:12px"></div>
+        </div>
+        <div id="jobDetail"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const API = CQ.API, t = CQ.t;
+    CQ.mountHeader({ tag: 'Tenant', who: 'who', nav: [
+      { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
+      { i18n: 'nav.public', href: 'index.html' },
+    ]});
+    let TOKEN = sessionStorage.getItem('cq_tenant_token') || '';
+    const $ = id => document.getElementById(id);
+    const authH = (extra={}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
+    const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    function toArr(v){ if(v==null) return []; if(Array.isArray(v)) return v.filter(x=>x!=null).map(x=>typeof x==='object'?Object.values(x).filter(Boolean).join(' — '):String(x)); if(typeof v==='object') return Object.values(v).map(String); const s=String(v).trim(); return s?[s]:[]; }
+    const list = v => { const a=toArr(v); return a.length?'<ul class="tight">'+a.map(i=>`<li>${esc(i)}</li>`).join('')+'</ul>':'<span class="muted">—</span>'; };
+
+    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active');
+      if (tb.dataset.tab==='kb') loadDocs(); if (tb.dataset.tab==='history') loadJobs();
+    }));
+    document.querySelectorAll('.subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('.subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
+    }));
+    document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) { loadDocs(); loadJobs(); } });
+
+    // dropzone
+    const audioInput = $('audio');
+    { const drop = $('audioDrop');
+      audioInput.addEventListener('change', () => { const f = audioInput.files[0];
+        $('audioDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
+    }
+
+    // unified login (tenant users + superadmin)
+    async function login() {
+      $('gateMsg').textContent='';
+      try {
+        const r = await fetch(`${API}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Sign in failed');
+        if (d.scope === 'admin') { sessionStorage.setItem('cq_admin_token', d.token); location.href = 'admin.html'; return; }
+        TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
+      } catch(e){ $('gateMsg').textContent = e.message; }
+    }
+    function enter(client) {
+      $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
+      if (client) $('who').textContent = client.name; loadDocs();
+    }
+    $('loginBtn').addEventListener('click', login);
+    $('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
+    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_tenant_token'); location.reload(); });
+
+    // import
+    $('importBtn').addEventListener('click', async () => {
+      const m = $('importMsg'); m.className='msg'; m.textContent='';
+      const mode = document.querySelector('.subtab.active').dataset.imp;
+      const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
+      const title = $('i_title').value.trim(); const tags = $('i_tags').value.trim();
+      const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.import')+'…';
+      try {
+        let r;
+        if (mode==='text') {
+          if (!$('i_text').value.trim()) throw new Error('Enter some text.');
+          r = await fetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
+            body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[] }) });
+        } else {
+          const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error('Choose a file.');
+          const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags);
+          r = await fetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
+        }
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Import failed');
+        m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value='';
+        setTimeout(loadDocs, 1500); setTimeout(loadDocs, 4000);
+      } catch(e){ m.className='msg err'; m.textContent = e.message; }
+      finally { btn.disabled=false; btn.textContent=t('btn.import'); }
+    });
+
+    // documents
+    $('reloadDocs').addEventListener('click', loadDocs);
+    async function loadDocs() {
+      const r = await fetch(`${API}/kb/documents`, { headers: authH() }); if (!r.ok) return;
+      const docs = await r.json(); const box = $('docList');
+      if (!docs.length) { box.innerHTML = `<div class="empty">${t('kb.none')}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.title')}</th><th>${t('th.category')}</th><th>${t('th.status')}</th><th>${t('th.chunks')}</th><th></th></tr></thead><tbody>` +
+        docs.map(d => `<tr>
+          <td>${esc(d.title)}</td><td>${esc(d.doc_type)}</td>
+          <td><span class="pill ${esc(d.status)}">${esc(d.status)}</span>${d.error?` <span class="hint">${esc(d.error)}</span>`:''}</td>
+          <td>${d.chunk_count}</td>
+          <td class="inline"><button class="ghost" data-act="chunks" data-id="${d.id}">${t('btn.chunks')}</button>
+            <button class="danger" data-act="del" data-id="${d.id}">${t('btn.delete')}</button></td>
+        </tr><tr><td colspan="5"><div id="dsub-${d.id}"></div></td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id)));
+    }
+    async function docAction(act, id) {
+      if (act==='del') { if(!(await CQ.confirm(t('btn.delete')+'?', {ok:t('btn.delete')}))) return;
+        await fetch(`${API}/kb/documents/${id}`, { method:'DELETE', headers: authH() }); CQ.toast(t('toast.deleted'), 'ok'); loadDocs(); return; }
+      if (act==='chunks') {
+        const r = await fetch(`${API}/kb/documents/${id}/chunks`, { headers: authH() }); const chunks = await r.json();
+        $('dsub-'+id).innerHTML = `<pre class="tx">${chunks.map((c,i)=>`[${c.chunk_index??i}] ${esc(c.content)}`).join('\n\n') || '(no chunks)'}</pre>`;
+      }
+    }
+
+    // KB search
+    $('kbSearchBtn').addEventListener('click', async () => {
+      const q = $('kbq').value.trim(); const box = $('kbSearchResults'); box.innerHTML='';
+      if (!q) return; box.innerHTML = `<div class="empty"><span class="spinner"></span>${t('btn.search')}…</div>`;
+      const r = await fetch(`${API}/kb/search`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ query: q }) });
+      const d = await r.json();
+      if (!r.ok) { box.innerHTML = `<div class="msg err">${esc(d.detail||'Search failed')}</div>`; return; }
+      box.innerHTML = d.count ? d.results.map(h => `<div class="card" style="margin:10px 0 0"><div class="hint">${esc(h.title||h.doc_type||'KB')} · score ${h.score!=null?h.score.toFixed(3):'—'}</div><div>${esc(h.content)}</div></div>`).join('')
+        : `<div class="empty">${t('kb.nomatch')}</div>`;
+    });
+    $('kbq').addEventListener('keydown', e => { if (e.key==='Enter') $('kbSearchBtn').click(); });
+
+    // analyze
+    $('analyzeBtn').addEventListener('click', async () => {
+      const f = $('audio').files[0]; const err = $('analyzeErr'); const out = $('analyzeResult');
+      err.textContent=''; out.innerHTML='';
+      if (!f) { err.textContent='Choose an audio file.'; return; }
+      const btn = $('analyzeBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.analyze')+'…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+        out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
+      } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled=false; btn.textContent=t('btn.analyze'); }
+    });
+    function renderAnalysis(d) {
+      const a = d.analysis || {};
+      const topics = toArr(a.topics).map(x=>`<span class="chip">${esc(x)}</span>`).join('') || '<span class="muted">—</span>';
+      const kb = (d.kb_used||[]).length ? (d.kb_used||[]).map(k=>`<span class="chip">${esc(k.title||k.doc_type||'KB')}${k.score!=null?` · ${k.score}`:''}</span>`).join('') : `<span class="muted">${t('res.nokb')}</span>`;
+      return `<div class="card">
+        <h3>${t('res.analysis')}</h3>
+        <div class="kv"><b>${t('res.language')}</b> ${esc(a.language||d.language||'—')}</div>
+        <div class="kv"><b>${t('res.sentiment')}</b> ${esc(a.sentiment||'—')} &nbsp; <b>${t('res.quality')}</b> ${a.quality_score??'—'}/100</div>
+        <div class="kv"><b>${t('res.topics')}</b> ${topics}</div>
+        <div style="margin-top:8px"><b style="color:var(--mist)">${t('res.kbused')}</b><div style="margin-top:4px">${kb}</div></div>
+        <div style="margin-top:10px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${esc(a.summary)}</p></div>
+        <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div><div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
+      </div>
+      ${renderScorecard(d.scoring)}
+      ${renderFactCheck(d.kb_check)}
+      <div class="card"><h3>${t('res.transcript')}</h3><pre class="tx">${esc(d.transcript)||t('res.empty')}</pre></div>`;
+    }
+    function renderScorecard(sc) {
+      if (!sc || !Array.isArray(sc.dimensions) || !sc.dimensions.length) return '';
+      const total = sc.weighted_total;
+      const band = v => v == null ? 'muted' : v >= 80 ? 'ok' : v >= 50 ? 'pending' : 'alert';
+      const barcls = v => v == null ? '' : v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad';
+      const dimRow = d => {
+        const s = d.score;
+        const ev = toArr(d.evidence);
+        return `<div class="sc-dim">
+          <div class="sc-dim-head">
+            <span class="sc-dim-name">${esc(d.name)}</span>
+            <span class="sc-dim-score" style="color:var(--${band(s)})">${s==null?'—':s}<span class="sc-meta">/100</span></span>
+          </div>
+          <div class="sc-meta">${t('sc.weight')} ${d.weight}% · ${t('sc.contribution')} ${d.contribution}</div>
+          <div class="sc-bar ${barcls(s)}"><span style="width:${Math.max(0,Math.min(100,s||0))}%"></span></div>
+          ${d.rationale ? `<div class="hint" style="margin-top:6px">${esc(d.rationale)}</div>` : ''}
+          ${ev.length ? `<div class="sc-evid">${ev.map(q=>`<q>${esc(q)}</q>`).join('')}</div>` : ''}
+        </div>`;
+      };
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <h3 style="margin:0">${t('sc.title')}</h3>
+          <div class="sc-total"><div class="num" style="color:var(--${band(total)})">${total==null?'—':total}</div><span class="muted">${t('sc.weighted')} / ${sc.max_total||100}</span></div>
+        </div>
+        ${sc.dimensions.map(dimRow).join('')}
+      </div>`;
+    }
+    function renderFactCheck(kb) {
+      if (!kb) return '';
+      const claims = Array.isArray(kb.claims) ? kb.claims : [];
+      const c = kb.counts || {};
+      if (!claims.length) return `<div class="card"><h3>${t('fc.title')}</h3><div class="empty">${t('fc.nochecked')}</div></div>`;
+      const acc = kb.accuracy_score;
+      const accVar = acc == null ? 'muted' : acc >= 80 ? 'ok' : acc >= 50 ? 'pending' : 'alert';
+      const vcls = v => ({SUPPORTED:'supported', CONTRADICTED:'contradicted', NOT_IN_KB:'notinkb'}[v] || 'notinkb');
+      const vlabel = v => t('fc.' + vcls(v));
+      const contradicted = claims.filter(x => x.verdict === 'CONTRADICTED');
+      const claimCard = cl => {
+        const ev = cl.evidence;
+        const conf = cl.confidence != null ? ' · ' + Math.round(cl.confidence * 100) + '%' : '';
+        const cat = cl.category ? ' · ' + esc(cl.category) : '';
+        return `<div class="fc-claim v-${esc(cl.verdict)}">
+          <div class="inline" style="justify-content:space-between;gap:8px">
+            <span class="pill ${vcls(cl.verdict)}">${vlabel(cl.verdict)}</span>
+            <span class="hint">${esc(cl.speaker || '')}${cat}${conf}</span>
+          </div>
+          <div style="margin-top:6px">${esc(cl.claim)}</div>
+          ${cl.rationale ? `<div class="hint" style="margin-top:4px">${esc(cl.rationale)}</div>` : ''}
+          ${ev ? `<div class="fc-ev"><div class="fc-ev-src">📄 ${esc(ev.title || ev.doc_type || 'KB')}${ev.score != null ? ' · ' + ev.score : ''}</div>${esc(ev.snippet || '')}</div>` : ''}
+        </div>`;
+      };
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <h3 style="margin:0">${t('fc.title')}</h3>
+          <div class="fc-accuracy"><div class="num" style="color:var(--${accVar})">${acc == null ? '—' : acc}</div><span class="muted">${t('fc.accuracy')}</span></div>
+        </div>
+        <div style="margin-top:8px">
+          <span class="pill supported">${c.supported || 0} ${t('fc.supported')}</span>
+          <span class="pill contradicted">${c.contradicted || 0} ${t('fc.contradicted')}</span>
+          <span class="pill notinkb">${c.not_in_kb || 0} ${t('fc.notinkb')}</span>
+        </div>
+        ${contradicted.length ? `<h4 style="color:var(--coral)">⚠ ${t('fc.misinfo')}</h4>${contradicted.map(claimCard).join('')}<h4>All claims</h4>` : ''}
+        ${claims.map(claimCard).join('')}
+      </div>`;
+    }
+
+    // history
+    $('reloadJobs').addEventListener('click', loadJobs);
+    async function loadJobs() {
+      const r = await fetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
+      const box = $('jobList');
+      box.innerHTML = jobs.length ? `<div class="table-wrap"><table><thead><tr><th>${t('th.file')}</th><th>${t('th.status')}</th><th>${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        jobs.map(j=>`<tr style="cursor:pointer" data-id="${j.id}"><td>${esc(j.filename||'—')}</td><td><span class="pill ${j.status==='done'?'ready':j.status==='error'?'error':'processing'}">${esc(j.status)}</span></td><td>${esc(j.language||'—')}</td><td class="hint">${new Date(j.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`
+        : `<div class="empty">${t('hist.none')}</div>`;
+      box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openJob(tr.dataset.id)));
+    }
+    async function openJob(id) {
+      const r = await fetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
+      if (r.ok) $('jobDetail').innerHTML = renderAnalysis(d);
+    }
+
+    if (TOKEN) {
+      fetch(`${API}/auth/me`, { headers: authH() }).then(r => r.ok ? r.json() : Promise.reject())
+        .then(me => { if (me.kind==='tenant') enter(me.client); else throw 0; })
+        .catch(() => { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; });
+    }
+  </script>
+</body>
+</html>

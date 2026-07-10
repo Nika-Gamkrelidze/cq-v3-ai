@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Knowledge Base</title>
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <script src="brand.js"></script>
+  <style>
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
+    .stat { background:var(--input-bg); border:1px solid var(--hairline); border-radius:var(--r-md); padding:14px; }
+    .stat .n { font-family:var(--font-display); font-weight:800; font-size:24px; color:var(--paper); }
+    .stat .l { font-size:11.5px; color:var(--muted); margin-top:2px; }
+    .kv-line { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid color-mix(in oklab,var(--hairline) 60%,transparent); font-size:13px; }
+    .kv-line b { color:var(--mist); font-weight:600; } .kv-line span { color:var(--paper); }
+    .scorebar { height:5px; border-radius:999px; background:var(--hairline); overflow:hidden; margin-top:5px; }
+    .scorebar i { display:block; height:100%; background:var(--beam); }
+    .selbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; }
+    td.tight, th.tight { white-space:nowrap; }
+    .warn-flag { color:var(--coral); font-weight:600; }
+  </style>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main>
+    <div class="card">
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1; min-width:220px"><label data-i18n="kba.tenant"></label><select id="tenantSel"><option value="">—</option></select></div>
+        <div style="flex:2" id="healthStrip"></div>
+      </div>
+    </div>
+    <div class="empty" id="tenantEmpty" data-i18n="kba.selecttenant"></div>
+
+    <div id="tenantApp" class="hidden">
+      <div class="tabs">
+        <div class="tab active" data-tab="overview" data-i18n="kba.tab.overview"></div>
+        <div class="tab" data-tab="documents" data-i18n="kba.tab.documents"></div>
+        <div class="tab" data-tab="import" data-i18n="kba.tab.import"></div>
+        <div class="tab" data-tab="playground" data-i18n="kba.tab.playground"></div>
+        <div class="tab" data-tab="duplicates" data-i18n="kba.tab.duplicates"></div>
+        <div class="tab" data-tab="activity" data-i18n="kba.tab.activity"></div>
+        <div class="tab" data-tab="scoring" data-i18n="kba.tab.scoring"></div>
+      </div>
+
+      <!-- OVERVIEW -->
+      <section class="panel active" id="panel-overview">
+        <div class="card"><div class="stat-grid" id="statGrid"></div>
+          <div class="actions">
+            <button class="ghost" id="exportJson" data-i18n="kba.export"></button>
+            <button class="ghost" id="exportCsv" data-i18n="kba.exportcsv"></button>
+            <button class="ghost" id="reembedAll" data-i18n="kba.reembedall"></button>
+            <button class="ghost" id="reloadOverview" data-i18n="kba.refresh"></button>
+          </div>
+        </div>
+        <div class="card"><h3 data-i18n="kba.params"></h3><div id="paramsBox"></div></div>
+      </section>
+
+      <!-- DOCUMENTS -->
+      <section class="panel" id="panel-documents">
+        <div class="card">
+          <div class="row">
+            <div><label data-i18n="kba.f.status"></label><select id="fStatus"><option value=""></option><option>ready</option><option>processing</option><option>pending</option><option>error</option></select></div>
+            <div><label data-i18n="kba.f.type"></label><input id="fType" /></div>
+            <div><label data-i18n="kba.f.tag"></label><input id="fTag" /></div>
+            <div style="flex:2"><label data-i18n="kba.f.search"></label><input id="fSearch" /></div>
+            <div style="flex:0; align-self:flex-end"><button class="ghost" id="applyFilter" data-i18n="kba.refresh"></button></div>
+          </div>
+          <div class="selbar hidden" id="selBar">
+            <span><b id="selCount">0</b> <span data-i18n="kba.selected"></span></span>
+            <button class="ghost" id="bulkReembed" data-i18n="kba.bulk.reembed"></button>
+            <button class="ghost" id="bulkRetag" data-i18n="kba.bulk.retag"></button>
+            <button class="danger" id="bulkDelete" data-i18n="kba.bulk.delete"></button>
+          </div>
+          <div id="docList" style="margin-top:10px"></div>
+          <div id="docPager" class="inline" style="justify-content:center; margin-top:10px"></div>
+        </div>
+      </section>
+
+      <!-- IMPORT -->
+      <section class="panel" id="panel-import">
+        <div class="card">
+          <div class="subtabs">
+            <div class="subtab active" data-imp="file" data-i18n="imp.file"></div>
+            <div class="subtab" data-imp="text" data-i18n="imp.paste"></div>
+            <div class="subtab" data-imp="csv" data-i18n="imp.csv"></div>
+          </div>
+          <div class="row">
+            <div><label data-i18n="kba.doc.type"></label><input id="i_type" placeholder="policy" /></div>
+            <div><label data-i18n="kba.doc.title"></label><input id="i_title" /></div>
+            <div><label data-i18n="kba.doc.tags"></label><input id="i_tags" placeholder="a, b" /></div>
+          </div>
+          <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
+          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+          <div id="imp-text" class="hidden" style="margin-top:8px"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
+          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+          <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
+          <div class="msg" id="importMsg"></div>
+        </div>
+      </section>
+
+      <!-- PLAYGROUND -->
+      <section class="panel" id="panel-playground">
+        <div class="card">
+          <label data-i18n="kba.pg.query"></label><input id="pgQuery" />
+          <div class="row" style="margin-top:10px">
+            <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="pgTopk" type="number" value="8" /></div>
+            <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="pgThresh" type="number" step="0.05" value="0" /></div>
+            <div style="flex:0; align-self:flex-end"><button class="primary" id="pgRun" data-i18n="kba.pg.run"></button></div>
+          </div>
+          <div id="pgResults" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- DUPLICATES -->
+      <section class="panel" id="panel-duplicates">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between"><h3 style="margin:0" data-i18n="kba.tab.duplicates"></h3><button class="ghost" id="scanDup" data-i18n="kba.refresh"></button></div>
+          <div id="dupBox" style="margin-top:10px"></div>
+        </div>
+      </section>
+
+      <!-- ACTIVITY -->
+      <section class="panel" id="panel-activity">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between"><h3 style="margin:0" data-i18n="kba.tab.activity"></h3><button class="ghost" id="reloadAct" data-i18n="kba.refresh"></button></div>
+          <div id="actBox" style="margin-top:10px"></div>
+        </div>
+      </section>
+
+      <!-- SCORING -->
+      <section class="panel" id="panel-scoring">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline">
+            <h3 style="margin:0" data-i18n="sc.heading"></h3>
+            <span class="hint" id="scVersion"></span>
+          </div>
+          <p class="hint" data-i18n="sc.desc"></p>
+          <div id="scDims"></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>%</span>
+          </div>
+          <label data-i18n="sc.rubric"></label>
+          <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
+          <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
+          <div class="msg" id="scMsg"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <div id="modalHost"></div>
+
+  <script>
+    const API = CQ.API, t = CQ.t;
+    CQ.mountHeader({ tag: 'KB', nav: [
+      { label: 'Console', href: 'admin.html' },
+      { i18n: 'nav.logout', href: '#', id: 'logout' },
+    ]});
+    let TOKEN = sessionStorage.getItem('cq_admin_token') || '';
+    if (!TOKEN) location.replace('tenant.html');
+    const $ = id => document.getElementById(id);
+    const H = (extra={}) => ({ 'X-Admin-Token': TOKEN, ...extra });
+    const JH = () => H({ 'Content-Type': 'application/json' });
+    const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    let TID = '';
+    const K = () => `${API}/admin/kb/${TID}`;
+    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
+
+    // modal
+    function showModal(inner) {
+      const bg = document.createElement('div'); bg.className = 'cq-modal-bg';
+      bg.innerHTML = `<div class="cq-modal" style="max-width:640px; max-height:86vh; overflow:auto">${inner}</div>`;
+      bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+      $('modalHost').appendChild(bg); return bg;
+    }
+
+    // tabs / subtabs
+    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active'); loadTab(tb.dataset.tab);
+    }));
+    document.querySelectorAll('.subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('.subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
+    }));
+    function activeTab() { return (document.querySelector('.tab.active')||{}).dataset ? document.querySelector('.tab.active').dataset.tab : 'overview'; }
+    function loadTab(tab) {
+      if (tab==='overview') loadOverview();
+      else if (tab==='documents') loadDocuments();
+      else if (tab==='duplicates') loadDuplicates();
+      else if (tab==='activity') loadActivity();
+      else if (tab==='scoring') loadScoring();
+    }
+
+    // tenant selector
+    async function loadTenants() {
+      const r = await fetch(`${API}/admin/tenants`, { headers: H() });
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      const list = await r.json(); const sel = $('tenantSel'); sel.innerHTML = '<option value="">—</option>';
+      list.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} (${c.slug})`; sel.appendChild(o); });
+      CQ.enhanceSelects();
+      sel.addEventListener('change', () => setTenant(sel.value));
+    }
+    function setTenant(tid) {
+      TID = tid;
+      $('tenantApp').classList.toggle('hidden', !tid);
+      $('tenantEmpty').classList.toggle('hidden', !!tid);
+      if (tid) loadTab(activeTab());
+      else $('healthStrip').innerHTML = '';
+    }
+    document.addEventListener('cq:lang', () => { if (TID) loadTab(activeTab()); });
+
+    // ---- OVERVIEW ----
+    $('reloadOverview').addEventListener('click', loadOverview);
+    async function loadOverview() {
+      const [st, pa] = await Promise.all([
+        fetch(`${K()}/stats`, { headers: H() }).then(r=>r.json()),
+        fetch(`${K()}/params`, { headers: H() }).then(r=>r.json()),
+      ]);
+      const tile = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+      $('statGrid').innerHTML =
+        tile(st.documents, t('kba.stat.documents')) + tile(st.chunks, t('kba.stat.chunks')) +
+        tile(st.embedding_coverage+'%', t('kba.stat.coverage')) + tile(st.failed, t('kba.stat.failed')) +
+        tile(st.approx_tokens, t('kba.stat.tokens')) + tile(st.in_progress, t('kba.stat.inprogress')) +
+        tile(st.last_updated ? new Date(st.last_updated).toLocaleDateString() : '—', t('kba.stat.lastupd'));
+      $('healthStrip').innerHTML = `<div class="hint" style="text-align:right">${st.documents} docs · ${st.chunks} chunks · ${st.embedding_coverage}% embedded${st.failed?` · <span class="warn-flag">${st.failed} failed</span>`:''}</div>`;
+      const e = pa.embedding, ch = pa.chunking, re = pa.retrieval;
+      const kv = (b,s,warn) => `<div class="kv-line"><b>${b}</b><span class="${warn?'warn-flag':''}">${s}</span></div>`;
+      $('paramsBox').innerHTML =
+        kv('Embedding provider', esc(e.provider)) + kv('Model', esc(e.model)) +
+        kv('Dimension (config)', e.dim) + kv('Dimension (column)', e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
+        (e.dim_mismatch ? `<div class="warn-flag" style="margin:6px 0">${t('kba.warn.mismatch')}</div>` : '') +
+        kv('Chunk size / overlap', `${ch.size} / ${ch.overlap}`) +
+        kv('Retrieval threshold', re.similarity_threshold) + kv('Default top-k', re.default_top_k) +
+        kv('Distance metric', re.distance_metric) + kv('Index type', re.index_type) +
+        kv('Chunks without embedding', pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
+    }
+    function download(url) {
+      fetch(url, { headers: H() }).then(r => r.blob()).then(b => {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+        a.download = url.includes('csv') ? 'kb-export.csv' : 'kb-export.json'; a.click();
+      });
+    }
+    $('exportJson').addEventListener('click', () => download(`${K()}/export?format=json`));
+    $('exportCsv').addEventListener('click', () => download(`${K()}/export?format=csv`));
+    $('reembedAll').addEventListener('click', async () => {
+      if (!(await CQ.confirm(t('kba.reembedall')+'?', {ok:t('kba.reembedall'), danger:false}))) return;
+      const r = await fetch(`${K()}/reembed`, { method:'POST', headers: H() }); const d = await r.json();
+      CQ.toast(`${d.documents} docs · ${d.reembedded_chunks} chunks`, 'ok'); loadOverview();
+    });
+
+    // ---- DOCUMENTS ----
+    let selected = new Set(), page = { limit: 50, offset: 0, total: 0 };
+    $('applyFilter').addEventListener('click', () => { page.offset = 0; loadDocuments(); });
+    ['fType','fTag','fSearch'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key==='Enter'){ page.offset=0; loadDocuments(); } }));
+    async function loadDocuments() {
+      selected.clear(); updateSelBar();
+      const p = new URLSearchParams({ limit: page.limit, offset: page.offset });
+      if ($('fStatus').value) p.set('status', $('fStatus').value);
+      if ($('fType').value.trim()) p.set('doc_type', $('fType').value.trim());
+      if ($('fTag').value.trim()) p.set('tag', $('fTag').value.trim());
+      if ($('fSearch').value.trim()) p.set('q', $('fSearch').value.trim());
+      const r = await fetch(`${K()}/documents?${p}`, { headers: H() }); const d = await r.json();
+      page.total = d.total;
+      if (!d.documents.length) { $('docList').innerHTML = `<div class="empty">${t('kba.nodocs')}</div>`; $('docPager').innerHTML=''; return; }
+      $('docList').innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th>${t('kba.doc.tags')}</th>
+        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">src</th><th></th></tr></thead><tbody>` +
+        d.documents.map(x => `<tr>
+          <td><input type="checkbox" class="rowsel" data-id="${x.id}"/></td>
+          <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
+          <td>${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
+          <td class="tight">${x.chunk_count}</td>
+          <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
+          <td class="tight hint">${esc(x.source_type||'—')}</td>
+          <td class="inline"><button class="ghost" data-act="edit" data-id="${x.id}">${t('kba.edit')}</button>
+            <button class="ghost" data-act="chunks" data-id="${x.id}">${t('kba.chunks')}</button>
+            <button class="ghost" data-act="reembed" data-id="${x.id}">${t('kba.reembed')}</button>
+            <button class="danger" data-act="del" data-id="${x.id}">${t('kba.delete')}</button></td></tr>`).join('') + `</tbody></table></div>`;
+      $('docList').querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id)));
+      $('docList').querySelectorAll('.rowsel').forEach(cb => cb.addEventListener('change', () => { cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); updateSelBar(); }));
+      $('selAll').addEventListener('change', () => { $('docList').querySelectorAll('.rowsel').forEach(cb => { cb.checked = $('selAll').checked; cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); }); updateSelBar(); });
+      const pages = Math.ceil(page.total / page.limit);
+      const cur = Math.floor(page.offset / page.limit) + 1;
+      $('docPager').innerHTML = pages > 1 ? `<button class="ghost" ${cur<=1?'disabled':''} id="prevP">‹</button> <span class="hint">${cur}/${pages} · ${page.total}</span> <button class="ghost" ${cur>=pages?'disabled':''} id="nextP">›</button>` : `<span class="hint">${page.total} total</span>`;
+      if ($('prevP')) $('prevP').addEventListener('click', () => { page.offset=Math.max(0,page.offset-page.limit); loadDocuments(); });
+      if ($('nextP')) $('nextP').addEventListener('click', () => { page.offset+=page.limit; loadDocuments(); });
+    }
+    function updateSelBar() { $('selBar').classList.toggle('hidden', selected.size===0); $('selCount').textContent = selected.size; }
+    async function docAction(act, id) {
+      if (act==='del') { if(!(await CQ.confirm(t('kba.delete')+'?', {ok:t('kba.delete')}))) return;
+        await fetch(`${K()}/documents/${id}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok'); loadDocuments(); return; }
+      if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json(); CQ.toast(`${d.reembedded_chunks} chunks`, 'ok'); return; }
+      if (act==='edit') return openEditor(id);
+      if (act==='chunks') return openChunks(id);
+    }
+    async function openEditor(id) {
+      const doc = await fetch(`${K()}/documents/${id}`, { headers: H() }).then(r=>r.json());
+      const bg = showModal(`<h3>${t('kba.edit')}: ${esc(doc.title)}</h3>
+        <label>${t('kba.doc.title')}</label><input id="ed_title" value="${esc(doc.title)}"/>
+        <label>${t('kba.doc.type')}</label><input id="ed_type" value="${esc(doc.doc_type)}"/>
+        <label>${t('kba.doc.tags')}</label><input id="ed_tags" value="${esc((doc.tags||[]).join(', '))}"/>
+        <label>${t('kba.doc.meta')}</label><textarea id="ed_meta" style="min-height:60px">${esc(JSON.stringify(doc.metadata||{}))}</textarea>
+        <label>${t('kba.doc.content')}</label><textarea id="ed_content" style="min-height:120px">${esc(doc.content_text||'')}</textarea>
+        <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="ed_save">${t('kba.save')}</button></div>
+        <div class="msg" id="ed_msg"></div>`);
+      bg.querySelector('[data-c]').addEventListener('click', ()=>bg.remove());
+      bg.querySelector('#ed_save').addEventListener('click', async () => {
+        let meta; try { meta = JSON.parse($('ed_meta').value||'{}'); } catch { $('ed_msg').className='msg err'; $('ed_msg').textContent='Invalid JSON metadata'; return; }
+        const body = { title:$('ed_title').value, doc_type:$('ed_type').value, tags:$('ed_tags').value.split(',').map(s=>s.trim()).filter(Boolean), metadata:meta };
+        if ($('ed_content').value !== (doc.content_text||'')) body.text = $('ed_content').value;
+        const btn = $('ed_save'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+        const r = await fetch(`${K()}/documents/${id}`, { method:'PUT', headers: JH(), body: JSON.stringify(body) });
+        if (r.ok) { CQ.toast(t('toast.saved'),'ok'); bg.remove(); loadDocuments(); } else { btn.disabled=false; btn.textContent=t('kba.save'); $('ed_msg').className='msg err'; $('ed_msg').textContent='Save failed'; }
+      });
+    }
+    async function openChunks(id) {
+      const chunks = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() }).then(r=>r.json());
+      const bg = showModal(`<h3>${t('kba.chunks')} (${chunks.length})</h3><div id="chList"></div>`);
+      const render = list => { bg.querySelector('#chList').innerHTML = list.map(c => `<div class="fc-claim" style="border-left-color:${c.has_embedding?'var(--ok)':'var(--alert)'}">
+        <div class="inline" style="justify-content:space-between"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>
+          <span class="inline"><button class="ghost" data-cedit="${c.id}">${t('kba.chunk.edit')}</button><button class="danger" data-cdel="${c.id}">${t('kba.chunk.delete')}</button></span></div>
+        <div style="margin-top:6px; white-space:pre-wrap">${esc(c.content)}</div></div>`).join('') || `<div class="empty">—</div>`;
+        bg.querySelectorAll('[data-cedit]').forEach(b => b.addEventListener('click', () => editChunk(id, b.dataset.cedit, bg)));
+        bg.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', async () => {
+          if(!(await CQ.confirm(t('kba.chunk.delete')+'?', {ok:t('kba.delete')}))) return;
+          await fetch(`${K()}/chunks/${b.dataset.cdel}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok');
+          const fresh = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() }).then(r=>r.json()); render(fresh); loadDocuments();
+        }));
+      };
+      render(chunks);
+    }
+    function editChunk(docId, chunkId, parentBg) {
+      const cur = parentBg;
+      const chDiv = parentBg.querySelector(`[data-cedit="${chunkId}"]`).closest('.fc-claim');
+      const content = chDiv.querySelector('div:last-child').textContent;
+      const bg = showModal(`<h3>${t('kba.chunk.edit')}</h3><textarea id="ce_content" style="min-height:140px">${esc(content)}</textarea>
+        <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="ce_save">${t('kba.save')}</button></div>`);
+      bg.querySelector('[data-c]').addEventListener('click', ()=>bg.remove());
+      bg.querySelector('#ce_save').addEventListener('click', async () => {
+        const btn = $('ce_save'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+        const r = await fetch(`${K()}/chunks/${chunkId}`, { method:'PUT', headers: JH(), body: JSON.stringify({content:$('ce_content').value}) });
+        if (r.ok) { CQ.toast(t('toast.saved'),'ok'); bg.remove(); parentBg.remove(); openChunks(docId); }
+        else { btn.disabled=false; btn.textContent=t('kba.save'); }
+      });
+    }
+    // bulk
+    $('bulkDelete').addEventListener('click', () => bulk('delete'));
+    $('bulkReembed').addEventListener('click', () => bulk('reembed'));
+    $('bulkRetag').addEventListener('click', async () => {
+      const tags = prompt('Tags (comma-separated):'); if (tags===null) return;
+      bulk('retag', tags.split(',').map(s=>s.trim()).filter(Boolean));
+    });
+    async function bulk(action, tags) {
+      if (action==='delete' && !(await CQ.confirm(`${t('kba.bulk.delete')} ${selected.size}?`, {ok:t('kba.delete')}))) return;
+      const r = await fetch(`${K()}/bulk`, { method:'POST', headers: JH(), body: JSON.stringify({ action, document_ids:[...selected], tags }) });
+      const d = await r.json(); if (r.ok) { CQ.toast(`${action}: ${d.affected}`, 'ok'); loadDocuments(); } else CQ.toast(d.detail||'failed','err');
+    }
+
+    // ---- IMPORT ----
+    $('importBtn').addEventListener('click', async () => {
+      const m = $('importMsg'); m.className='msg'; m.textContent='';
+      let meta; try { meta = $('i_meta').value.trim() ? JSON.parse($('i_meta').value) : {}; } catch { m.className='msg err'; m.textContent='Invalid JSON metadata'; return; }
+      const mode = document.querySelector('.subtab.active').dataset.imp;
+      const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
+      const title = $('i_title').value.trim(), tags = $('i_tags').value.trim();
+      const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      try {
+        let r;
+        if (mode==='text') { if(!$('i_text').value.trim()) throw new Error('Enter text');
+          r = await fetch(`${K()}/documents/text`, { method:'POST', headers: JH(), body: JSON.stringify({ title, doc_type, text:$('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
+        } else { const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if(!f) throw new Error('Choose a file');
+          const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags); fd.append('metadata', JSON.stringify(meta));
+          r = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
+        }
+        const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
+        m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; setTimeout(loadOverview, 3000);
+      } catch(e){ m.className='msg err'; m.textContent=e.message; } finally { btn.disabled=false; btn.textContent=t('btn.import'); }
+    });
+
+    // ---- PLAYGROUND ----
+    $('pgRun').addEventListener('click', async () => {
+      const q = $('pgQuery').value.trim(); const box = $('pgResults'); if(!q) return;
+      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const r = await fetch(`${K()}/playground`, { method:'POST', headers: JH(), body: JSON.stringify({ query:q, top_k:parseInt($('pgTopk').value)||8, threshold:parseFloat($('pgThresh').value)||0 }) });
+      const d = await r.json();
+      if (!d.results.length) { box.innerHTML = `<div class="empty">${t('kba.pg.nohits')}</div>`; return; }
+      box.innerHTML = `<div class="hint" style="margin-bottom:8px">${t('kba.pg.method')}: ${d.method} · ${d.results.length}</div>` +
+        d.results.map(h => `<div class="fc-claim" style="border-left-color:var(--beam)">
+          <div class="inline" style="justify-content:space-between"><span class="hint">${esc(h.title||h.doc_type||'KB')} · #${h.chunk_index}</span><b>${h.score!=null?h.score.toFixed(4):'—'}</b></div>
+          <div class="scorebar"><i style="width:${Math.round((h.score||0)*100)}%"></i></div>
+          <div style="margin-top:6px; white-space:pre-wrap">${esc(h.content)}</div></div>`).join('');
+    });
+    $('pgQuery').addEventListener('keydown', e => { if(e.key==='Enter') $('pgRun').click(); });
+
+    // ---- DUPLICATES ----
+    $('scanDup').addEventListener('click', loadDuplicates);
+    async function loadDuplicates() {
+      const box = $('dupBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const d = await fetch(`${K()}/duplicates`, { headers: H() }).then(r=>r.json());
+      let html = '';
+      if (d.exact_duplicate_groups.length) { html += `<h4>${t('kba.dup.exact')}</h4>` + d.exact_duplicate_groups.map(g => `<div class="fc-claim v-CONTRADICTED"><b>${g.count}×</b> ${g.titles.map(esc).join(', ')}<div class="hint">${g.document_ids.length} documents share identical content</div></div>`).join(''); }
+      if (d.near_duplicate_pairs.length) { html += `<h4>${t('kba.dup.near')}</h4>` + d.near_duplicate_pairs.map(p => `<div class="fc-claim"><span class="pill notinkb">${(p.similarity*100).toFixed(1)}% ${t('kba.dup.sim')}</span> ${esc(p.a_title)} ↔ ${esc(p.b_title)}</div>`).join(''); }
+      if (d.near_scan_skipped) html += `<div class="hint">Near-dup scan skipped (KB too large).</div>`;
+      box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
+    }
+
+    // ---- ACTIVITY ----
+    $('reloadAct').addEventListener('click', loadActivity);
+    async function loadActivity() {
+      const box = $('actBox');
+      const ev = (await fetch(`${K()}/activity`, { headers: H() }).then(r=>r.json())).events;
+      if (!ev.length) { box.innerHTML = `<div class="empty">${t('kba.act.none')}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>action</th><th>method</th><th>status</th><th>detail</th><th class="tight">chunks</th><th class="tight">ms</th><th>actor</th><th>when</th></tr></thead><tbody>` +
+        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td>${esc(e.method||'—')}</td>
+          <td><span class="pill ${e.status==='ready'||e.status==='ok'?'ready':e.status==='error'?'error':'processing'}">${esc(e.status||'—')}</span></td>
+          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count??'—'}</td><td class="tight">${e.duration_ms??'—'}</td>
+          <td class="hint">${esc(e.actor||'—')}</td><td class="hint">${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`;
+    }
+
+    // ---- SCORING ----
+    let scDims = [];
+    function scRow(d, i) {
+      return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
+        <div class="row">
+          <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"/></div>
+          <div style="flex:0; min-width:110px"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"/></div>
+        </div>
+        <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"/>
+        <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}">${esc(d.guidance||'')}</textarea>
+        <div class="actions"><button class="danger sc-del" data-i="${i}">${t('sc.remove')}</button></div>
+      </div>`;
+    }
+    function scReadDom() {
+      const box = $('scDims');
+      scDims = [...box.querySelectorAll('[data-i]')].filter(el=>el.classList.contains('fc-claim')).map(el => ({
+        key: (scDims[+el.dataset.i]||{}).key,
+        name: el.querySelector('.sc-name').value.trim(),
+        weight: parseFloat(el.querySelector('.sc-weight').value)||0,
+        description: el.querySelector('.sc-desc').value.trim(),
+        guidance: el.querySelector('.sc-guide').value.trim(),
+      }));
+    }
+    function scRenderDims() {
+      const box = $('scDims');
+      box.innerHTML = scDims.length ? scDims.map(scRow).join('') : `<div class="empty">${t('sc.nodims')}</div>`;
+      box.querySelectorAll('.sc-del').forEach(b => b.addEventListener('click', () => { scReadDom(); scDims.splice(+b.dataset.i,1); scRenderDims(); }));
+      box.querySelectorAll('.sc-weight').forEach(inp => inp.addEventListener('input', scSum));
+      scSum();
+    }
+    function scSum() {
+      let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value)||0);
+      $('scSum').textContent = Math.round(s*10)/10;
+    }
+    $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+    async function loadScoring() {
+      $('scMsg').textContent=''; $('scMsg').className='msg';
+      const cfg = await fetch(`${API}/admin/scoring/${TID}/config`, { headers: H() }).then(r=>r.json());
+      scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
+      $('scRubric').value = cfg.rubric || '';
+      $('scVersion').textContent = cfg.version ? `${t('sc.version')} ${cfg.version}` : t('sc.none');
+      scRenderDims();
+    }
+    $('scSave').addEventListener('click', async () => {
+      scReadDom();
+      if (!scDims.length) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needone'); return; }
+      if (scDims.some(d => !d.name)) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needname'); return; }
+      const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      const r = await fetch(`${API}/admin/scoring/${TID}/config`, { method:'PUT', headers: JH(),
+        body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) });
+      const d = await r.json(); btn.disabled=false; btn.textContent=t('sc.save');
+      if (r.ok) { CQ.toast(t('sc.saved'),'ok'); scDims = (d.dimensions||[]).map(x=>({key:x.key,name:x.name,weight:x.weight,description:x.description,guidance:x.guidance}));
+        $('scRubric').value=d.rubric||''; $('scVersion').textContent=`${t('sc.version')} ${d.version}`; scRenderDims(); }
+      else { $('scMsg').className='msg err'; $('scMsg').textContent = d.detail || 'Save failed'; }
+    });
+
+    // boot
+    (async () => {
+      const r = await fetch(`${API}/admin/tenants`, { headers: H() });
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      await loadTenants();
+    })();
+  </script>
+</body>
+</html>

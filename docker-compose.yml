@@ -19,12 +19,29 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Self-hosted multilingual embeddings (BAAI/bge-m3) — no external API key.
+  # Downloads the model on first start into the cached volume (~2 GB).
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: cq-embeddings
+    command: ["--model-id", "BAAI/bge-m3", "--port", "80"]
+    volumes:
+      - hf_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    restart: unless-stopped
+
   api:
     build: ./backend
     container_name: cq-api
     env_file: .env
     environment:
       DATABASE_URL: postgresql://cq:cq@db:5432/cq
+      EMBEDDING_BASE_URL: http://embeddings:80
     depends_on:
       db:
         condition: service_healthy
@@ -46,3 +63,4 @@ services:
 
 volumes:
   pgdata:
+  hf_cache:
