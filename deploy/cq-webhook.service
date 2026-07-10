@@ -8,7 +8,7 @@ Type=simple
 User=cqdeploy
 Group=cqdeploy
 WorkingDirectory=/home/cqdeploy/cq-v3-ai
-EnvironmentFile=/home/cqdeploy/.cq_webhook_secret
+EnvironmentFile=/etc/cq-webhook.env
 Environment=REPO_DIR=/home/cqdeploy/cq-v3-ai
 Environment=DEPLOY_BRANCH=main
 Environment=WEBHOOK_PORT=9000
