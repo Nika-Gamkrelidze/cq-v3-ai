@@ -3,18 +3,15 @@
 Prioritized. See root `CLAUDE.md` for full context. Nothing here contains secrets.
 
 ## Status snapshot
-- **Deployed:** audio analysis, ElevenLabs STT + TTS (EN/RU/Georgian), knowledge base + imports,
-  KB admin console, multi-tenancy + isolation, RAG fact-check, per-tenant weighted scoring rubric,
-  three trilingual UIs, single sign-in, push-to-deploy webhook (server side).
-- **Local, unpushed:** 7 QA bug fixes on 2 commits ahead of `origin/main` (see `CLAUDE.md` §6).
+- **Deployed & live:** audio analysis, ElevenLabs STT + TTS (EN/RU/Georgian), knowledge base +
+  imports, KB admin console, multi-tenancy + isolation, RAG fact-check, per-tenant weighted scoring
+  rubric, three trilingual UIs, single sign-in, and the QA fixes. `origin/main` == server.
+- **Auto-deploy:** ✅ GitHub webhook registered (hook `651713539`) — every push to `main` deploys.
 - **Local QA:** fully green.
 
-## Now (unblock the pipeline)
-1. **Register the GitHub webhook.** Repo → Settings → Webhooks → Add:
-   URL `http://<server>/gh-webhook`, content-type `application/json`, shared secret, event = push,
-   SSL verification off (plain HTTP). Exact URL + secret location: `docs/DEPLOYMENT.local.md`.
-   Until done, deploys are manual (pull + `docker compose -p cqv3 up -d --build` on the server).
-2. **Push + deploy the 2 QA-fix commits** (owner triggers). Non-destructive; volumes untouched.
+## Now
+- ~~Register the GitHub webhook~~ ✅ done — pushes auto-deploy (no VPN needed).
+- ~~Push + deploy the QA-fix commits~~ ✅ done, verified live.
 
 ## Next (production readiness)
 3. **HTTPS/TLS.** Currently plain HTTP, no domain. Get a domain → Caddy (auto-certs) or nginx+certbot

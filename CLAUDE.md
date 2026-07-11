@@ -173,22 +173,21 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `deploy/deploy.sh` (the pull+rebuild above), logging to `deploy/webhook.log`. It's exposed via an
   nginx `location = /gh-webhook` → host `:9000` (over the existing port 80, **no extra firewall
   port**; `web` has `extra_hosts: host-gateway`). The server-side receiver is installed and tested.
-  - **⚠️ OPEN ITEM: the webhook is NOT yet registered in GitHub.** Add it in repo
-    **Settings → Webhooks** (URL `http://<server>/gh-webhook`, content-type `application/json`, the
-    shared secret, event = push, SSL verify off since HTTP). Exact URL + secret location are in
-    `docs/DEPLOYMENT.local.md`. Until registered, deploy manually (pull + compose up on the server).
-- **Manual/non-destructive deploy flow, VPN + guard:** connect CQ VPN → confirm no concurrent
-  deploy → sync/pull → `docker compose -p cqv3 up -d --build api` → verify over the public IP. Full
-  runbook (server IP, user, key path, VPN name) is in **`docs/DEPLOYMENT.local.md`** (git-ignored).
+  - **✅ REGISTERED in GitHub** (hook id `651713539` → `http://217.147.236.219/gh-webhook`, push
+    event, json, insecure_ssl). The old dead hook (`ai.communiq.ge/deploy`) was removed. **Every push
+    to `main` now auto-deploys — no VPN/SSH needed.** (The VPN is only needed for manual SSH access.)
+- **Manual/non-destructive deploy flow (fallback), VPN + guard:** connect CQ VPN → confirm no
+  concurrent deploy → `git pull --ff-only` → `docker compose -p cqv3 up -d --build` → verify over the
+  public IP. Full runbook (server IP, user, key path, VPN name) is in **`docs/DEPLOYMENT.local.md`**.
 
 ---
 
 ## 6. Where we stopped (exact state)
 
-- **Deployed to the server:** everything through the **scoring rubric** (audio analysis, TTS, KB +
-  KB-admin console, fact-check, rubric scoring, all three UIs, the webhook receiver).
-- **Local repo is 2 commits ahead of `origin/main` — NOT pushed** (owner will trigger). These are
-  **7 QA bug fixes** from a full local regression pass:
+- **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
+  rubric scoring, all three UIs — **including the QA fixes below** (pushed + deployed), plus the
+  **registered auto-deploy webhook**. `origin/main` and the server are in sync.
+- The **7 QA bug fixes** from the full local regression pass (now live):
   1. Malformed UUID in path/body → was **500**, now **400** (global `asyncpg.DataError` handler).
   2. `analyze.py` guarded `stt["text"]` (missing/None transcript no longer 500s + strands the job).
   3. `reembed_document` raises on embedding-count mismatch (was a silent partial re-embed).
@@ -206,8 +205,8 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 ## 7. Roadmap / remaining steps
 
 See **`docs/ROADMAP.md`** for the prioritized list. Top items:
-1. **Register the GitHub webhook** (open item above).
-2. **Push + deploy the 2 QA-fix commits.**
+1. ~~Register the GitHub webhook~~ ✅ done — pushes auto-deploy.
+2. ~~Push + deploy the QA-fix commits~~ ✅ done.
 3. **HTTPS/TLS** once a domain exists (Caddy or nginx+certbot; open 443).
 4. **PII/PHI redaction** before transcripts go to Claude (compliance for banks/clinics).
 5. **Production hardening** — lock CORS to real domains, rotate keys, add Alembic, add tests/CI.
