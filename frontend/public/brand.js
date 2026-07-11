@@ -32,6 +32,7 @@ const CQ = (() => {
       'tts.heading':'Generate speech from text','tts.text_ph':'Type something to say… (English, Russian or Georgian)',
       'an.heading':'Upload a recording to analyze','an.heading_kb':'Analyze a call — uses your knowledge base',
       'drop.title':'Drop an audio file here, or click to browse','drop.sub':'mp3, wav, m4a, ogg — transcribed with ElevenLabs Scribe, analyzed by Claude','drop.sub_kb':'Transcribed, then analyzed against your knowledge base',
+      'rec.or':'or','rec.record':'Record','rec.stop':'Stop','rec.recording':'Recording','rec.ready':'Recorded — ready to analyze','rec.unsupported':'Recording needs HTTPS or localhost','rec.denied':'Microphone access denied',
       'res.analysis':'Analysis','res.language':'Language','res.sentiment':'Sentiment','res.topics':'Topics','res.time':'Time','res.quality':'Quality','res.summary':'Summary','res.keypoints':'Key points','res.actions':'Action items','res.transcript':'Transcript','res.kbused':'Knowledge base used','res.nokb':'No knowledge base context matched.','res.empty':'(empty)','res.done':'Analysis complete',
       'login.heading':'Sign in','login.hint':'Sign in to your workspace, or with your administrator credentials.',
       'kb.import':'Import knowledge','imp.file':'Upload file','imp.paste':'Paste text','imp.csv':'CSV (Q&A / key-value)','kb.filelabel':'File (PDF / DOCX / TXT / MD)','kb.csvlabel':'CSV file (first row = header)','kb.searchlabel':'Search knowledge base','kb.search_ph':'ask a question…','kb.documents':'Documents','kb.none':'No documents yet. Import some knowledge above.','kb.processing':'processing…','kb.nomatch':'No matches.',
@@ -79,6 +80,7 @@ const CQ = (() => {
       'tts.heading':'ტექსტიდან მეტყველების გენერაცია','tts.text_ph':'აკრიფე სათქმელი… (ინგლისური, რუსული ან ქართული)',
       'an.heading':'ატვირთე ჩანაწერი ანალიზისთვის','an.heading_kb':'გააანალიზე ზარი — იყენებს შენს ცოდნის ბაზას',
       'drop.title':'ჩააგდე აუდიო ფაილი აქ ან დააჭირე ასარჩევად','drop.sub':'mp3, wav, m4a, ogg — გადაიწერება ElevenLabs Scribe-ით, ანალიზი Claude-ით','drop.sub_kb':'ჯერ გადაიწერება, შემდეგ ანალიზდება შენს ცოდნის ბაზასთან',
+      'rec.or':'ან','rec.record':'ჩაწერა','rec.stop':'გაჩერება','rec.recording':'მიმდინარეობს ჩაწერა','rec.ready':'ჩაწერილია — მზადაა ანალიზისთვის','rec.unsupported':'ჩაწერა საჭიროებს HTTPS-ს ან localhost-ს','rec.denied':'მიკროფონზე წვდომა უარყოფილია',
       'res.analysis':'ანალიზი','res.language':'ენა','res.sentiment':'განწყობა','res.topics':'თემები','res.time':'დრო','res.quality':'ხარისხი','res.summary':'შეჯამება','res.keypoints':'ძირითადი პუნქტები','res.actions':'სამოქმედო პუნქტები','res.transcript':'ტრანსკრიფცია','res.kbused':'გამოყენებული ცოდნის ბაზა','res.nokb':'ცოდნის ბაზასთან დამთხვევა ვერ მოიძებნა.','res.empty':'(ცარიელი)','res.done':'ანალიზი დასრულდა',
       'login.heading':'შესვლა','login.hint':'შედი შენს სამუშაო სივრცეში ან ადმინისტრატორის მონაცემებით.',
       'kb.import':'ცოდნის იმპორტი','imp.file':'ფაილის ატვირთვა','imp.paste':'ტექსტის ჩასმა','imp.csv':'CSV (კითხვა-პასუხი)','kb.filelabel':'ფაილი (PDF / DOCX / TXT / MD)','kb.csvlabel':'CSV ფაილი (პირველი რიგი = სათაური)','kb.searchlabel':'ცოდნის ბაზაში ძებნა','kb.search_ph':'დასვი კითხვა…','kb.documents':'დოკუმენტები','kb.none':'ჯერ არ არის დოკუმენტები. დაამატე ცოდნა ზემოთ.','kb.processing':'მუშავდება…','kb.nomatch':'დამთხვევა ვერ მოიძებნა.',
@@ -126,6 +128,7 @@ const CQ = (() => {
       'tts.heading':'Генерация речи из текста','tts.text_ph':'Введите текст… (английский, русский или грузинский)',
       'an.heading':'Загрузите запись для анализа','an.heading_kb':'Анализ звонка — использует вашу базу знаний',
       'drop.title':'Перетащите аудиофайл сюда или нажмите для выбора','drop.sub':'mp3, wav, m4a, ogg — расшифровка ElevenLabs Scribe, анализ Claude','drop.sub_kb':'Сначала расшифровка, затем анализ по вашей базе знаний',
+      'rec.or':'или','rec.record':'Записать','rec.stop':'Стоп','rec.recording':'Идёт запись','rec.ready':'Записано — готово к анализу','rec.unsupported':'Для записи нужен HTTPS или localhost','rec.denied':'Доступ к микрофону запрещён',
       'res.analysis':'Анализ','res.language':'Язык','res.sentiment':'Тональность','res.topics':'Темы','res.time':'Время','res.quality':'Качество','res.summary':'Резюме','res.keypoints':'Ключевые моменты','res.actions':'Действия','res.transcript':'Транскрипция','res.kbused':'Использованная база знаний','res.nokb':'Совпадений в базе знаний не найдено.','res.empty':'(пусто)','res.done':'Анализ завершён',
       'login.heading':'Войти','login.hint':'Войдите в своё рабочее пространство или с учётными данными администратора.',
       'kb.import':'Импорт знаний','imp.file':'Загрузить файл','imp.paste':'Вставить текст','imp.csv':'CSV (вопрос-ответ)','kb.filelabel':'Файл (PDF / DOCX / TXT / MD)','kb.csvlabel':'CSV-файл (первая строка = заголовок)','kb.searchlabel':'Поиск по базе знаний','kb.search_ph':'задайте вопрос…','kb.documents':'Документы','kb.none':'Документов пока нет. Импортируйте знания выше.','kb.processing':'обработка…','kb.nomatch':'Совпадений нет.',
@@ -319,6 +322,56 @@ const CQ = (() => {
     return { audio, el, load(newSrc){ audio.src = newSrc; dl.href = newSrc; audio.play().catch(()=>{}); }, toggle(){ audio.paused ? audio.play() : audio.pause(); } };
   }
 
+  /* ---------------- Mic recorder (for the analyzer) ----------------
+     Records from the microphone and drops the result into an existing <input type=file>
+     so the normal "analyze" flow works unchanged. getUserMedia requires a SECURE CONTEXT
+     (https or http://localhost) — on plain http the button disables itself with a reason. */
+  function attachRecorder({ button, status, fileInput, onReady } = {}) {
+    if (!button) return;
+    const setStatus = (msg, cls) => { if (status) { status.textContent = msg || ''; status.className = 'rec-status hint' + (cls ? ' ' + cls : ''); } };
+    const supported = window.isSecureContext && navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia && typeof MediaRecorder !== 'undefined';
+    let rec = null, stream = null, chunks = [], timer = null, seconds = 0, recording = false;
+    const label = () => { button.innerHTML = recording ? '<span class="rec-dot"></span>' + t('rec.stop') : '● ' + t('rec.record'); };
+    if (!supported) {
+      button.disabled = true; button.classList.add('rec-off');
+      button.innerHTML = '● ' + t('rec.record'); setStatus(t('rec.unsupported'));
+      document.addEventListener('cq:lang', () => { button.innerHTML = '● ' + t('rec.record'); setStatus(t('rec.unsupported')); });
+      return;
+    }
+    async function start() {
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e) { setStatus(t('rec.denied'), 'err'); return; }
+      chunks = []; seconds = 0;
+      let mime = '';
+      ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].some(m => MediaRecorder.isTypeSupported(m) && (mime = m));
+      rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        clearInterval(timer);
+        if (stream) stream.getTracks().forEach(tr => tr.stop());
+        const type = (rec.mimeType || mime || 'audio/webm').split(';')[0];
+        const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+        const file = new File(chunks, 'recording.' + ext, { type });
+        if (fileInput) {
+          try { const dt = new DataTransfer(); dt.items.add(file); fileInput.files = dt.files; fileInput.dispatchEvent(new Event('change')); }
+          catch (e) { /* very old browsers can't set input.files — rely on onReady */ }
+        }
+        recording = false; label();
+        setStatus(t('rec.ready') + ' (' + fmt(seconds) + ')', 'ok');
+        if (onReady) onReady(file, seconds);
+      };
+      rec.start();
+      recording = true; label();
+      setStatus(t('rec.recording') + ' 0:00', 'rec-live');
+      timer = setInterval(() => { seconds++; setStatus(t('rec.recording') + ' ' + fmt(seconds), 'rec-live'); }, 1000);
+    }
+    function stop() { if (rec && rec.state !== 'inactive') rec.stop(); }
+    button.addEventListener('click', () => { recording ? stop() : start(); });
+    document.addEventListener('cq:lang', () => { if (!recording) label(); });
+    label();
+  }
+
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
-           toast, confirm, select, enhanceSelects, syncSelect, player };
+           toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder };
 })();

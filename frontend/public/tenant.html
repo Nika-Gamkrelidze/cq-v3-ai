@@ -78,6 +78,11 @@
             <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
             <div class="drop-sub" data-i18n="drop.sub_kb"></div>
           </div>
+          <div class="rec-row">
+            <span class="hint" data-i18n="rec.or"></span>
+            <button class="ghost" type="button" id="recBtn">● Record</button>
+            <span class="rec-status hint" id="recStatus"></span>
+          </div>
           <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
           <div class="msg err" id="analyzeErr"></div>
         </div>
@@ -129,6 +134,7 @@
       ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
       ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
       drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
+      CQ.attachRecorder({ button: $('recBtn'), status: $('recStatus'), fileInput: audioInput });
     }
 
     // unified login (tenant users + superadmin)

@@ -185,6 +185,14 @@ button:disabled { opacity:.5; cursor:default; }
 .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:var(--pending); }
 .dot.ok { background:var(--ok); } .dot.bad { background:var(--alert); } .dot.wait { background:var(--pending); }
 
+/* ---- Mic recorder (analyzer) ---- */
+.rec-row { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
+.rec-row .rec-off { opacity:.55; cursor:not-allowed; }
+.rec-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--coral); margin-right:7px; vertical-align:middle; animation:recpulse 1s ease-in-out infinite; }
+@keyframes recpulse { 0%,100%{opacity:1;} 50%{opacity:.25;} }
+.rec-status.rec-live { color:var(--coral); font-variant-numeric:tabular-nums; }
+.rec-status.ok { color:var(--ok); } .rec-status.err { color:var(--coral); }
+
 /* ---- Feedback ---- */
 .msg { margin-top:12px; font-size:13.5px; white-space:pre-wrap; }
 .msg.ok { color:var(--ok); } .msg.err, .err { color:var(--coral); }

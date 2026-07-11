@@ -65,6 +65,11 @@
           <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
           <div class="drop-sub" data-i18n="drop.sub"></div>
         </div>
+        <div class="rec-row">
+          <span class="hint" data-i18n="rec.or"></span>
+          <button class="ghost" type="button" id="recBtn">● Record</button>
+          <span class="rec-status hint" id="recStatus"></span>
+        </div>
         <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
         <div class="err" id="analyzeErr"></div>
       </div>
@@ -113,6 +118,9 @@
     ['dragover','dragenter'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.add('drag'); }));
     ['dragleave','drop'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.remove('drag'); }));
     audioDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
+
+    // mic recorder -> drops the recording into the file input, then Analyze works as usual
+    CQ.attachRecorder({ button: document.getElementById('recBtn'), status: document.getElementById('recStatus'), fileInput: audioInput });
 
     // ---- Analyze ----
     const analyzeBtn = document.getElementById('analyzeBtn');
