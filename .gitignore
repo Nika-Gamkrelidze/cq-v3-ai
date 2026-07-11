@@ -16,6 +16,8 @@ id_ed25519
 *_ed25519
 # Local-only compose override (host port bindings, dev mounts)
 docker-compose.override.yml
+# Local-only operational notes (server access, VPN, credential pointers) — never commit
+*.local.md
 # Data volumes / build output / logs
 pgdata/
 node_modules/
