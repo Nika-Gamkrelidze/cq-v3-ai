@@ -10,6 +10,10 @@ __pycache__/
 *.key
 *.p12
 *.pfx
+# TLS certs copied from Let's Encrypt into the repo dir for the nginx bind-mount
+deploy/certs/
+# ACME HTTP-01 challenge files (transient, written under the served webroot)
+frontend/public/.well-known/
 id_rsa
 id_ed25519
 *_rsa
