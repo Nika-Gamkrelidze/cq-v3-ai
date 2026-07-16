@@ -137,3 +137,63 @@ async def get_anon_limits():
 async def put_anon_limits(patch: AnonPatch):
     await settings_store.set_anonymous_config(patch.model_dump(exclude_none=True))
     return await settings_store.get_anonymous_config()
+
+
+# ---------------------------------------------------------------------------
+# Customer-visible voices: the admin sees EVERY voice (unfiltered) to pre-listen and
+# curate. The public GET /voices is the filtered one — the panel must not use it, or the
+# admin couldn't preview a hidden voice.
+# ---------------------------------------------------------------------------
+class VoicePatch(BaseModel):
+    mode: str | None = None
+    voice_ids: list[str] | None = None
+
+
+@router.get("/voices", dependencies=[Depends(require_admin)])
+async def get_voices():
+    from .tts import GEORGIAN_VOICE, VOICE_ID_RE, system_voice_ids  # noqa: F401 (avoid import cycle at module load)
+
+    cfg = await settings_store.get_effective()
+    vcfg = await settings_store.get_voice_config()
+    sysids = system_voice_ids(cfg)
+    error, live = None, []
+    try:
+        live = await elevenlabs.list_voices(cfg["elevenlabs_api_key"])
+    except Exception as exc:  # noqa: BLE001 — report in-band so the panel can render an error
+        error = str(exc)
+
+    by_id = {v.get("voice_id"): dict(v) for v in live if v.get("voice_id")}
+    # System voices (e.g. the shared Georgian voice) may not be in the account listing at
+    # all — surface them anyway so the operator can see what is always on.
+    for vid in sysids:
+        if vid not in by_id:
+            by_id[vid] = {"voice_id": vid, "name": "System default voice",
+                          "category": "shared", "preview_url": None}
+
+    picked = set(vcfg["voice_ids"])
+    ordered = [by_id[i] for i in vcfg["voice_ids"] if i in by_id]
+    ordered += [v for k, v in by_id.items() if k not in picked]
+    voices_out = [{**v,
+                   "selected": v["voice_id"] in picked or v["voice_id"] in sysids,
+                   "system": v["voice_id"] in sysids} for v in ordered]
+    missing = [i for i in vcfg["voice_ids"] if i not in {v.get("voice_id") for v in live}]
+    return {"mode": vcfg["mode"], "voice_ids": vcfg["voice_ids"],
+            "voices": voices_out, "missing": missing, "error": error}
+
+
+@router.put("/voices", dependencies=[Depends(require_admin)])
+async def put_voices(patch: VoicePatch):
+    from .tts import VOICE_ID_RE
+
+    if patch.mode is not None and patch.mode not in ("all", "allowlist"):
+        raise HTTPException(status_code=400, detail="mode must be 'all' or 'allowlist'")
+    current = await settings_store.get_voice_config()
+    mode = patch.mode or current["mode"]
+    ids = patch.voice_ids if patch.voice_ids is not None else current["voice_ids"]
+    if mode == "allowlist" and not ids:
+        raise HTTPException(status_code=400, detail="Select at least one voice.")
+    for i in (patch.voice_ids or []):
+        if not VOICE_ID_RE.match(i):
+            raise HTTPException(status_code=400, detail=f"Invalid voice id: {i[:24]}")
+    await settings_store.set_voice_config(patch.model_dump(exclude_none=True))
+    return await get_voices()

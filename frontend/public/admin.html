@@ -21,6 +21,7 @@
         <div class="tab" data-tab="embeddings" data-i18n="adm.embeddings"></div>
         <div class="tab" data-tab="anon" data-i18n="adm.anon"></div>
         <div class="tab" data-tab="integrations" data-i18n="adm.integrations"></div>
+        <div class="tab" data-tab="voices" data-i18n="adm.voices"></div>
       </div>
 
       <!-- TENANTS -->
@@ -115,6 +116,24 @@
           <div class="msg" id="intMsg"></div><div id="intTest"></div>
         </div>
       </section>
+
+      <!-- VOICES -->
+      <section class="panel" id="panel-voices">
+        <div class="card">
+          <h3 data-i18n="adm.voicevis"></h3>
+          <label class="inline" style="gap:8px"><input type="checkbox" id="v_restrict" /><span data-i18n="f.restrictvoices"></span></label>
+          <div class="hint" style="margin-top:6px" data-i18n="v.hint"></div>
+          <div class="row" style="margin-top:10px">
+            <div style="flex:2"><input id="v_search" data-i18n-ph="v.search" /></div>
+            <div style="flex:0; align-self:center" class="hint"><b id="v_count">0</b> <span data-i18n="v.selected"></span></div>
+          </div>
+          <!-- one shared player for all previews (no second play bar) -->
+          <div id="voicesPlayer" style="margin-top:8px"></div>
+          <div id="voicesList" style="margin-top:8px; max-height:52vh; overflow:auto"></div>
+          <div class="actions"><button class="primary" id="saveVoices" data-i18n="btn.savesettings"></button></div>
+          <div class="msg" id="voicesMsg"></div>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -141,7 +160,7 @@
     }));
     document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) loadTenants(); });
 
-    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants()]); }
+    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants(), loadVoices()]); }
 
     // Login happens on the unified sign-in page; this console is token-gated only.
     async function boot() {
@@ -166,7 +185,10 @@
       if ($('anthropic_api_key').value.trim()) patch.anthropic_api_key = $('anthropic_api_key').value.trim();
       if ($('elevenlabs_api_key').value.trim()) patch.elevenlabs_api_key = $('elevenlabs_api_key').value.trim();
       const r = await fetch(`${API}/admin/settings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
-      if (r.ok) { $('anthropic_api_key').value=''; $('elevenlabs_api_key').value=''; await loadIntegrations(); m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
+      if (r.ok) { $('anthropic_api_key').value=''; $('elevenlabs_api_key').value=''; await loadIntegrations();
+        // a new ElevenLabs key may mean a different account -> refresh the voice list + preview map
+        voicesFetched = false; voiceMap = {}; await loadVoices();
+        m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
       else { const d = await r.json().catch(()=>({})); m.className='msg err'; m.textContent = d.detail || 'Save failed'; }
     });
     $('testInt').addEventListener('click', async () => {
@@ -178,14 +200,80 @@
       finally { b.disabled=false; b.textContent=t('btn.testconn'); }
     });
     let voiceMap = {}, voicesFetched = false;
-    async function fetchVoices(){ if (voicesFetched) return; try { const r = await fetch(`${API}/voices`); if(!r.ok) return;
-      (await r.json()).forEach(v => { if (v.preview_url) voiceMap[v.voice_id] = v.preview_url; }); voicesFetched = true; } catch{} }
+    // Admin-side map MUST come from /admin/voices (unfiltered): the public /voices is now
+    // curated, so a hidden voice would miss the map and fall through to a paid POST /tts.
+    async function fetchVoices(){ if (voicesFetched) return; try { const r = await fetch(`${API}/admin/voices`, { headers: hdr() }); if(!r.ok) return;
+      const d = await r.json(); (Array.isArray(d.voices) ? d.voices : []).forEach(v => { if (v.preview_url) voiceMap[v.voice_id] = v.preview_url; }); voicesFetched = true; } catch{} }
     $('voicePreviewBtn').addEventListener('click', async () => {
       const box = $('voicePreviewAudio'); box.innerHTML=''; const vid = $('tts_voice_id').value.trim(); if(!vid) return;
       await fetchVoices();
       if (voiceMap[vid]) { CQ.player(box, voiceMap[vid], {name:'preview.mp3'}); return; }
       try { const r = await fetch(`${API}/tts`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:'Hello.', voice_id: vid}) });
         if (r.ok) CQ.player(box, URL.createObjectURL(await r.blob()), {name:'preview.mp3'}); } catch{}
+    });
+
+    // ---- Voices: pre-listen every voice, pick which customers see ----
+    let VOICES = [], voicesPlayer = null, voicesCurSrc = null;
+    function playVoice(url) {   // one shared bar; re-clicking the same row toggles
+      const box = $('voicesPlayer');
+      if (voicesCurSrc === url && voicesPlayer) { voicesPlayer.toggle(); return; }
+      voicesPlayer = CQ.player(box, url, { name: 'preview.mp3' }); voicesCurSrc = url;
+    }
+    function voiceRow(v, missing) {
+      const sys = v.system ? `<span class="chip" data-i18n="v.system"></span>` : '';
+      const gone = missing ? `<span class="chip" data-i18n="v.unavailable"></span>` : '';
+      const prev = v.preview_url
+        ? `<button class="ghost v-prev" type="button" data-id="${esc(v.voice_id)}" aria-label="Preview">▶</button>`
+        : `<span class="chip" data-i18n="v.nopreview"></span>`;
+      return `<div class="inline v-row" style="gap:10px; padding:7px 0; border-bottom:1px solid var(--hairline)">
+        <input type="checkbox" class="v-tick" data-id="${esc(v.voice_id)}" ${v.selected?'checked':''} ${v.system?'disabled':''} />
+        ${prev}
+        <span style="flex:1">${esc(v.name || v.voice_id)}</span>
+        <span class="pill">${esc(v.category||'')}</span>
+        <span class="pill" title="${esc(v.voice_id)}">${esc((v.voice_id||'').slice(0,8))}…</span>
+        ${sys}${gone}</div>`;
+    }
+    function renderVoices(d) {
+      const miss = new Set(d.missing||[]);
+      const q = ($('v_search').value||'').trim().toLowerCase();
+      const rows = VOICES.filter(v => !q || (v.name||'').toLowerCase().includes(q) || (v.category||'').toLowerCase().includes(q));
+      $('voicesList').innerHTML = rows.length ? rows.map(v => voiceRow(v, miss.has(v.voice_id))).join('')
+        : `<div class="empty">${t('kb.nomatch')}</div>`;
+      CQ.applyI18n($('voicesList'));   // injected HTML isn't auto-translated
+      updateVCount();
+    }
+    function updateVCount(){ $('v_count').textContent = $('voicesList').querySelectorAll('.v-tick:checked').length; }
+    async function loadVoices() {
+      const m = $('voicesMsg'); m.className='msg'; m.textContent='';
+      const r = await fetch(`${API}/admin/voices`, { headers: hdr() });
+      if (!r.ok) { m.className='msg err'; m.textContent = t('v.loadfail'); return; }
+      const d = await r.json();
+      VOICES = Array.isArray(d.voices) ? d.voices : [];
+      $('v_restrict').checked = d.mode === 'allowlist';
+      if (d.error) { m.className='msg err'; m.textContent = t('v.loadfail') + ' ' + esc(d.error); }
+      renderVoices(d); window._vd = d;
+    }
+    $('v_search').addEventListener('input', () => renderVoices(window._vd || {}));
+    $('voicesList').addEventListener('click', e => {
+      const b = e.target.closest('.v-prev');
+      if (b) { const v = VOICES.find(x => x.voice_id === b.dataset.id); if (v && v.preview_url) playVoice(v.preview_url); return; }
+      if (e.target.classList.contains('v-tick')) {
+        const v = VOICES.find(x => x.voice_id === e.target.dataset.id); if (v) v.selected = e.target.checked;
+        updateVCount();
+      }
+    });
+    $('saveVoices').addEventListener('click', async () => {
+      const m = $('voicesMsg'); m.className='msg'; m.textContent='';
+      const ids = VOICES.filter(v => v.selected && !v.system).map(v => v.voice_id);
+      const mode = $('v_restrict').checked ? 'allowlist' : 'all';
+      if (mode === 'allowlist' && !ids.length) { m.className='msg err'; m.textContent = t('v.pickone'); return; }
+      const b = $('saveVoices'); b.disabled=true; b.innerHTML='<span class="spinner"></span>';
+      const r = await fetch(`${API}/admin/voices`, { method:'PUT', headers: jhdr(), body: JSON.stringify({ mode, voice_ids: ids }) });
+      const d = await r.json(); b.disabled=false; b.textContent=t('btn.savesettings');
+      if (r.ok) { VOICES = d.voices||[]; $('v_restrict').checked = d.mode==='allowlist'; window._vd = d; renderVoices(d);
+        voicesFetched = false; voiceMap = {};   // integrations preview map may be stale
+        m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
+      else { m.className='msg err'; m.textContent = d.detail || t('toast.error'); }
     });
 
     // embeddings

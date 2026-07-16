@@ -39,7 +39,7 @@
           <div>
             <label for="voiceSelect" data-i18n="f.voice"></label>
             <div class="inline">
-              <div style="flex:1"><select id="voiceSelect"><option value="">Default voice</option></select></div>
+              <div style="flex:1"><select id="voiceSelect"><option value="" data-i18n="f.defaultvoice"></option></select></div>
               <button class="ghost" id="previewBtn" title="Preview voice (free sample)" aria-label="Preview voice">▶</button>
             </div>
           </div>
@@ -183,9 +183,9 @@
       } } catch {}
       try { const r = await fetch(`${API}/voices`); if (r.ok) {
         const voices = await r.json(); const sel = document.getElementById('voiceSelect');
-        voices.forEach(v => { if (v.preview_url) previewMap[v.voice_id] = v.preview_url;
+        if (Array.isArray(voices)) voices.forEach(v => { if (v.preview_url) previewMap[v.voice_id] = v.preview_url;
           const o = document.createElement('option'); o.value = v.voice_id;
-          o.textContent = v.name + (v.category ? ` (${v.category})` : ''); sel.appendChild(o); });
+          o.textContent = (v.name || v.voice_id || '') + (v.category ? ` (${v.category})` : ''); sel.appendChild(o); });
       } } catch {}
       ttsLoaded = true;
     }

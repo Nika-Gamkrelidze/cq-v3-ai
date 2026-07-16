@@ -174,3 +174,33 @@ async def set_anonymous_config(patch: dict) -> None:
     ov = await _load_key(ANON_KEY)
     ov.update({k: v for k, v in patch.items() if v is not None})
     await _save_key(ANON_KEY, ov)
+
+
+# ---------------------------------------------------------------------------
+# Customer-visible TTS voices (app_settings 'voices').
+# Kept in its OWN key, not the 'integrations' blob: get_public() coerces missing
+# DEFAULTS to '' and the admin panel's settings save rewrites every integration
+# field, which would clobber a list. Value is always an object, never a bare array.
+# ---------------------------------------------------------------------------
+VOICES_KEY = "voices"
+VOICE_DEFAULTS = {
+    "mode": "all",        # all | allowlist  — 'all' means show every voice (fail open)
+    "voice_ids": [],      # ordered: the admin's tick order is the dropdown order
+}
+
+
+async def get_voice_config() -> dict:
+    """Never raises and never returns a state that hides every voice by accident:
+    an absent/!invalid config falls back to mode='all' (show everything)."""
+    ov = await _load_key(VOICES_KEY)
+    cfg = dict(VOICE_DEFAULTS)
+    cfg.update(ov or {})
+    cfg["mode"] = cfg.get("mode") if cfg.get("mode") in ("all", "allowlist") else "all"
+    cfg["voice_ids"] = [str(i) for i in (cfg.get("voice_ids") or []) if i]
+    return cfg
+
+
+async def set_voice_config(patch: dict) -> None:
+    ov = await _load_key(VOICES_KEY)
+    ov.update({k: v for k, v in patch.items() if v is not None})
+    await _save_key(VOICES_KEY, ov)
