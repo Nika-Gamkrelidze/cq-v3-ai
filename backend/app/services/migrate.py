@@ -71,6 +71,7 @@ async def run_startup_migrations() -> list[str]:
         await _apply(conn, "analyzer.sql")
         await _apply(conn, "kb.sql")
         await _apply(conn, "scoring.sql")
+        await _apply(conn, "partner.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)
