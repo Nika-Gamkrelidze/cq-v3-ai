@@ -64,7 +64,11 @@ services:
     volumes:
       - ./frontend/public:/usr/share/nginx/html:ro,z
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
-      # TLS certs (Let's Encrypt, copied here by the renewal deploy-hook; git-ignored).
+      # HTTPS server block + the startup switch that enables it only when certs exist,
+      # so the stack still runs on HTTP where there are none (local dev / fresh clone).
+      - ./deploy/tls-ssl.conf:/etc/nginx/tls-available/ssl.conf:ro,z
+      - ./deploy/enable-tls.sh:/docker-entrypoint.d/05-enable-tls.sh:ro,z
+      # TLS certs (Let's Encrypt, copied here by the certbot renewal deploy-hook; git-ignored).
       - ./deploy/certs:/etc/nginx/certs:ro,z
     restart: unless-stopped
 
