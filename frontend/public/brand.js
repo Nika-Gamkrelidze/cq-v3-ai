@@ -45,6 +45,7 @@ const CQ = (() => {
       'toast.saved':'Settings saved','toast.imported':'Import started','toast.deleted':'Deleted','toast.created':'Created','toast.welcome':'Welcome','toast.error':'Something went wrong',
       'quota.using':"You're using CommuniQ anonymously —",'quota.analyses':'analyses','quota.clips':'speech clips','quota.left':'left today.','quota.more':'for a knowledge base and higher limits.','quota.disabled':'Anonymous access is disabled.',
       'fc.title':'Knowledge base fact-check','fc.accuracy':'accuracy','fc.supported':'supported','fc.contradicted':'contradicted','fc.notinkb':'not in KB','fc.misinfo':'Possible misinformation','fc.nochecked':'No verifiable claims were found.',
+      'fc.allclaims':'All claims','pg.tab.retrieval':'Retrieval','pg.tab.score':'Answer scoring','pg.ans.label':'Operator answer (any language)','pg.ans.ph':'Paste or type what the operator said or replied — it will be scored against this tenant’s rubric…','pg.ans.run':'Score answer','pg.ans.hint':'Scored with the tenant’s active rubric; claims are checked against their knowledge base.','pg.ans.norubric':'No active rubric — define one in the Scoring tab first.','pg.ans.empty':'Enter an answer to score.','pg.ans.usingv':'rubric version',
       'kba.title':'Knowledge Base Management','kba.tenant':'Tenant','kba.selecttenant':'Select a tenant to manage its knowledge base.',
       'kba.tab.overview':'Overview','kba.tab.documents':'Documents','kba.tab.import':'Import','kba.tab.playground':'Playground','kba.tab.duplicates':'Duplicates','kba.tab.activity':'Activity',
       'kba.stat.documents':'Documents','kba.stat.chunks':'Chunks','kba.stat.coverage':'Embedding coverage','kba.stat.failed':'Failed imports','kba.stat.tokens':'Approx. tokens','kba.stat.lastupd':'Last updated','kba.stat.inprogress':'In progress',
@@ -93,6 +94,7 @@ const CQ = (() => {
       'toast.saved':'პარამეტრები შენახულია','toast.imported':'იმპორტი დაიწყო','toast.deleted':'წაიშალა','toast.created':'შეიქმნა','toast.welcome':'კეთილი იყოს თქვენი მობრძანება','toast.error':'რაღაც ვერ მოხერხდა',
       'quota.using':'თქვენ იყენებთ CommuniQ-ს ანონიმურად —','quota.analyses':'ანალიზი','quota.clips':'აუდიო კლიპი','quota.left':'დარჩა დღეს.','quota.more':'ცოდნის ბაზისა და მაღალი ლიმიტებისთვის.','quota.disabled':'ანონიმური წვდომა გათიშულია.',
       'fc.title':'ცოდნის ბაზასთან შემოწმება','fc.accuracy':'სიზუსტე','fc.supported':'დადასტურებული','fc.contradicted':'გაბათილებული','fc.notinkb':'ბაზაში არ არის','fc.misinfo':'შესაძლო მცდარი ინფორმაცია','fc.nochecked':'შესამოწმებელი მტკიცება ვერ მოიძებნა.',
+      'fc.allclaims':'ყველა მტკიცება','pg.tab.retrieval':'მოძიება','pg.tab.score':'პასუხის შეფასება','pg.ans.label':'ოპერატორის პასუხი (ნებისმიერ ენაზე)','pg.ans.ph':'ჩასვი ან აკრიფე ოპერატორის პასუხი — შეფასდება ამ კლიენტის რუბრიკით…','pg.ans.run':'პასუხის შეფასება','pg.ans.hint':'ფასდება კლიენტის აქტიური რუბრიკით; მტკიცებები მოწმდება მის ცოდნის ბაზასთან.','pg.ans.norubric':'აქტიური რუბრიკა არ არის — ჯერ განსაზღვრე შეფასების ტაბში.','pg.ans.empty':'შეიყვანე პასუხი შესაფასებლად.','pg.ans.usingv':'რუბრიკის ვერსია',
       'kba.title':'ცოდნის ბაზის მართვა','kba.tenant':'ტენანტი','kba.selecttenant':'აირჩიეთ ტენანტი მისი ცოდნის ბაზის სამართავად.',
       'kba.tab.overview':'მიმოხილვა','kba.tab.documents':'დოკუმენტები','kba.tab.import':'იმპორტი','kba.tab.playground':'სათამაშო','kba.tab.duplicates':'დუბლიკატები','kba.tab.activity':'აქტივობა',
       'kba.stat.documents':'დოკუმენტები','kba.stat.chunks':'ფრაგმენტები','kba.stat.coverage':'ემბედინგის დაფარვა','kba.stat.failed':'ჩავარდნილი იმპორტი','kba.stat.tokens':'დაახლ. ტოკენები','kba.stat.lastupd':'ბოლო განახლება','kba.stat.inprogress':'მიმდინარე',
@@ -141,6 +143,7 @@ const CQ = (() => {
       'toast.saved':'Настройки сохранены','toast.imported':'Импорт начат','toast.deleted':'Удалено','toast.created':'Создано','toast.welcome':'Добро пожаловать','toast.error':'Что-то пошло не так',
       'quota.using':'Вы используете CommuniQ анонимно —','quota.analyses':'анализов','quota.clips':'аудиоклипов','quota.left':'осталось сегодня.','quota.more':'для базы знаний и более высоких лимитов.','quota.disabled':'Анонимный доступ отключён.',
       'fc.title':'Проверка по базе знаний','fc.accuracy':'точность','fc.supported':'подтверждено','fc.contradicted':'опровергнуто','fc.notinkb':'нет в базе','fc.misinfo':'Возможная дезинформация','fc.nochecked':'Проверяемых утверждений не найдено.',
+      'fc.allclaims':'Все утверждения','pg.tab.retrieval':'Поиск','pg.tab.score':'Оценка ответа','pg.ans.label':'Ответ оператора (на любом языке)','pg.ans.ph':'Вставьте или напишите ответ оператора — он будет оценён по рубрике этого клиента…','pg.ans.run':'Оценить ответ','pg.ans.hint':'Оценивается по активной рубрике клиента; утверждения проверяются по его базе знаний.','pg.ans.norubric':'Нет активной рубрики — сначала задайте её во вкладке «Оценка».','pg.ans.empty':'Введите ответ для оценки.','pg.ans.usingv':'версия рубрики',
       'kba.title':'Управление базой знаний','kba.tenant':'Арендатор','kba.selecttenant':'Выберите арендатора для управления его базой знаний.',
       'kba.tab.overview':'Обзор','kba.tab.documents':'Документы','kba.tab.import':'Импорт','kba.tab.playground':'Песочница','kba.tab.duplicates':'Дубликаты','kba.tab.activity':'Активность',
       'kba.stat.documents':'Документы','kba.stat.chunks':'Фрагменты','kba.stat.coverage':'Покрытие эмбеддингами','kba.stat.failed':'Ошибки импорта','kba.stat.tokens':'Прибл. токены','kba.stat.lastupd':'Обновлено','kba.stat.inprogress':'В процессе',
@@ -322,6 +325,82 @@ const CQ = (() => {
     return { audio, el, load(newSrc){ audio.src = newSrc; dl.href = newSrc; audio.play().catch(()=>{}); }, toggle(){ audio.paused ? audio.play() : audio.pause(); } };
   }
 
+  /* ---------------- Result renderers (scorecard / KB fact-check) ----------------
+     Shared by the tenant portal and the admin answer-scoring playground so both
+     render identically. Defensive about shapes the model might return. */
+  function _esc(s) { return (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function _arr(v) {
+    if (v == null) return [];
+    if (Array.isArray(v)) return v.filter(x => x != null).map(x => typeof x === 'object' ? Object.values(x).filter(Boolean).join(' — ') : String(x)).filter(s => s.trim());
+    if (typeof v === 'object') return Object.values(v).filter(Boolean).map(String);
+    const s = String(v).trim(); return s ? [s] : [];
+  }
+
+  function scorecardHTML(sc) {
+    if (!sc || !Array.isArray(sc.dimensions) || !sc.dimensions.length) return '';
+    const total = sc.weighted_total;
+    const band = v => v == null ? 'muted' : v >= 80 ? 'ok' : v >= 50 ? 'pending' : 'alert';
+    const barcls = v => v == null ? '' : v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad';
+    const dimRow = d => {
+      const s = d.score, ev = _arr(d.evidence);
+      return `<div class="sc-dim">
+        <div class="sc-dim-head">
+          <span class="sc-dim-name">${_esc(d.name)}</span>
+          <span class="sc-dim-score" style="color:var(--${band(s)})">${s==null?'—':s}<span class="sc-meta">/100</span></span>
+        </div>
+        <div class="sc-meta">${t('sc.weight')} ${d.weight}% · ${t('sc.contribution')} ${d.contribution}</div>
+        <div class="sc-bar ${barcls(s)}"><span style="width:${Math.max(0,Math.min(100,s||0))}%"></span></div>
+        ${d.rationale ? `<div class="hint" style="margin-top:6px">${_esc(d.rationale)}</div>` : ''}
+        ${ev.length ? `<div class="sc-evid">${ev.map(q=>`<q>${_esc(q)}</q>`).join('')}</div>` : ''}
+      </div>`;
+    };
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center">
+        <h3 style="margin:0">${t('sc.title')}</h3>
+        <div class="sc-total"><div class="num" style="color:var(--${band(total)})">${total==null?'—':total}</div><span class="muted">${t('sc.weighted')} / ${sc.max_total||100}</span></div>
+      </div>
+      ${sc.dimensions.map(dimRow).join('')}
+    </div>`;
+  }
+
+  function factcheckHTML(kb) {
+    if (!kb) return '';
+    const claims = Array.isArray(kb.claims) ? kb.claims : [];
+    const c = kb.counts || {};
+    if (!claims.length) return `<div class="card"><h3>${t('fc.title')}</h3><div class="empty">${t('fc.nochecked')}</div></div>`;
+    const acc = kb.accuracy_score;
+    const accVar = acc == null ? 'muted' : acc >= 80 ? 'ok' : acc >= 50 ? 'pending' : 'alert';
+    const vcls = v => ({SUPPORTED:'supported', CONTRADICTED:'contradicted', NOT_IN_KB:'notinkb'}[v] || 'notinkb');
+    const contradicted = claims.filter(x => x.verdict === 'CONTRADICTED');
+    const claimCard = cl => {
+      const ev = cl.evidence;
+      const conf = cl.confidence != null ? ' · ' + Math.round(cl.confidence * 100) + '%' : '';
+      const cat = cl.category ? ' · ' + _esc(cl.category) : '';
+      return `<div class="fc-claim v-${_esc(cl.verdict)}">
+        <div class="inline" style="justify-content:space-between;gap:8px">
+          <span class="pill ${vcls(cl.verdict)}">${t('fc.' + vcls(cl.verdict))}</span>
+          <span class="hint">${_esc(cl.speaker || '')}${cat}${conf}</span>
+        </div>
+        <div style="margin-top:6px">${_esc(cl.claim)}</div>
+        ${cl.rationale ? `<div class="hint" style="margin-top:4px">${_esc(cl.rationale)}</div>` : ''}
+        ${ev ? `<div class="fc-ev"><div class="fc-ev-src">📄 ${_esc(ev.title || ev.doc_type || 'KB')}${ev.score != null ? ' · ' + ev.score : ''}</div>${_esc(ev.snippet || '')}</div>` : ''}
+      </div>`;
+    };
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between; align-items:center">
+        <h3 style="margin:0">${t('fc.title')}</h3>
+        <div class="fc-accuracy"><div class="num" style="color:var(--${accVar})">${acc == null ? '—' : acc}</div><span class="muted">${t('fc.accuracy')}</span></div>
+      </div>
+      <div style="margin-top:8px">
+        <span class="pill supported">${c.supported || 0} ${t('fc.supported')}</span>
+        <span class="pill contradicted">${c.contradicted || 0} ${t('fc.contradicted')}</span>
+        <span class="pill notinkb">${c.not_in_kb || 0} ${t('fc.notinkb')}</span>
+      </div>
+      ${contradicted.length ? `<h4 style="color:var(--coral)">⚠ ${t('fc.misinfo')}</h4>${contradicted.map(claimCard).join('')}<h4>${t('fc.allclaims')}</h4>` : ''}
+      ${claims.map(claimCard).join('')}
+    </div>`;
+  }
+
   /* ---------------- Mic recorder (for the analyzer) ----------------
      Records from the microphone and drops the result into an existing <input type=file>
      so the normal "analyze" flow works unchanged. getUserMedia requires a SECURE CONTEXT
@@ -373,5 +452,6 @@ const CQ = (() => {
   }
 
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
-           toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder };
+           toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder,
+           scorecardHTML, factcheckHTML };
 })();
