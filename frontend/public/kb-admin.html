@@ -158,8 +158,11 @@
           <p class="hint" data-i18n="sc.desc"></p>
           <div id="scDims"></div>
           <div class="actions" style="justify-content:space-between; align-items:center">
-            <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
-            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>%</span>
+            <div class="inline" style="gap:8px">
+              <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
+              <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+            </div>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
           <label data-i18n="sc.rubric"></label>
           <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
@@ -515,9 +518,22 @@
     }
     function scSum() {
       let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value)||0);
-      $('scSum').textContent = Math.round(s*10)/10;
+      s = Math.round(s*10)/10;
+      const ok = Math.abs(s - 100) <= 0.5;
+      $('scSum').textContent = s; $('scSum').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      $('scSumFlag').textContent = ok ? '✓' : '✗'; $('scSumFlag').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      return ok;
     }
     $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+    // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
+    $('scNormalize').addEventListener('click', () => {
+      scReadDom(); const n = scDims.length; if (!n) return;
+      const total = scDims.reduce((a,d)=>a+(d.weight||0),0);
+      if (total <= 0) scDims.forEach(d => d.weight = Math.round(100/n));
+      else scDims.forEach(d => d.weight = Math.round((d.weight/total)*100));
+      scDims[n-1].weight += 100 - scDims.reduce((a,d)=>a+d.weight,0);
+      scRenderDims();
+    });
     async function loadScoring() {
       $('scMsg').textContent=''; $('scMsg').className='msg';
       const cfg = await fetch(`${API}/admin/scoring/${TID}/config`, { headers: H() }).then(r=>r.json());
@@ -530,6 +546,8 @@
       scReadDom();
       if (!scDims.length) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needone'); return; }
       if (scDims.some(d => !d.name)) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needname'); return; }
+      const total = Math.round(scDims.reduce((a,d)=>a+(d.weight||0),0)*10)/10;
+      if (Math.abs(total - 100) > 0.5) { $('scMsg').className='msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
       const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
       const r = await fetch(`${API}/admin/scoring/${TID}/config`, { method:'PUT', headers: JH(),
         body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) });

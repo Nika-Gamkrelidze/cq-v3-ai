@@ -69,6 +69,7 @@ const CQ = (() => {
       'sc.remove':'Remove','sc.save':'Save rubric','sc.saved':'Rubric saved','sc.sum':'Total weight',
       'sc.nodims':'No dimensions yet — add one to start.','sc.version':'Version','sc.none':'No active rubric for this tenant yet.',
       'sc.needname':'Every dimension needs a name.','sc.needone':'Add at least one dimension.',
+      'sc.normalize':'Normalize to 100%','sc.mustbe100':'Weights must total 100% (they total {total}%).',
     },
     ka: {
       'nav.public':'საჯარო აპი','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'ცოდნის ბაზა',
@@ -119,6 +120,7 @@ const CQ = (() => {
       'sc.remove':'წაშლა','sc.save':'რუბრიკის შენახვა','sc.saved':'რუბრიკა შენახულია','sc.sum':'სრული წონა',
       'sc.nodims':'განზომილებები ჯერ არ არის — დაამატეთ ერთი დასაწყებად.','sc.version':'ვერსია','sc.none':'ამ კლიენტს აქტიური რუბრიკა ჯერ არ აქვს.',
       'sc.needname':'თითოეულ განზომილებას სჭირდება სახელი.','sc.needone':'დაამატეთ მინიმუმ ერთი განზომილება.',
+      'sc.normalize':'100%-ზე მოყვანა','sc.mustbe100':'წონები უნდა შეადგენდეს 100%-ს (ახლა {total}%).',
     },
     ru: {
       'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'База знаний',
@@ -169,6 +171,7 @@ const CQ = (() => {
       'sc.remove':'Удалить','sc.save':'Сохранить рубрику','sc.saved':'Рубрика сохранена','sc.sum':'Общий вес',
       'sc.nodims':'Пока нет измерений — добавьте одно, чтобы начать.','sc.version':'Версия','sc.none':'У этого клиента ещё нет активной рубрики.',
       'sc.needname':'У каждого измерения должно быть название.','sc.needone':'Добавьте хотя бы одно измерение.',
+      'sc.normalize':'Привести к 100%','sc.mustbe100':'Сумма весов должна быть 100% (сейчас {total}%).',
     },
   };
   let LANG = (() => { try { return localStorage.getItem('cq_lang') || (navigator.language||'en').slice(0,2); } catch { return 'en'; } })();

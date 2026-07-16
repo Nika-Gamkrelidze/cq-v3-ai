@@ -48,10 +48,16 @@ async def save_config(client_id: str, dimensions, rubric: str, updated_by: str) 
     if not dims:
         raise ValueError("At least one scoring dimension with a name is required.")
     if not any(d["weight"] for d in dims):
-        # No weights given → distribute equally so the total is meaningful.
-        equal = round(100 / len(dims), 2)
+        # No weights given → distribute evenly, giving the rounding remainder to the last
+        # dimension so the total is exactly 100.
+        base = round(100 / len(dims), 2)
         for d in dims:
-            d["weight"] = equal
+            d["weight"] = base
+        dims[-1]["weight"] = round(dims[-1]["weight"] + (100 - base * len(dims)), 2)
+    # Weights are percentages and must total 100 (small rounding tolerance).
+    total = round(sum(d["weight"] for d in dims), 2)
+    if abs(total - 100) > 0.5:
+        raise ValueError(f"Dimension weights must total 100% (they currently total {total:g}%).")
     weights = {d["key"]: d["weight"] for d in dims}
     # Retry on a version collision from a concurrent save for the same tenant
     # (both readers computed the same MAX(version)+1 -> UNIQUE(client_id, version)).
