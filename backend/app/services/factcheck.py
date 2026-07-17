@@ -92,7 +92,7 @@ _EXTRACT_SYS = (
     "policies, eligibility, procedures, hours, coverage, deadlines, medical/financial facts. "
     "Ignore greetings, opinions, questions, and small talk. Each claim must be self-contained "
     "and understandable on its own. The transcript may be in Georgian, Russian, or English — "
-    "keep each claim in the language it was said."
+    "write every claim in the SAME language as the transcript. NEVER translate a claim to English."
 )
 
 _VERIFY_INTRO = (
@@ -101,7 +101,8 @@ _VERIFY_INTRO = (
     "different or incompatible (this is misinformation the agent gave). NOT_IN_KB = the evidence "
     "does not contain enough information to confirm or deny. Compare meaning even if the claim and "
     "the knowledge base are in different languages. Return, per claim: the verdict, a one-sentence "
-    "rationale, a confidence 0-1, and evidence_used = the [index] of the snippet you relied on (or -1).\n\n"
+    "rationale WRITTEN IN THE SAME LANGUAGE AS THE CLAIM, a confidence 0-1, and evidence_used = the "
+    "[index] of the snippet you relied on (or -1).\n\n"
 )
 
 

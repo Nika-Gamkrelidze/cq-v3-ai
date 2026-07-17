@@ -76,6 +76,13 @@ async def analyze(transcript: str, api_key: str, model: str, instructions: str,
             "analysis:\n\n<knowledge_base>\n" + kb_context + "\n</knowledge_base>"
         )
 
+    # Respond in the caller's language: the summary, topics, key points and action items must
+    # be written in the SAME language as the transcript (e.g. Georgian in, Georgian out).
+    user_content += (
+        "\n\nWrite the summary, topics, key_points and action_items in the SAME language as the "
+        "transcript above. Keep 'sentiment' as one of the allowed enum values."
+    )
+
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
         message = await client.messages.create(

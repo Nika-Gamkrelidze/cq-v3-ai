@@ -119,7 +119,8 @@ def _build_system(config: dict, dims: list[dict]) -> str:
         "(the support agent, not the customer) against the rubric below. For each dimension give "
         "an integer 0-100 (0 = failed entirely, 100 = excellent), a short rationale, and verbatim "
         "quotes from the transcript as evidence. Judge meaning even if the transcript is in "
-        "Georgian, Russian, or English. Be fair and consistent; base scores only on the transcript.",
+        "Georgian, Russian, or English. Be fair and consistent; base scores only on the transcript. "
+        "Write each rationale in the SAME language as the transcript; keep the evidence quotes verbatim.",
     ]
     rubric = str(config.get("rubric") or "").strip()
     if rubric:
