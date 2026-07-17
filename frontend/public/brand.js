@@ -43,6 +43,7 @@ const CQ = (() => {
       'adm.anonheading':'Anonymous (no-login) user limits','adm.allowanon':'Allow anonymous users','adm.maxanalyses':'Max analyses / day','adm.maxmb':'Max audio MB','adm.maxtts':'Max TTS / day','adm.features':'Features allowed','feat.analyze':'Analyze','feat.tts':'Text-to-Speech',
       'adm.intkeys':'Integration keys','adm.models':'Models & voice','adm.instructions':'Analysis instructions',
       'toast.saved':'Settings saved','toast.imported':'Import started','toast.deleted':'Deleted','toast.created':'Created','toast.welcome':'Welcome','toast.error':'Something went wrong',
+      'err.toolarge':'That file is too large to upload. Please use a shorter or smaller recording.','err.timeout':'The analysis took too long and timed out. Try a shorter recording.','err.unavailable':'The service is temporarily unavailable. Please try again in a moment.','err.http':'Request failed (HTTP {status}).','err.badresp':'The server returned an unexpected response. Please try again.',
       'quota.using':"You're using CommuniQ anonymously —",'quota.analyses':'analyses','quota.clips':'speech clips','quota.left':'left today.','quota.more':'for a knowledge base and higher limits.','quota.disabled':'Anonymous access is disabled.',
       'fc.title':'Knowledge base fact-check','fc.accuracy':'accuracy','fc.supported':'supported','fc.contradicted':'contradicted','fc.notinkb':'not in KB','fc.misinfo':'Possible misinformation','fc.nochecked':'No verifiable claims were found.',
       'adm.voices':'Voices','adm.voicevis':'Customer-visible voices','f.restrictvoices':'Show only the ticked voices to customers','f.defaultvoice':'Default voice','v.hint':'Unticked voices are hidden from the customer voice list and rejected by the TTS API. Leave the box unticked to show every voice. System defaults (incl. the Georgian voice) are always on.','v.search':'Search voices…','v.selected':'selected','v.system':'System default','v.nopreview':'No preview','v.unavailable':'Not in this ElevenLabs account','v.pickone':'Select at least one voice, or untick the restriction.','v.loadfail':'Could not load voices from ElevenLabs. Check the API key in Integrations.','msg.voicegone':'That voice is no longer available. The list has been refreshed.',
@@ -95,6 +96,7 @@ const CQ = (() => {
       'adm.anonheading':'ანონიმური (უავტორიზაციო) ლიმიტები','adm.allowanon':'ანონიმური მომხმარებლების დაშვება','adm.maxanalyses':'მაქს. ანალიზი / დღე','adm.maxmb':'მაქს. აუდიო MB','adm.maxtts':'მაქს. TTS / დღე','adm.features':'დაშვებული ფუნქციები','feat.analyze':'ანალიზი','feat.tts':'ტექსტი-მეტყველებად',
       'adm.intkeys':'ინტეგრაციის გასაღებები','adm.models':'მოდელები და ხმა','adm.instructions':'ანალიზის ინსტრუქციები',
       'toast.saved':'პარამეტრები შენახულია','toast.imported':'იმპორტი დაიწყო','toast.deleted':'წაიშალა','toast.created':'შეიქმნა','toast.welcome':'კეთილი იყოს თქვენი მობრძანება','toast.error':'რაღაც ვერ მოხერხდა',
+      'err.toolarge':'ფაილი ძალიან დიდია ასატვირთად. გამოიყენეთ უფრო მოკლე ან პატარა ჩანაწერი.','err.timeout':'ანალიზმა დიდი დრო წაიღო და ვადა ამოიწურა. სცადეთ უფრო მოკლე ჩანაწერი.','err.unavailable':'სერვისი დროებით მიუწვდომელია. გთხოვთ სცადოთ ცოტა ხანში.','err.http':'მოთხოვნა ვერ შესრულდა (HTTP {status}).','err.badresp':'სერვერმა მოულოდნელი პასუხი დააბრუნა. გთხოვთ სცადოთ თავიდან.',
       'quota.using':'თქვენ იყენებთ CommuniQ-ს ანონიმურად —','quota.analyses':'ანალიზი','quota.clips':'აუდიო კლიპი','quota.left':'დარჩა დღეს.','quota.more':'ცოდნის ბაზისა და მაღალი ლიმიტებისთვის.','quota.disabled':'ანონიმური წვდომა გათიშულია.',
       'fc.title':'ცოდნის ბაზასთან შემოწმება','fc.accuracy':'სიზუსტე','fc.supported':'დადასტურებული','fc.contradicted':'გაბათილებული','fc.notinkb':'ბაზაში არ არის','fc.misinfo':'შესაძლო მცდარი ინფორმაცია','fc.nochecked':'შესამოწმებელი მტკიცება ვერ მოიძებნა.',
       'adm.voices':'ხმები','adm.voicevis':'მომხმარებლისთვის ხილული ხმები','f.restrictvoices':'მომხმარებელს მხოლოდ მონიშნული ხმები აჩვენე','f.defaultvoice':'ნაგულისხმევი ხმა','v.hint':'მოუნიშნავი ხმები დაიმალება მომხმარებლის სიიდან და TTS მათ არ მიიღებს. თუ ველი მოუნიშნავია — ყველა ხმა ჩანს. სისტემური ნაგულისხმევები (მათ შორის ქართული ხმა) ყოველთვის ჩართულია.','v.search':'ხმების ძებნა…','v.selected':'მონიშნული','v.system':'სისტემური','v.nopreview':'გადასმენა არ არის','v.unavailable':'არ არის ამ ElevenLabs ანგარიშში','v.pickone':'მონიშნე მინიმუმ ერთი ხმა ან მოხსენი შეზღუდვა.','v.loadfail':'ხმების ჩატვირთვა ვერ მოხერხდა. შეამოწმე API გასაღები ინტეგრაციებში.','msg.voicegone':'ეს ხმა აღარ არის ხელმისაწვდომი. სია განახლდა.',
@@ -147,6 +149,7 @@ const CQ = (() => {
       'adm.anonheading':'Лимиты анонимных пользователей','adm.allowanon':'Разрешить анонимных пользователей','adm.maxanalyses':'Макс. анализов / день','adm.maxmb':'Макс. аудио МБ','adm.maxtts':'Макс. TTS / день','adm.features':'Разрешённые функции','feat.analyze':'Анализ','feat.tts':'Текст в речь',
       'adm.intkeys':'Ключи интеграций','adm.models':'Модели и голос','adm.instructions':'Инструкции анализа',
       'toast.saved':'Настройки сохранены','toast.imported':'Импорт начат','toast.deleted':'Удалено','toast.created':'Создано','toast.welcome':'Добро пожаловать','toast.error':'Что-то пошло не так',
+      'err.toolarge':'Файл слишком большой для загрузки. Используйте более короткую или маленькую запись.','err.timeout':'Анализ занял слишком много времени и превысил лимит. Попробуйте более короткую запись.','err.unavailable':'Сервис временно недоступен. Пожалуйста, попробуйте через минуту.','err.http':'Запрос не выполнен (HTTP {status}).','err.badresp':'Сервер вернул неожиданный ответ. Пожалуйста, попробуйте снова.',
       'quota.using':'Вы используете CommuniQ анонимно —','quota.analyses':'анализов','quota.clips':'аудиоклипов','quota.left':'осталось сегодня.','quota.more':'для базы знаний и более высоких лимитов.','quota.disabled':'Анонимный доступ отключён.',
       'fc.title':'Проверка по базе знаний','fc.accuracy':'точность','fc.supported':'подтверждено','fc.contradicted':'опровергнуто','fc.notinkb':'нет в базе','fc.misinfo':'Возможная дезинформация','fc.nochecked':'Проверяемых утверждений не найдено.',
       'adm.voices':'Голоса','adm.voicevis':'Голоса, видимые клиентам','f.restrictvoices':'Показывать клиентам только отмеченные голоса','f.defaultvoice':'Голос по умолчанию','v.hint':'Неотмеченные голоса скрыты из списка для клиентов и отклоняются TTS. Оставьте флажок снятым, чтобы показывать все голоса. Системные (включая грузинский) всегда включены.','v.search':'Поиск голосов…','v.selected':'выбрано','v.system':'Системный','v.nopreview':'Нет образца','v.unavailable':'Нет в этом аккаунте ElevenLabs','v.pickone':'Выберите хотя бы один голос или снимите ограничение.','v.loadfail':'Не удалось загрузить голоса из ElevenLabs. Проверьте API-ключ в «Интеграциях».','msg.voicegone':'Этот голос больше недоступен. Список обновлён.',
@@ -181,6 +184,26 @@ const CQ = (() => {
   if (!DICT[LANG]) LANG = 'en';
   function t(key) { return (DICT[LANG] && DICT[LANG][key]) || DICT.en[key] || key; }
   function lang() { return LANG; }
+
+  /* Safely read a fetch Response as JSON. If the server (or a reverse proxy like nginx)
+     returns a non-JSON error page — e.g. a 413/502/504 HTML page — this throws a clean,
+     localized Error with the real cause instead of a cryptic "Unexpected token '<'". */
+  async function readResp(r) {
+    const text = await r.text().catch(() => '');
+    let data = null;
+    const s = (text || '').trimStart();
+    if (s && (s[0] === '{' || s[0] === '[')) { try { data = JSON.parse(s); } catch {} }
+    if (!r.ok) {
+      const detail = data && (data.detail || data.message || data.error);
+      if (typeof detail === 'string' && detail) throw new Error(detail);
+      if (r.status === 413) throw new Error(t('err.toolarge'));
+      if (r.status === 504) throw new Error(t('err.timeout'));
+      if (r.status === 502 || r.status === 503) throw new Error(t('err.unavailable'));
+      throw new Error(t('err.http').replace('{status}', r.status));
+    }
+    if (data === null) throw new Error(t('err.badresp'));
+    return data;
+  }
   function applyI18n(root = document) {
     root.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
     root.querySelectorAll('[data-i18n-ph]').forEach(el => { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
@@ -462,5 +485,5 @@ const CQ = (() => {
 
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder,
-           scorecardHTML, factcheckHTML };
+           scorecardHTML, factcheckHTML, readResp };
 })();

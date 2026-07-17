@@ -133,7 +133,7 @@
       try {
         const fd = new FormData(); fd.append('file', f);
         const r = await fetch(`${API}/analyze`, { method: 'POST', body: fd });
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Request failed');
+        const d = await CQ.readResp(r);
         out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { analyzeBtn.disabled = false; analyzeBtn.textContent = t('btn.analyze'); loadLimits(); }

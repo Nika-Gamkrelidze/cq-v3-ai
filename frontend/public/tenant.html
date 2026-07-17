@@ -258,7 +258,7 @@
       try {
         const fd = new FormData(); fd.append('file', f);
         const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+        const d = await CQ.readResp(r);
         out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { btn.disabled=false; btn.textContent=t('btn.analyze'); }
@@ -303,7 +303,7 @@
           if (!text) { err.textContent = t('pg.ans.empty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
           const r = await fetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
-          const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+          const d = await CQ.readResp(r);
           out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
             + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
         } else {
@@ -312,7 +312,7 @@
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
           const fd = new FormData(); fd.append('file', f);
           const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
-          const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+          const d = await CQ.readResp(r);
           out.innerHTML = renderAnalysis(d);
         }
         CQ.toast(t('res.done'), 'ok');
