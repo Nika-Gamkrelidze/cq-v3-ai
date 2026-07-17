@@ -20,7 +20,10 @@ def _headers(api_key: str) -> dict:
 
 async def transcribe(audio: bytes, filename: str, content_type: str, api_key: str,
                      model_id: str = "scribe_v1") -> dict:
-    """Transcribe an audio file with speaker diarization. Returns {text, language_code}."""
+    """Transcribe an audio file with speaker diarization. Returns {text, language_code}.
+    Any input format (or a video) is first transcoded to mono 16 kHz MP3 for reliability."""
+    from .audio import to_stt_format
+    audio, filename, content_type = await to_stt_format(audio, filename, content_type)
     files = {"file": (filename or "audio", audio, content_type or "application/octet-stream")}
     data = {"model_id": model_id, "diarize": "true", "tag_audio_events": "true"}
     async with httpx.AsyncClient(timeout=300.0) as client:
