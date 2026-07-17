@@ -69,19 +69,18 @@ class ScoreTextBody(BaseModel):
     factcheck: bool = True   # also verify the answer's claims against the tenant's KB
 
 
-@router.post("/admin/scoring/{tenant_id}/score-text")
-async def admin_score_text(body: ScoreTextBody, tid: str = Depends(_scope)):
-    """Answer-scoring playground: score a written operator answer against this tenant's
-    active rubric (same engine the audio pipeline uses), optionally fact-checked against
-    the tenant's own KB. Tenant-scoped: only this tenant's rubric and KB are ever used."""
-    text = (body.text or "").strip()
+async def _score_text(tid: str, text: str, do_factcheck: bool) -> dict:
+    """Score a written operator answer against a tenant's active rubric (same engine the
+    audio pipeline uses), optionally fact-checked against that tenant's own KB. Strictly
+    scoped by tid — only this tenant's rubric and KB are ever used."""
+    text = (text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
     cfg = await scoring_store.get_active_config(tid)
     if not cfg or not cfg.get("dimensions"):
         raise HTTPException(status_code=400,
-                            detail="No active scoring rubric for this tenant — define one in the Scoring tab first.")
+                            detail="No active scoring rubric for this tenant yet. Set one before scoring.")
 
     s = await settings_store.get_effective()
     try:
@@ -91,7 +90,7 @@ async def admin_score_text(body: ScoreTextBody, tid: str = Depends(_scope)):
 
     # Ground "correctness" in the tenant's KB when there is one. Never blocks the score.
     kb_check = None
-    if body.factcheck:
+    if do_factcheck:
         try:
             async with pool().acquire() as conn:
                 has_kb = await conn.fetchval(
@@ -102,6 +101,12 @@ async def admin_score_text(body: ScoreTextBody, tid: str = Depends(_scope)):
             kb_check = None
 
     return {"scoring": scorecard, "kb_check": kb_check, "config_version": cfg.get("version")}
+
+
+@router.post("/admin/scoring/{tenant_id}/score-text")
+async def admin_score_text(body: ScoreTextBody, tid: str = Depends(_scope)):
+    """Answer-scoring playground (superadmin, per tenant)."""
+    return await _score_text(tid, body.text, body.factcheck)
 
 
 # --------------------------------------------------------------------------- #
@@ -125,3 +130,9 @@ async def tenant_put(body: ConfigBody, client_id: str = Depends(_tenant)):
         return await scoring_store.save_config(client_id, _dump(body.dimensions), body.rubric or "", "tenant")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/scoring/score-text")
+async def tenant_score_text(body: ScoreTextBody, client_id: str = Depends(_tenant)):
+    """Tenant playground: score a written answer against the caller's own rubric + KB."""
+    return await _score_text(client_id, body.text, body.factcheck)

@@ -29,6 +29,7 @@
       <div class="tabs">
         <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
+        <div class="tab" data-tab="playground"><span>🧪</span> <span data-i18n="tab.playground"></span></div>
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
       </div>
 
@@ -89,6 +90,33 @@
         <div id="analyzeResult"></div>
       </section>
 
+      <!-- PLAYGROUND -->
+      <section class="panel" id="panel-playground">
+        <div class="card">
+          <h3 data-i18n="pg.heading"></h3>
+          <p class="hint" data-i18n="pg.hint"></p>
+          <div class="subtabs" id="pgTabs">
+            <div class="subtab active" data-pg="text" data-i18n="pg.mode.text"></div>
+            <div class="subtab" data-pg="audio" data-i18n="pg.mode.audio"></div>
+          </div>
+          <div id="pg-text">
+            <label data-i18n="pg.ans.label"></label>
+            <textarea id="pgText" data-i18n-ph="pg.ans.ph" style="min-height:110px"></textarea>
+          </div>
+          <div id="pg-audio" class="hidden">
+            <label data-i18n="pg.audiolabel"></label>
+            <div class="drop" id="pgDrop">
+              <input type="file" id="pgFile" accept="audio/*,video/*" />
+              <div class="drop-title" id="pgDropTitle" data-i18n="drop.title"></div>
+              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+            </div>
+          </div>
+          <div class="actions"><button class="primary" id="pgRun" data-i18n="pg.run"></button></div>
+          <div class="msg err" id="pgErr"></div>
+        </div>
+        <div id="pgResult"></div>
+      </section>
+
       <!-- HISTORY -->
       <section class="panel" id="panel-history">
         <div class="card">
@@ -120,8 +148,8 @@
       tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active');
       if (tb.dataset.tab==='kb') loadDocs(); if (tb.dataset.tab==='history') loadJobs();
     }));
-    document.querySelectorAll('.subtab').forEach(s => s.addEventListener('click', () => {
-      document.querySelectorAll('.subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+    document.querySelectorAll('#panel-kb .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#panel-kb .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
     }));
     document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) { loadDocs(); loadJobs(); } });
@@ -252,6 +280,46 @@
       ${CQ.factcheckHTML(d.kb_check)}
       <div class="card"><h3>${t('res.transcript')}</h3><pre class="tx">${esc(d.transcript)||t('res.empty')}</pre></div>`;
     }
+    // ---- Playground: score typed text OR an uploaded audio/video against rubric + KB ----
+    document.querySelectorAll('#pgTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#pgTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      $('pg-text').classList.toggle('hidden', s.dataset.pg!=='text');
+      $('pg-audio').classList.toggle('hidden', s.dataset.pg!=='audio');
+    }));
+    { const drop = $('pgDrop'), inp = $('pgFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('pgDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
+    $('pgRun').addEventListener('click', async () => {
+      const mode = (document.querySelector('#pgTabs .subtab.active')||{}).dataset.pg || 'text';
+      const err = $('pgErr'), out = $('pgResult'); err.textContent=''; out.innerHTML='';
+      const btn = $('pgRun'), label = t('pg.run');
+      try {
+        if (mode === 'text') {
+          const text = $('pgText').value.trim();
+          if (!text) { err.textContent = t('pg.ans.empty'); return; }
+          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
+          const r = await fetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
+          const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+          out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
+            + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        } else {
+          const f = $('pgFile').files[0];
+          if (!f) { err.textContent = t('pg.audioempty'); return; }
+          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+          const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Failed');
+          out.innerHTML = renderAnalysis(d);
+        }
+        CQ.toast(t('res.done'), 'ok');
+      } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled=false; btn.textContent = label; }
+    });
+
     // history
     $('reloadJobs').addEventListener('click', loadJobs);
     async function loadJobs() {
