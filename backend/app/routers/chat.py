@@ -1,4 +1,4 @@
-"""The chat site's server-to-server surface (ADR-001, endpoints 1-6 and 8-10).
+"""The chat site's server-to-server surface (ADR-001, endpoints 1-10).
 
 Everything the chat product calls lives under ONE prefix so exactly one nginx location block
 exists per config file. Read `docs/ADR-001-conversational-ai.md` before changing anything here;
@@ -21,8 +21,10 @@ Auth: a scoped integration credential (`X-CQ-Key` + `X-CQ-Tenant`). `Principal.i
 False for it, so nothing in this file is reachable with a tenant key and nothing in `/kb`,
 `/analyze` or `/scoring` is reachable with a chat key.
 
-`POST /v1/chat/answer` (ADR endpoint 7, the public autopilot) is **P3** and deliberately absent —
-see the marked slot at the bottom. `/v1/curation/*` (endpoint 11) is P2 and lives elsewhere.
+`POST /v1/chat/answer` (ADR endpoint 7, the public autopilot) is at the bottom. It is the same
+machinery as the copilot with different *policy*: which engine runs is decided by the suggestion
+row's `mode`, so there is exactly one persistence helper, one SSE framer and one envelope
+producer for both surfaces. `/v1/curation/*` (endpoint 11) is P2 and lives elsewhere.
 
 Errors keep FastAPI's exact `{"detail": "<string>"}` shape because `CQ.readResp` (brand.js:191)
 requires `detail` to be a string; a machine-readable `code` is only ever added as a SIBLING key.
@@ -37,7 +39,7 @@ import uuid
 from fastapi import (APIRouter, BackgroundTasks, Depends, Header, HTTPException,
                      Query, Request)
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..services import chat, chat_store, limits, llm, settings_store
 from ..services.auth import (Principal, assert_expected_tenant, make_token,
@@ -58,9 +60,23 @@ STREAM_POLL_MS = 250              # attach-to-in-flight poll interval
 STREAM_DEADLINE_S = 90.0          # hard stop, so a stuck generation cannot pin a connection
 TICKET_TTL_S = 60
 
+# The one value that selects the public engine. Stored on the suggestion row by
+# `claim_suggestion`, and read back by `_drive` — see `_runner_for`.
+MODE_AUTOPILOT = "autopilot"
+
+# What POST /turns — the copilot ingest, authorised by `chat:turn` — is allowed to write into
+# that column. Autopilot is deliberately NOT in it: see `TurnIn.mode`.
+TURN_MODES = ("assist",)
+
 # Default caps, overridable per tenant via `chat_configs.settings.limits`.
 DEFAULT_TENANT_PER_MINUTE = 120
 DEFAULT_ENDUSER_PER_HOUR = 120
+# The public bot is metered on its own dimension: an autopilot turn is a full answer plus a
+# possible handoff summary, it is not reviewed by anybody, and it is the surface an abusive
+# end user reaches directly. Sharing `chat_turns`' counter would let copilot traffic mask a
+# runaway public bot (and vice versa) in exactly the incident where the numbers matter.
+DEFAULT_ANSWER_PER_MINUTE = 60
+DEFAULT_ANSWER_ENDUSER_PER_HOUR = 60
 
 # Suggestions whose generation is already running IN THIS PROCESS. Its only job is to stop
 # `GET /stream` from starting a second, duplicate generation for a suggest_ref that a
@@ -136,20 +152,40 @@ def _enduser_scope(p: Principal, end_user: str | None) -> str | None:
     return f"enduser:{p.integration_id or p.client_id}:{digest}"
 
 
-async def _reserve_turn(p: Principal, cfg: dict, end_user: str | None) -> None:
+async def _reserve(p: Principal, cfg: dict, end_user: str | None, *, kind: str,
+                   minute_key: str, minute_default: int,
+                   hour_key: str, hour_default: int) -> None:
     """The two metering dimensions ADR-001 §Security-bar item 4 requires on ingest.
 
     `reserve_counter` counts even when uncapped, so cost is visible from the first turn rather
     than from whenever somebody remembers to configure a limit. It raises 429 itself.
+
+    Tenant-per-minute catches a runaway integration; end-user-per-hour catches one abusive
+    customer without taking the tenant's whole bot down with them. Both dimensions are needed:
+    either one alone has an obvious bypass.
     """
-    await limits.reserve_counter(f"tenant:{p.client_id}", "chat_turns",
-                                 _limit(cfg, "tenant_per_minute", DEFAULT_TENANT_PER_MINUTE),
-                                 bucket="minute")
+    await limits.reserve_counter(f"tenant:{p.client_id}", kind,
+                                 _limit(cfg, minute_key, minute_default), bucket="minute")
     scope = _enduser_scope(p, end_user)
     if scope:
-        await limits.reserve_counter(scope, "chat_turns",
-                                     _limit(cfg, "enduser_per_hour", DEFAULT_ENDUSER_PER_HOUR),
-                                     bucket="hour")
+        await limits.reserve_counter(scope, kind,
+                                     _limit(cfg, hour_key, hour_default), bucket="hour")
+
+
+async def _reserve_turn(p: Principal, cfg: dict, end_user: str | None) -> None:
+    """Meter one copilot ingest."""
+    await _reserve(p, cfg, end_user, kind="chat_turns",
+                   minute_key="tenant_per_minute", minute_default=DEFAULT_TENANT_PER_MINUTE,
+                   hour_key="enduser_per_hour", hour_default=DEFAULT_ENDUSER_PER_HOUR)
+
+
+async def _reserve_answer(p: Principal, cfg: dict, end_user: str | None) -> None:
+    """Meter one public autopilot answer, on its own `chat_answer` kind."""
+    await _reserve(p, cfg, end_user, kind="chat_answer",
+                   minute_key="answer_tenant_per_minute",
+                   minute_default=DEFAULT_ANSWER_PER_MINUTE,
+                   hour_key="answer_enduser_per_hour",
+                   hour_default=DEFAULT_ANSWER_ENDUSER_PER_HOUR)
 
 
 def _envelope(row: dict) -> dict:
@@ -194,9 +230,46 @@ class TurnIn(BaseModel):
     role: str = "customer"                 # customer | operator | bot
     channel: str = "web"                   # opaque — a fourth channel is zero CQ work
     locale: str | None = None              # ka | ru | en
-    mode: str = "assist"                   # assist (human in the loop) | autopilot
+    # COPILOT MODES ONLY. `mode` is written onto the suggestion row and read back by
+    # `_runner_for`, so accepting an arbitrary string here made this endpoint a second door
+    # into the public answer engine: a credential holding only `chat:turn` could post
+    # `mode: "autopilot"` and get `run_answer` — defeating the `chat:answer` scope, skipping
+    # this router's 503/409 pre-checks, and billing the run to the `chat_turns` meter, which
+    # is exactly the "copilot traffic masks a runaway public bot" case the separate
+    # `chat_answer` counter exists to prevent. The public bot has its own endpoint; asking for
+    # it here is a validation error (422), not a silent upgrade.
+    mode: str = "assist"                   # assist — human in the loop (see POST /answer)
     customer_ref: str | None = None        # opaque end-user id, metering only
     precompute: bool = True                # false => the caller will drive GET /stream instead
+
+    @field_validator("mode")
+    @classmethod
+    def _copilot_mode_only(cls, v: str) -> str:
+        v = (v or "assist").strip().lower()
+        if v not in TURN_MODES:
+            raise ValueError(
+                "mode must be 'assist'; the public bot is POST /v1/chat/answer, which "
+                "requires the chat:answer scope.")
+        return v
+
+
+class AnswerIn(BaseModel):
+    # Shaped like TurnIn minus the knobs that make no sense with no human in the loop: there is
+    # no `role` (an autopilot answer is always a reply to a CUSTOMER — accepting a role would
+    # let the caller have the bot answer its own operator), no `mode` (this endpoint IS the
+    # mode) and no `precompute` (the caller is waiting for the answer).
+    conversation_ref: str = Field(min_length=1, max_length=200)
+    content: str
+    turn_ref: str | None = Field(default=None, max_length=200)
+    channel: str = "web"                   # web | whatsapp | messenger | …
+    locale: str | None = None
+    customer_ref: str | None = None
+    # Envelope fields that are attacker-controlled on social channels exactly as much as the
+    # message body is. They are accepted so `chat_prompts.wrap_untrusted` can quarantine them
+    # explicitly, which is strictly safer than the chat site concatenating them into `content`.
+    display_name: str | None = Field(default=None, max_length=200)
+    subject: str | None = Field(default=None, max_length=200)
+    attachment: str | None = Field(default=None, max_length=200)
 
 
 class RegenerateIn(BaseModel):
@@ -359,6 +432,19 @@ async def _precompute(client_id: str, conversation_id: str, suggest_ref: str,
         _INFLIGHT.discard(key)
 
 
+def _runner_for(mode: str | None):
+    """Which engine a suggestion row belongs to.
+
+    Derived from the row's `mode` rather than passed down from the handler on purpose. The
+    stream endpoint can be asked to drive a row whose originating request is long gone (a
+    ticket opened after a restart, `precompute: false`), and if the runner were a handler
+    argument that path would default to the copilot — running `run_suggest`, which retrieves
+    with `visibility=None`, over a row whose output is going to a member of the public. The
+    mode is written once, by `claim_suggestion`, and every later driver reads it.
+    """
+    return chat.run_answer if (mode or "") == MODE_AUTOPILOT else chat.run_suggest
+
+
 async def _drive(client_id: str, suggest_ref: str, ctx: chat.ChatContext):
     """Run the engine, PERSIST its result, and yield `(event_name, payload)` for the wire.
 
@@ -379,7 +465,7 @@ async def _drive(client_id: str, suggest_ref: str, ctx: chat.ChatContext):
     n = 0
     envelope: dict | None = None
     try:
-        async for ev in chat.run_suggest(ctx):
+        async for ev in _runner_for(ctx.mode)(ctx):
             if ev.name == "open":
                 continue
             n += 1
@@ -401,14 +487,19 @@ async def _drive(client_id: str, suggest_ref: str, ctx: chat.ChatContext):
         await _safe_fail(client_id, suggest_ref, "Generation produced no result.")
 
 
+def _state_for(envelope: dict) -> str:
+    """'ready' | 'refused'. One definition, because the stored row's state and the state the
+    blocking answer response reports must never be able to disagree."""
+    return "ready" if bool((envelope.get("grounding") or {}).get("grounded")) else "refused"
+
+
 async def _persist(client_id: str, suggest_ref: str, envelope: dict) -> None:
     """File the finished envelope. 'refused' is a SUCCESS state: the gate declined before any
     Claude call, the refusal card is real output, and calling that an error would make every
     ungrounded question look like an outage."""
-    grounded = bool((envelope.get("grounding") or {}).get("grounded"))
     try:
         await chat_store.finish_suggestion(client_id, suggest_ref, envelope=envelope,
-                                           state="ready" if grounded else "refused")
+                                           state=_state_for(envelope))
     except Exception as exc:  # noqa: BLE001 — a storage failure must not swallow the answer
         log.warning("could not store suggestion %s: %s", suggest_ref, exc)
 
@@ -422,11 +513,20 @@ async def _safe_fail(client_id: str, suggest_ref: str, error: str) -> None:
 
 async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
                          locale: str | None, mode: str, integration_id: str | None,
-                         cfg: dict) -> chat.ChatContext:
+                         cfg: dict, *, conversation_ref: str | None = None,
+                         turn_ref: str | None = None, channel: str = "web",
+                         envelope: dict | None = None) -> chat.ChatContext:
     """Everything the engine needs, assembled OFF the request path.
 
     The model id is read from `settings_store` — never hardcoded, because the admin panel owns
     it (root CLAUDE.md §4).
+
+    The trailing keyword arguments are the inbound envelope, and only a handler that still has
+    the request can supply them: `copilot_suggestions` has no column for `channel`,
+    `display_name` or the chat site's own refs, so a driver reconstructing a context from the
+    row (a ticket stream) legitimately passes none of them. They are additive and defaulted for
+    that reason. Everything inside `envelope` is attacker-controlled and is quarantined by
+    `chat_prompts.wrap_untrusted` — it is never read as configuration here.
     """
     messages = await chat_store.recent_turns(client_id, conversation_id, HISTORY_TURNS)
     app_cfg = await settings_store.get_effective()
@@ -437,7 +537,9 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
         client_id=str(client_id), conversation_id=str(conversation_id),
         suggest_ref=suggest_ref, locale=locale or fallback,
         messages=messages, cfg=cfg, api_key=app_cfg["anthropic_api_key"],
-        model=app_cfg["llm_model"], mode=mode, integration_id=integration_id)
+        model=app_cfg["llm_model"], mode=mode, integration_id=integration_id,
+        conversation_ref=conversation_ref, turn_ref=turn_ref, channel=channel,
+        envelope=envelope or {})
 
 
 # --------------------------------------------------------------------------- #
@@ -516,6 +618,18 @@ def _sse(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'), default=str)}\n\n"
 
 
+def _sse_response(body) -> StreamingResponse:
+    """The SSE headers, in ONE place. The ticket stream and the answer stream must not be able
+    to drift apart on buffering: `X-Accel-Buffering: no` is what decides whether tokens reach
+    the customer as they are produced or arrive in one lump at the end (belt and braces — the
+    nginx location sets it too, and only one of the two is in this repo's deploy)."""
+    return StreamingResponse(body, media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
+
+
 @router.get("/stream")
 async def stream(request: Request, ticket: str = Query(...)):
     """`text/event-stream` for one suggestion: open -> grounding -> tier1 -> delta -> suggestion
@@ -545,19 +659,17 @@ async def stream(request: Request, ticket: str = Query(...)):
     if live:
         _INFLIGHT.add(key)
 
-    return StreamingResponse(
-        _stream_body(request, client_id, suggest_ref, row, live),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",       # belt and braces; the nginx location also sets it
-            "Connection": "keep-alive",
-        },
-    )
+    return _sse_response(_stream_body(request, client_id, suggest_ref, row, live))
 
 
 async def _stream_body(request: Request, client_id: str, suggest_ref: str,
-                       row: dict, live: bool):
+                       row: dict, live: bool, ctx: chat.ChatContext | None = None):
+    """The ONE SSE framer: `open`, then either a replay of a finished row or a pumped source.
+
+    `ctx` is the answer endpoint handing over the context it already built from the live
+    request (which carries `turn_ref`, `channel` and the inbound envelope — things the row has
+    no columns for). Without it a driver rebuilds from the row, as the ticket path always has.
+    """
     yield _sse("open", {"client_id": client_id, "suggest_ref": suggest_ref,
                         "state": row.get("state"), "seq": 0})
 
@@ -568,7 +680,7 @@ async def _stream_body(request: Request, client_id: str, suggest_ref: str,
 
     queue: asyncio.Queue = asyncio.Queue()
     if live:
-        source = _engine_events(client_id, suggest_ref, row)
+        source = _engine_events(client_id, suggest_ref, row, ctx)
     else:
         source = _poll_events(client_id, suggest_ref)
     pump = asyncio.create_task(_pump(source, queue))
@@ -615,17 +727,20 @@ async def _pump(source, queue: asyncio.Queue) -> None:
         await queue.put(None)
 
 
-async def _engine_events(client_id: str, suggest_ref: str, row: dict):
+async def _engine_events(client_id: str, suggest_ref: str, row: dict,
+                         ctx: chat.ChatContext | None = None):
     """Drive the engine live and translate its ChatEvents onto the wire.
 
-    The request that created this suggestion is long gone, so locale/mode/integration_id come
-    off the row `claim_suggestion` wrote — not from a config default, which would answer a
-    Russian customer in Georgian on every `precompute: false` turn.
+    When the caller has no context to hand over, the request that created this suggestion is
+    long gone, so locale/mode/integration_id come off the row `claim_suggestion` wrote — not
+    from a config default, which would answer a Russian customer in Georgian on every
+    `precompute: false` turn. `mode` in particular decides which engine runs (`_runner_for`).
     """
-    cfg = await chat_store.get_chat_config(client_id)
-    ctx = await _build_context(client_id, str(row.get("conversation_id")), suggest_ref,
-                               row.get("locale"), row.get("mode") or "assist",
-                               row.get("integration_id"), cfg)
+    if ctx is None:
+        cfg = await chat_store.get_chat_config(client_id)
+        ctx = await _build_context(client_id, str(row.get("conversation_id")), suggest_ref,
+                                   row.get("locale"), row.get("mode") or "assist",
+                                   row.get("integration_id"), cfg)
     async for item in _drive(client_id, suggest_ref, ctx):
         yield item
 
@@ -838,10 +953,150 @@ async def get_config(p: Principal = Depends(require_chat("chat:turn", "chat:sugg
 
 
 # --------------------------------------------------------------------------- #
-# 7. POST /chat/answer — the public autopilot. P3, deliberately NOT built.
+# 7. POST /chat/answer — the public autopilot
 #
-# It is gated behind everything that makes it safe to point at the public internet: the
-# `visibility='public'` KB audit, the tenant's lawyer-reviewed refusal copy in EN/KA/RU, the
-# AI-disclosure wording, and the kill switch. `chat.run_answer` exists for it; wiring a route to
-# that engine before those exist would ship an ungated public bot as a one-line change.
+# The only endpoint in this file whose output reaches a member of the public with no human in
+# between, so it is the only one with two independent off switches in front of it. Both are
+# checked HERE as well as inside `chat.run_answer`: the engine's copies are the ones that
+# actually protect the customer (a future WebSocket adapter gets them for free), while these
+# exist to give the chat site an unambiguous HTTP status — 503 "the operator stopped all bots"
+# and 409 "this tenant never enabled one" are different operational events, and a caller that
+# only ever sees a polite refusal string cannot tell them apart or page anybody about them.
 # --------------------------------------------------------------------------- #
+@router.post("/answer")
+async def answer(
+    request: Request,
+    body: AnswerIn,
+    # Aliased rather than named `stream`, which is the GET /stream handler in this module.
+    as_stream: int = Query(default=0, alias="stream", ge=0, le=1),
+    p: Principal = Depends(require_chat("chat:answer")),
+    x_cq_expect_tenant: str | None = Header(default=None, alias="X-CQ-Expect-Tenant"),
+    x_cq_end_user: str | None = Header(default=None, alias="X-CQ-End-User"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """Answer a customer directly. Blocking by default; `?stream=1` returns SSE.
+
+    One code path, two transports: both build the same `ChatContext`, both go through `_drive`,
+    and the terminal `done` payload is the same envelope the blocking body returns — which is
+    only true because neither of them assembles an envelope of its own.
+
+    The turn is mirrored and the answer is filed through the ordinary store functions, with the
+    row's `mode` set to `autopilot`. The P2 curation miner and the operator's history therefore
+    see a bot answer exactly like a suggestion; making autopilot conversations invisible to
+    curation would mean the surface with no human review is also the one nobody can learn from.
+
+    Idempotent on `(client_id, turn_ref)` like `/turns`: a retried delivery (every social
+    webhook retries) re-reads the finished answer instead of paying for a second one and
+    sending the customer a second, differently-worded reply.
+    """
+    assert_expected_tenant(p, x_cq_expect_tenant)
+    content = (body.content or "").strip()
+    if not content:
+        return _err(400, "content must not be empty.", "empty_content")
+    if len(content) > MAX_TURN_CHARS:
+        return _err(413, f"content exceeds {MAX_TURN_CHARS} characters.", "content_too_large")
+
+    # 1. The operator brake. Before the mirror write, before metering, before anything: when a
+    #    bot is misbehaving, "stop" has to mean stop, and a 503 the chat site can fall back to
+    #    a human queue on is more useful than a refusal string it will render as the bot's own
+    #    words. `get_autopilot_kill_switch` is 5 s-cached and never raises.
+    kill = await settings_store.get_autopilot_kill_switch()
+    if settings_store.autopilot_killed(kill, str(p.client_id)):
+        log.warning("answer refused by kill switch client=%s", p.client_id)
+        return _err(503, "Automated answering is temporarily disabled.", "autopilot_disabled")
+
+    # 2. The tenant's own opt-in — false until a human turned it on, and not turnable on at all
+    #    until the tenant has published a `visibility='public'` document (enforced on the config
+    #    write, not here; this endpoint only has to refuse to speak).
+    cfg = await chat_store.get_chat_config(p.client_id)
+    if not bool(cfg.get("autopilot_enabled")):
+        return _err(409, "Automated answering is not enabled for this tenant.",
+                    "autopilot_not_enabled")
+
+    conversation_id = await chat_store.upsert_conversation(
+        p.client_id, body.conversation_ref, channel=body.channel, locale=body.locale,
+        mode=MODE_AUTOPILOT, customer_ref=x_cq_end_user or body.customer_ref)
+    turn_ref = body.turn_ref or idempotency_key or uuid.uuid4().hex
+    turn_id, turn_is_new = await chat_store.append_turn(
+        p.client_id, conversation_id, turn_ref=turn_ref, idempotency_key=idempotency_key,
+        role="customer", content=content, lang=body.locale, source="live")
+
+    # Metered after idempotency is resolved, for the reason spelled out in `post_turn`: one
+    # logical message costs one unit however many times the channel redelivers it.
+    if turn_is_new:
+        await _reserve_answer(p, cfg, x_cq_end_user or body.customer_ref)
+
+    suggest_ref = f"an_{turn_id}"
+    _, claim_is_new = await chat_store.claim_suggestion(
+        p.client_id, suggest_ref, conversation_id, turn_id, locale=body.locale,
+        mode=MODE_AUTOPILOT, integration_id=p.integration_id)
+
+    key = (str(p.client_id), suggest_ref)
+    if not claim_is_new:
+        # Somebody already owns this answer. If it finished, hand back the stored envelope —
+        # that is the replay, and it is byte-identical because it is literally the same object.
+        row = await chat_store.get_suggestion(str(p.client_id), suggest_ref)
+        if row is None:
+            return _err(409, "That answer is already being generated.", "answer_in_flight")
+        if row.get("state") == "running":
+            return _err(409, "That answer is already being generated.", "answer_in_flight")
+        if row.get("state") == "error":
+            return _err(502, row.get("error") or "Generation failed.", "generation_failed")
+        if as_stream:
+            return _sse_response(_stream_body(request, str(p.client_id), suggest_ref,
+                                              row, live=False))
+        return _answer_body(p, suggest_ref, conversation_id, turn_id, turn_ref,
+                            _envelope(row), state=row.get("state"), replay=True)
+
+    ctx = await _build_context(
+        str(p.client_id), str(conversation_id), suggest_ref, body.locale, MODE_AUTOPILOT,
+        p.integration_id, cfg, conversation_ref=body.conversation_ref, turn_ref=turn_ref,
+        channel=body.channel,
+        envelope={"channel": body.channel, "text": content,
+                  "display_name": body.display_name, "subject": body.subject,
+                  "attachment": body.attachment})
+
+    _INFLIGHT.add(key)
+    if as_stream:
+        # `_INFLIGHT` is discarded by `_stream_body`'s own finally, exactly as on the ticket
+        # path — the generator owns the marker from here on.
+        row = await chat_store.get_suggestion(str(p.client_id), suggest_ref) or {
+            "state": "running"}
+        return _sse_response(_stream_body(request, str(p.client_id), suggest_ref, row,
+                                          live=True, ctx=ctx))
+
+    try:
+        envelope: dict | None = None
+        async for name, data in _drive(str(p.client_id), suggest_ref, ctx):
+            if name == "done":
+                envelope = data.get("turn")
+    except llm.LLMBusyError:
+        # `_drive` has already marked the row; the customer gets a retry, not a lie.
+        return _err(429, "Service is busy; retry shortly.", "llm_busy")
+    except Exception as exc:  # noqa: BLE001 — the row is terminal either way (see `_drive`)
+        log.warning("answer failed client=%s suggest_ref=%s: %s", p.client_id, suggest_ref, exc)
+        return _err(502, "Could not generate an answer.", "answer_failed")
+    finally:
+        _INFLIGHT.discard(key)
+
+    if envelope is None:
+        return _err(502, "Could not generate an answer.", "answer_failed")
+    return _answer_body(p, suggest_ref, conversation_id, turn_id, turn_ref, envelope,
+                        state=_state_for(envelope), replay=False)
+
+
+def _answer_body(p: Principal, suggest_ref: str, conversation_id, turn_id, turn_ref: str,
+                 envelope: dict, *, state: str | None, replay: bool) -> dict:
+    """The blocking answer response. `turn` is the engine's envelope verbatim — the same object
+    the SSE `done` frame carries and the same one `GET /suggestions/{ref}` will hand back."""
+    return {
+        "client_id": str(p.client_id),
+        "conversation_id": str(conversation_id),
+        "conversation_ref": envelope.get("conversation_ref"),
+        "turn_id": str(turn_id),
+        "turn_ref": turn_ref,
+        "suggest_ref": suggest_ref,
+        "state": state or "refused",
+        "idempotent_replay": replay,
+        "turn": envelope,
+    }

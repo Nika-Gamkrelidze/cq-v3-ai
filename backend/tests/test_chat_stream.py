@@ -28,6 +28,18 @@ class _Req:
         return False
 
 
+class _Ctx:
+    """The one thing `_drive` asks of a ChatContext: which engine this row belongs to.
+
+    `_runner_for(ctx.mode)` is what keeps a public-bot row off the copilot engine (which
+    retrieves with `visibility=None`), so the stub carries a real mode rather than being a
+    bare `object()` — the tests below are about the copilot path and say so.
+    """
+
+    def __init__(self, mode: str = "assist") -> None:
+        self.mode = mode
+
+
 def _collect(agen_factory):
     async def _run():
         return [chunk async for chunk in agen_factory()]
@@ -95,7 +107,7 @@ def test_drive_stores_the_terminal_envelope(monkeypatch):
     _stub_engine(monkeypatch)
     stored = _capture_store(monkeypatch)
 
-    events = _collect(lambda: chat_router._drive("cid", "sg_1", object()))
+    events = _collect(lambda: chat_router._drive("cid", "sg_1", _Ctx()))
 
     assert stored["envelope"] == REFUSAL_ENVELOPE
     assert stored["suggest_ref"] == "sg_1"
@@ -116,7 +128,7 @@ def test_drive_marks_a_crashed_generation_terminal(monkeypatch):
     stored = _capture_store(monkeypatch)
 
     with pytest.raises(RuntimeError):
-        _collect(lambda: chat_router._drive("cid", "sg_1", object()))
+        _collect(lambda: chat_router._drive("cid", "sg_1", _Ctx()))
     assert stored["state"] == "error"
 
 
@@ -129,8 +141,8 @@ def test_live_stream_emits_one_open_and_a_monotonic_sequence(monkeypatch):
     _stub_engine(monkeypatch)
     _capture_store(monkeypatch)
 
-    async def _live(client_id, suggest_ref, row):
-        async for item in chat_router._drive(client_id, suggest_ref, object()):
+    async def _live(client_id, suggest_ref, row, ctx=None):
+        async for item in chat_router._drive(client_id, suggest_ref, ctx or _Ctx()):
             yield item
 
     monkeypatch.setattr(chat_router, "_engine_events", _live)

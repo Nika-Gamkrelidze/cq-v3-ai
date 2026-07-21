@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from ..db import pool
 from ..services import kb_events, kb_ingest, retrieval, settings_store
 from ..services.auth import Principal, resolve_principal
+from .kb import check_visibility, count_public_documents
 
 router = APIRouter(prefix="/admin/kb", tags=["kb-admin"])
 
@@ -67,6 +68,7 @@ async def stats(tid: str = Depends(scope)):
               (SELECT count(*) FROM kb_documents WHERE client_id=$1) AS documents,
               (SELECT count(*) FROM kb_documents WHERE client_id=$1 AND status='error') AS failed,
               (SELECT count(*) FROM kb_documents WHERE client_id=$1 AND status IN ('pending','processing')) AS in_progress,
+              (SELECT count(*) FROM kb_documents WHERE client_id=$1 AND visibility='public') AS public_documents,
               (SELECT count(*) FROM kb_chunks WHERE client_id=$1) AS chunks,
               (SELECT count(*) FROM kb_chunks WHERE client_id=$1 AND embedding IS NULL) AS chunks_no_embedding,
               (SELECT count(*) FROM kb_chunks WHERE client_id=$1 AND (content IS NULL OR btrim(content)='')) AS empty_chunks,
@@ -115,11 +117,14 @@ async def params(tid: str = Depends(scope)):
 @router.get("/{tenant_id}/documents")
 async def list_documents(tid: str = Depends(scope), status: str | None = None,
                          doc_type: str | None = None, tag: str | None = None,
+                         visibility: str | None = None,
                          q: str | None = None, limit: int = 50, offset: int = 0):
     where = ["client_id = $1"]
     args = [tid]
     if status:
         args.append(status); where.append(f"status = ${len(args)}")
+    if visibility:
+        args.append(check_visibility(visibility)); where.append(f"visibility = ${len(args)}")
     if doc_type:
         args.append(doc_type); where.append(f"doc_type = ${len(args)}")
     if tag:
@@ -132,8 +137,8 @@ async def list_documents(tid: str = Depends(scope), status: str | None = None,
         args2 = args + [min(max(limit, 1), 200), max(offset, 0)]
         rows = await conn.fetch(
             f"""
-            SELECT id, doc_type, title, status, tags, chunk_count, char_count, source_type,
-                   source_uri, actor, ingest_ms, error, created_at, updated_at
+            SELECT id, doc_type, title, status, visibility, tags, chunk_count, char_count,
+                   source_type, source_uri, actor, ingest_ms, error, created_at, updated_at
             FROM kb_documents WHERE {where_sql}
             ORDER BY created_at DESC LIMIT ${len(args)+1} OFFSET ${len(args)+2}
             """, *args2)
@@ -210,6 +215,39 @@ async def delete_document(doc_id: str, tid: str = Depends(scope)):
         raise HTTPException(status_code=404, detail="Document not found")
     await kb_events.log(tid, "delete", document_id=doc_id, actor=ACTOR, status="ok")
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Publishability — the operator-side twin of routers/kb.py's tenant endpoints.
+#
+# `visibility` is the only thing standing between an internal pricing floor and a
+# WhatsApp customer: the public autopilot retrieves with visibility='public', so a
+# document nobody published is unquotable by construction rather than by prompt.
+# Superadmins get the same two operations tenants have — and the same kb_events
+# rows, so the activity timeline answers "who made this quotable, and when".
+# ---------------------------------------------------------------------------
+class VisibilityBody(BaseModel):
+    visibility: str
+
+
+@router.get("/{tenant_id}/public-count")
+async def public_count(tid: str = Depends(scope)):
+    """How many documents this tenant has published — what gates autopilot enablement."""
+    return {"public_documents": await count_public_documents(tid)}
+
+
+@router.put("/{tenant_id}/documents/{doc_id}/visibility")
+async def set_visibility(doc_id: str, body: VisibilityBody, tid: str = Depends(scope)):
+    vis = check_visibility(body.visibility)
+    async with pool().acquire() as conn:
+        title = await conn.fetchval(
+            "UPDATE kb_documents SET visibility = $3, updated_at = now() "
+            "WHERE id = $1 AND client_id = $2 RETURNING title", doc_id, tid, vis)
+    if title is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await kb_events.log(tid, "publish" if vis == "public" else "unpublish",
+                        document_id=doc_id, actor=ACTOR, status="ok", detail=title)
+    return {"id": doc_id, "visibility": vis}
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +423,7 @@ async def reembed_all(tid: str = Depends(scope)):
 # Bulk actions (#11)
 # ---------------------------------------------------------------------------
 class BulkBody(BaseModel):
-    action: str                 # delete | reembed | retag
+    action: str                 # delete | reembed | retag | publish | unpublish
     document_ids: list[str]
     tags: list[str] | None = None
 
@@ -409,9 +447,18 @@ async def bulk(body: BulkBody, tid: str = Depends(scope)):
         for doc_id in ids:
             await kb_ingest.reembed_document(doc_id, tid)
             affected += 1
+    elif body.action in ("publish", "unpublish"):
+        vis = "public" if body.action == "publish" else "internal"
+        async with pool().acquire() as conn:
+            affected = int((await conn.execute(
+                "UPDATE kb_documents SET visibility=$3, updated_at=now() "
+                "WHERE client_id=$1 AND id = ANY($2::uuid[])", tid, ids, vis)).split()[-1])
     else:
         raise HTTPException(status_code=400, detail="Unknown bulk action")
-    await kb_events.log(tid, "bulk", actor=ACTOR, status="ok", chunk_count=affected,
+    # Publishing is logged under its own action (not the generic "bulk") so the activity
+    # timeline can be filtered down to exactly "what became customer-quotable, and when".
+    event_action = body.action if body.action in ("publish", "unpublish") else "bulk"
+    await kb_events.log(tid, event_action, actor=ACTOR, status="ok", chunk_count=affected,
                         detail=f"{body.action} on {len(ids)} documents")
     return {"action": body.action, "affected": affected}
 
@@ -460,20 +507,21 @@ async def export(tid: str = Depends(scope), format: str = Query("json")):
     async with pool().acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, doc_type, title, tags, status, chunk_count, char_count, source_type,
-                   source_uri, metadata, content_text, created_at, updated_at
+            SELECT id, doc_type, title, tags, status, visibility, chunk_count, char_count,
+                   source_type, source_uri, metadata, content_text, created_at, updated_at
             FROM kb_documents WHERE client_id=$1 ORDER BY created_at
             """, tid)
     await kb_events.log(tid, "export", actor=ACTOR, status="ok", detail=f"format={format}")
     if format == "csv":
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["id", "title", "doc_type", "tags", "status", "chunk_count", "source_type",
-                    "created_at", "metadata"])
+        w.writerow(["id", "title", "doc_type", "tags", "status", "visibility", "chunk_count",
+                    "source_type", "created_at", "metadata"])
         for r in rows:
             meta = r["metadata"] if isinstance(r["metadata"], str) else json.dumps(r["metadata"])
             w.writerow([str(r["id"]), r["title"], r["doc_type"], ",".join(r["tags"] or []), r["status"],
-                        r["chunk_count"], r["source_type"], r["created_at"].isoformat(), meta])
+                        r["visibility"], r["chunk_count"], r["source_type"],
+                        r["created_at"].isoformat(), meta])
         return Response(buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="kb-{tid[:8]}.csv"'})
     docs = []

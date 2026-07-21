@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..services import chat_credentials, chat_store, claude, elevenlabs, settings_store
+from .kb import count_public_documents
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -287,8 +288,22 @@ async def get_chat_config(tenant_id: str):
 
 @router.put("/chat/{tenant_id}/config", dependencies=[Depends(require_admin)])
 async def put_chat_config(tenant_id: str, body: ChatConfigBody):
-    """Save a new active version. `autopilot_enabled` is accepted here but the public bot route
-    it unlocks is P3 and not mounted — so turning it on today changes nothing, by design."""
+    """Save a new active version.
+
+    `autopilot_enabled` unlocks POST /v1/chat/answer — the one route whose output reaches a
+    member of the public with no human in between — so it is gated here, on the write, rather
+    than argued about later: a tenant whose KB is entirely `visibility='internal'` would refuse
+    EVERY customer question (the public bot retrieves published documents only), which reads as
+    a broken product and gets blamed on the model. Publishing is a human act, so the guard is a
+    cheap EXISTS-style pre-check (`kb.count_public_documents`, the pattern routers/scoring.py
+    uses) and a 409 naming the missing thing, not a silent downgrade to false — an operator who
+    asked for autopilot must be told it did not happen.
+    """
+    if body.autopilot_enabled and not await count_public_documents(tenant_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot enable autopilot: this tenant has no public knowledge-base "
+                   "documents. Publish at least one document (visibility='public') first.")
     try:
         return await chat_store.save_chat_config(
             tenant_id, persona=body.persona, greeting=body.greeting,
@@ -297,3 +312,34 @@ async def put_chat_config(tenant_id: str, body: ChatConfigBody):
             updated_by="superadmin")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Autopilot kill switch — the operator brake
+#
+# ADR-001 security bar item 9: stopping a misbehaving public bot must be something an operator
+# can do in seconds, from the admin panel, without a deploy, without SSH and therefore without
+# the VPN. The state itself is one `app_settings` blob read (5 s-cached) on every autopilot
+# turn; these two routes are the only way to see and flip it that does not involve a human
+# writing SQL on the server at 3am.
+#
+# Superadmin-only: it is a cross-tenant brake, and a tenant must not be able to clear the
+# stop the operator just put on them.
+# ---------------------------------------------------------------------------
+class KillSwitchBody(BaseModel):
+    # Both optional and both patch semantics: the admin panel flips the global brake and the
+    # per-tenant list from two different controls, and neither should clobber the other.
+    global_disabled: bool | None = None
+    disabled_clients: list[str] | None = None
+
+
+@router.get("/chat/kill-switch", dependencies=[Depends(require_admin)])
+async def get_kill_switch():
+    """Read the brake, bypassing the 5 s cache — an operator checking whether the stop landed
+    must see the truth, not a value that was fresh enough for a request path."""
+    return await settings_store.get_autopilot_kill_switch(force=True)
+
+
+@router.put("/chat/kill-switch", dependencies=[Depends(require_admin)])
+async def put_kill_switch(body: KillSwitchBody):
+    return await settings_store.set_autopilot_kill_switch(body.model_dump(exclude_none=True))

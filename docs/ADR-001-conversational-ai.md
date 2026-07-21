@@ -511,6 +511,17 @@ copilot query is grounded in it, and the next night's miner sees the gap closed.
    public bot* (fine for the copilot — a human reviews it). AI disclosure. **Kill switch** read
    from `app_settings` with a short TTL cache — it must **not** require a redeploy, because every
    deploy also blanket-errors in-flight audio jobs.
+
+   *As built (P3):* the launch gate is enforced on the **config write** —
+   `PUT /admin/chat/{tenant_id}/config` returns **409** for `autopilot_enabled: true` while the
+   tenant has zero `visibility='public'` documents (a bot with an unpublished KB refuses every
+   question, which reads as broken rather than safe). The kill switch is operable from the admin
+   panel over `GET|PUT /admin/chat/kill-switch` (superadmin only, patch semantics, cache-bypassing
+   read) — a brake that needs SSH and the VPN is not a brake. AI disclosure is **appended in
+   python** on every public reply (`chat._disclosed`), per tenant and per channel
+   (`disclosure` / `disclosure_channels` / `disclosure_mode` in the chat config, default: the
+   bot's first reply in a thread) — it is on this list precisely because a prompt rule is
+   something an injected instruction gets a vote on.
 10. **Two tests in the same PR as the credential work.** The existing `test_tenant_isolation.py`
     calls `retrieve()` directly and never constructs a `Request` — mirroring it would validate
     none of the new surface. Required: non-granted tenant → 401; expectation mismatch → 403; two

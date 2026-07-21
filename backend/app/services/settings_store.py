@@ -4,9 +4,13 @@ Effective config = DB overrides (app_settings 'integrations' row) merged on top 
 the .env defaults in `settings`. Secrets never leave the backend except masked.
 """
 import json
+import logging
+import time
 
 from ..config import settings
 from ..db import pool
+
+log = logging.getLogger("cq")
 
 SETTINGS_KEY = "integrations"
 
@@ -210,3 +214,90 @@ async def set_voice_config(patch: dict) -> None:
     ov = await _load_key(VOICES_KEY)
     ov.update({k: v for k, v in patch.items() if v is not None})
     await _save_key(VOICES_KEY, ov)
+
+
+# ---------------------------------------------------------------------------
+# Autopilot kill switch (app_settings 'autopilot_kill').
+#
+# The public bot is the one surface that talks to end customers with no human in the loop,
+# so "stop it NOW" has to be a superadmin action that takes seconds and touches nothing else.
+# Two levers: `global_disabled` (everything, everywhere) and `disabled_clients` (one tenant
+# that is misbehaving, while the rest keep working).
+#
+# Why this is not just `chat_configs.autopilot_enabled`: that column is the TENANT's setting,
+# it is versioned, and turning it off writes a new config version into the tenant's own audit
+# trail as if they had changed their mind. This is the OPERATOR's brake — orthogonal owner,
+# orthogonal storage.
+#
+# Why it is not an env var or a deploy: a redeploy is the slowest possible way to stop a bot
+# (image build + restart), and it is not side-effect free — every deploy blanket-errors
+# in-flight audio jobs via `sweep_stuck_jobs()`. Flipping a row must not cost anyone their
+# analysis.
+#
+# The 5-second TTL is the whole design. Reading `app_settings` on every single turn would put
+# a DB round-trip in front of a latency-critical path for a value that changes maybe twice a
+# year; caching it for minutes would mean a superadmin hits "stop" and then watches the bot
+# keep answering. 5s is short enough that "within seconds" is true and long enough that a
+# busy tenant is not hammering the row.
+# ---------------------------------------------------------------------------
+AUTOPILOT_KILL_KEY = "autopilot_kill"
+AUTOPILOT_KILL_DEFAULTS = {"global_disabled": False, "disabled_clients": []}
+AUTOPILOT_KILL_TTL_S = 5.0
+
+# (fetched_at, value). Module-level, therefore per-process — correct here because the API
+# runs a single uvicorn worker (see services/llm.py for the same assumption).
+_kill_cache: tuple[float, dict] | None = None
+
+
+def _normalize_kill(raw: dict) -> dict:
+    cfg = dict(AUTOPILOT_KILL_DEFAULTS)
+    cfg.update(raw or {})
+    cfg["global_disabled"] = bool(cfg.get("global_disabled"))
+    cfg["disabled_clients"] = [str(c) for c in (cfg.get("disabled_clients") or []) if c]
+    return cfg
+
+
+async def get_autopilot_kill_switch(*, force: bool = False) -> dict:
+    """`{global_disabled: bool, disabled_clients: [uuid]}`, cached for 5 seconds.
+
+    Never raises. On a DB failure it returns the last value it saw, or the permissive default
+    — deliberately fail-OPEN, because the DB being unreachable already means retrieval is
+    down, which means `chat.gate()` refuses every turn anyway. Failing closed here would add
+    nothing but a second reason for the same outcome; failing open keeps this switch honest
+    about being an operator brake rather than a dependency.
+    """
+    global _kill_cache
+    now = time.monotonic()
+    if not force and _kill_cache and (now - _kill_cache[0]) < AUTOPILOT_KILL_TTL_S:
+        return _kill_cache[1]
+    try:
+        cfg = _normalize_kill(await _load_key(AUTOPILOT_KILL_KEY))
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        log.warning("autopilot kill switch read failed: %s", exc)
+        return _kill_cache[1] if _kill_cache else dict(AUTOPILOT_KILL_DEFAULTS)
+    _kill_cache = (now, cfg)
+    return cfg
+
+
+async def set_autopilot_kill_switch(patch: dict) -> dict:
+    """Flip the brake and drop the cache, so the superadmin's own next read is the truth."""
+    global _kill_cache
+    ov = _normalize_kill(await _load_key(AUTOPILOT_KILL_KEY))
+    if patch.get("global_disabled") is not None:
+        ov["global_disabled"] = bool(patch["global_disabled"])
+    if patch.get("disabled_clients") is not None:
+        ov["disabled_clients"] = [str(c) for c in (patch["disabled_clients"] or []) if c]
+    await _save_key(AUTOPILOT_KILL_KEY, ov)
+    _kill_cache = None
+    log.warning("autopilot kill switch set: global_disabled=%s disabled_clients=%d",
+                ov["global_disabled"], len(ov["disabled_clients"]))
+    return ov
+
+
+def autopilot_killed(kill: dict, client_id: str | None) -> bool:
+    """Pure predicate over an already-fetched switch, so the engine can log WHY without a
+    second read and a test can exercise it with a dict literal."""
+    kill = kill or {}
+    if kill.get("global_disabled"):
+        return True
+    return str(client_id or "") in (kill.get("disabled_clients") or [])

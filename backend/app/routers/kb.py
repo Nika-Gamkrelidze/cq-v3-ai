@@ -11,12 +11,40 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcept
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import kb_ingest, retrieval
+from ..services import kb_events, kb_ingest, retrieval
 from ..services.auth import Principal, resolve_principal
 
 router = APIRouter(prefix="/kb", tags=["kb"])
 
 MAX_BYTES = 25 * 1024 * 1024
+
+# A document is INTERNAL until a human publishes it (db/chat.sql defaults the column to
+# 'internal'). The public autopilot retrieves with visibility='public' only, so this flag —
+# not a prompt, not a model judgement — is what keeps an internal pricing floor or an
+# escalation script out of a WhatsApp reply. Two values, deliberately: anything richer
+# invites "sort of public" and the whole guarantee stops being auditable.
+VISIBILITIES = ("internal", "public")
+
+
+def check_visibility(value: str) -> str:
+    v = (value or "").strip().lower()
+    if v not in VISIBILITIES:
+        raise HTTPException(status_code=400, detail="visibility must be 'internal' or 'public'")
+    return v
+
+
+async def count_public_documents(client_id: str) -> int:
+    """How many documents this tenant has published.
+
+    Lives here (rather than being re-typed per call site) because two very different
+    surfaces need the same number: the KB console shows it, and enabling autopilot is
+    gated on it being > 0. A tenant with an unpublished KB would refuse every single
+    customer question, which reads as a broken product rather than a safe default.
+    """
+    async with pool().acquire() as conn:
+        return int(await conn.fetchval(
+            "SELECT count(*) FROM kb_documents WHERE client_id = $1 AND visibility = 'public'",
+            client_id) or 0)
 
 
 def require_tenant(principal: Principal = Depends(resolve_principal)) -> str:
@@ -125,7 +153,7 @@ async def csv_document(
 
 @router.get("/documents")
 async def list_documents(doc_type: str | None = None, client_id: str = Depends(require_tenant)):
-    q = ("SELECT id, doc_type, title, status, tags, chunk_count, char_count, error, "
+    q = ("SELECT id, doc_type, title, status, visibility, tags, chunk_count, char_count, error, "
          "created_at, updated_at FROM kb_documents WHERE client_id = $1")
     args = [client_id]
     if doc_type:
@@ -177,6 +205,57 @@ async def delete_document(doc_id: str, client_id: str = Depends(require_tenant))
     if res.endswith("0"):
         raise HTTPException(status_code=404, detail="Document not found")
     return {"deleted": True}
+
+
+# --------------------------------------------------------------------------- #
+# Publishability — the control that decides what a public bot may quote.
+# Every change writes a kb_events row so the existing activity timeline answers
+# "who made this quotable to customers, and when".
+# --------------------------------------------------------------------------- #
+class VisibilityBody(BaseModel):
+    visibility: str
+
+
+class BulkVisibilityBody(BaseModel):
+    document_ids: list[str]
+    visibility: str
+
+
+@router.get("/public-count")
+async def public_count(client_id: str = Depends(require_tenant)):
+    return {"public_documents": await count_public_documents(client_id)}
+
+
+@router.put("/documents/{doc_id}/visibility")
+async def set_visibility(doc_id: str, body: VisibilityBody,
+                         client_id: str = Depends(require_tenant)):
+    vis = check_visibility(body.visibility)
+    async with pool().acquire() as conn:
+        title = await conn.fetchval(
+            "UPDATE kb_documents SET visibility = $3, updated_at = now() "
+            "WHERE id = $1 AND client_id = $2 RETURNING title", doc_id, client_id, vis)
+    if title is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await kb_events.log(client_id, "publish" if vis == "public" else "unpublish",
+                        document_id=doc_id, actor="tenant", status="ok", detail=title)
+    return {"id": doc_id, "visibility": vis}
+
+
+@router.post("/documents/visibility")
+async def bulk_set_visibility(body: BulkVisibilityBody,
+                              client_id: str = Depends(require_tenant)):
+    vis = check_visibility(body.visibility)
+    ids = [i for i in (body.document_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No documents selected")
+    async with pool().acquire() as conn:
+        affected = int((await conn.execute(
+            "UPDATE kb_documents SET visibility = $3, updated_at = now() "
+            "WHERE client_id = $1 AND id = ANY($2::uuid[])", client_id, ids, vis)).split()[-1])
+    await kb_events.log(client_id, "publish" if vis == "public" else "unpublish",
+                        actor="tenant", status="ok", chunk_count=affected,
+                        detail=f"{vis} on {len(ids)} documents")
+    return {"visibility": vis, "affected": affected}
 
 
 class SearchQuery(BaseModel):

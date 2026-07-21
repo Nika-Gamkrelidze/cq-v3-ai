@@ -36,6 +36,10 @@
     .cur-diff del { background:color-mix(in oklab,var(--alert) 22%,transparent); color:var(--coral); }
     .cur-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:11.5px; color:var(--muted); }
     .cur-reason { display:flex; align-items:center; gap:8px; padding:7px 2px; cursor:pointer; }
+    /* Publishability. Deliberately NOT the ok/error palette: "public" is not "good" and
+       "internal" is not "broken" — the badge states a fact about who may be quoted this. */
+    .pill.vis-public { background:color-mix(in oklab,var(--beam) 20%,transparent); color:var(--beam); }
+    .pill.vis-internal { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
   </style>
 </head>
 <body>
@@ -81,11 +85,14 @@
             <div><label data-i18n="kba.f.status"></label><select id="fStatus"><option value=""></option><option>ready</option><option>processing</option><option>pending</option><option>error</option></select></div>
             <div><label data-i18n="kba.f.type"></label><input id="fType" /></div>
             <div><label data-i18n="kba.f.tag"></label><input id="fTag" /></div>
+            <div><label id="fVisLabel"></label><select id="fVis"><option value=""></option><option value="public"></option><option value="internal"></option></select></div>
             <div style="flex:2"><label data-i18n="kba.f.search"></label><input id="fSearch" /></div>
             <div style="flex:0; align-self:flex-end"><button class="ghost" id="applyFilter" data-i18n="kba.refresh"></button></div>
           </div>
           <div class="selbar hidden" id="selBar">
             <span><b id="selCount">0</b> <span data-i18n="kba.selected"></span></span>
+            <button class="ghost" id="bulkPublish"></button>
+            <button class="ghost" id="bulkUnpublish"></button>
             <button class="ghost" id="bulkReembed" data-i18n="kba.bulk.reembed"></button>
             <button class="ghost" id="bulkRetag" data-i18n="kba.bulk.retag"></button>
             <button class="danger" id="bulkDelete" data-i18n="kba.bulk.delete"></button>
@@ -234,6 +241,42 @@
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     let TID = '';
     const K = () => `${API}/admin/kb/${TID}`;
+
+    /* ---- Publishability strings (page-local) ----------------------------------------
+       These live here rather than in brand.js's DICT because this console is the only
+       surface that carries them and brand.js is owned elsewhere; `vt()` falls back to
+       English so a missing translation degrades to a readable label, never to a raw key.
+       If these ever need to appear in the tenant portal too, promote them to the DICT. */
+    const VT = {
+      en: { 'col':'Visibility', 'public':'Public', 'internal':'Internal', 'all':'All',
+            'filter':'Visibility', 'publish':'Publish', 'unpublish':'Unpublish',
+            'bulk.publish':'Publish selected', 'bulk.unpublish':'Unpublish selected',
+            'stat.public':'Published',
+            'confirm.publish':'Publish {n} document(s)? The public bot may quote published documents verbatim to end customers.',
+            'confirm.unpublish':'Unpublish {n} document(s)? The public bot will stop quoting them.',
+            'confirm.publish.one':'Publish “{title}”? The public bot may quote it verbatim to end customers.',
+            'confirm.unpublish.one':'Unpublish “{title}”? The public bot will stop quoting it.',
+            'done.publish':'Published', 'done.unpublish':'Unpublished' },
+      ka: { 'col':'ხილვადობა', 'public':'საჯარო', 'internal':'შიდა', 'all':'ყველა',
+            'filter':'ხილვადობა', 'publish':'გამოქვეყნება', 'unpublish':'გამოქვეყნების გაუქმება',
+            'bulk.publish':'არჩეულის გამოქვეყნება', 'bulk.unpublish':'არჩეულის დამალვა',
+            'stat.public':'გამოქვეყნებული',
+            'confirm.publish':'გამოქვეყნდეს {n} დოკუმენტი? საჯარო ბოტს შეუძლია გამოქვეყნებული დოკუმენტი სიტყვასიტყვით მოუყვეს კლიენტს.',
+            'confirm.unpublish':'გაუქმდეს {n} დოკუმენტის გამოქვეყნება? საჯარო ბოტი მათ აღარ გამოიყენებს.',
+            'confirm.publish.one':'გამოქვეყნდეს „{title}“? საჯარო ბოტს შეუძლია იგი სიტყვასიტყვით მოუყვეს კლიენტს.',
+            'confirm.unpublish.one':'გაუქმდეს „{title}“-ის გამოქვეყნება? საჯარო ბოტი მას აღარ გამოიყენებს.',
+            'done.publish':'გამოქვეყნდა', 'done.unpublish':'გამოქვეყნება გაუქმდა' },
+      ru: { 'col':'Видимость', 'public':'Публичный', 'internal':'Внутренний', 'all':'Все',
+            'filter':'Видимость', 'publish':'Опубликовать', 'unpublish':'Снять с публикации',
+            'bulk.publish':'Опубликовать выбранные', 'bulk.unpublish':'Снять выбранные',
+            'stat.public':'Опубликовано',
+            'confirm.publish':'Опубликовать {n} документ(ов)? Публичный бот может дословно цитировать опубликованные документы клиентам.',
+            'confirm.unpublish':'Снять с публикации {n} документ(ов)? Публичный бот перестанет их цитировать.',
+            'confirm.publish.one':'Опубликовать «{title}»? Публичный бот сможет дословно цитировать его клиентам.',
+            'confirm.unpublish.one':'Снять с публикации «{title}»? Публичный бот перестанет его цитировать.',
+            'done.publish':'Опубликовано', 'done.unpublish':'Снято с публикации' },
+    };
+    const vt = k => (VT[CQ.lang()] || {})[k] || VT.en[k] || k;
     $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
 
     // modal
@@ -285,7 +328,17 @@
       if (tid) loadTab(activeTab());
       else $('healthStrip').innerHTML = '';
     }
-    document.addEventListener('cq:lang', () => { if (TID) loadTab(activeTab()); });
+    // Page-local strings are not covered by CQ.applyI18n's [data-i18n] pass, so paint them
+    // ourselves — at boot and again whenever the language changes.
+    function paintVisLabels() {
+      $('fVisLabel').textContent = vt('filter');
+      const opts = $('fVis').options;
+      opts[0].textContent = vt('all'); opts[1].textContent = vt('public'); opts[2].textContent = vt('internal');
+      CQ.syncSelect($('fVis'));
+      $('bulkPublish').textContent = vt('bulk.publish');
+      $('bulkUnpublish').textContent = vt('bulk.unpublish');
+    }
+    document.addEventListener('cq:lang', () => { paintVisLabels(); if (TID) loadTab(activeTab()); });
 
     // ---- OVERVIEW ----
     $('reloadOverview').addEventListener('click', loadOverview);
@@ -296,7 +349,8 @@
       ]);
       const tile = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       $('statGrid').innerHTML =
-        tile(st.documents, t('kba.stat.documents')) + tile(st.chunks, t('kba.stat.chunks')) +
+        tile(st.documents, t('kba.stat.documents')) + tile(st.public_documents ?? 0, vt('stat.public')) +
+        tile(st.chunks, t('kba.stat.chunks')) +
         tile(st.embedding_coverage+'%', t('kba.stat.coverage')) + tile(st.failed, t('kba.stat.failed')) +
         tile(st.approx_tokens, t('kba.stat.tokens')) + tile(st.in_progress, t('kba.stat.inprogress')) +
         tile(st.last_updated ? new Date(st.last_updated).toLocaleDateString() : '—', t('kba.stat.lastupd'));
@@ -336,6 +390,7 @@
       if ($('fStatus').value) p.set('status', $('fStatus').value);
       if ($('fType').value.trim()) p.set('doc_type', $('fType').value.trim());
       if ($('fTag').value.trim()) p.set('tag', $('fTag').value.trim());
+      if ($('fVis').value) p.set('visibility', $('fVis').value);
       if ($('fSearch').value.trim()) p.set('q', $('fSearch').value.trim());
       const r = await fetch(`${K()}/documents?${p}`, { headers: H() });
       const d = r.ok ? await r.json() : { total: 0, documents: [] };
@@ -344,19 +399,21 @@
       if (!d.documents.length) { $('docList').innerHTML = `<div class="empty">${t('kba.nodocs')}</div>`; $('docPager').innerHTML=''; return; }
       $('docList').innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th>${t('kba.doc.tags')}</th>
-        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">src</th><th></th></tr></thead><tbody>` +
+        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">${vt('col')}</th><th class="tight">src</th><th></th></tr></thead><tbody>` +
         d.documents.map(x => `<tr>
           <td><input type="checkbox" class="rowsel" data-id="${x.id}"/></td>
           <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
           <td>${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
           <td class="tight">${x.chunk_count}</td>
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
+          <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?vt('public'):vt('internal')}</span></td>
           <td class="tight hint">${esc(x.source_type||'—')}</td>
-          <td class="inline"><button class="ghost" data-act="edit" data-id="${x.id}">${t('kba.edit')}</button>
+          <td class="inline"><button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}">${x.visibility==='public'?vt('unpublish'):vt('publish')}</button>
+            <button class="ghost" data-act="edit" data-id="${x.id}">${t('kba.edit')}</button>
             <button class="ghost" data-act="chunks" data-id="${x.id}">${t('kba.chunks')}</button>
             <button class="ghost" data-act="reembed" data-id="${x.id}">${t('kba.reembed')}</button>
             <button class="danger" data-act="del" data-id="${x.id}">${t('kba.delete')}</button></td></tr>`).join('') + `</tbody></table></div>`;
-      $('docList').querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id)));
+      $('docList').querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
       $('docList').querySelectorAll('.rowsel').forEach(cb => cb.addEventListener('change', () => { cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); updateSelBar(); }));
       $('selAll').addEventListener('change', () => { $('docList').querySelectorAll('.rowsel').forEach(cb => { cb.checked = $('selAll').checked; cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); }); updateSelBar(); });
       const pages = Math.ceil(page.total / page.limit);
@@ -366,7 +423,18 @@
       if ($('nextP')) $('nextP').addEventListener('click', () => { page.offset+=page.limit; loadDocuments(); });
     }
     function updateSelBar() { $('selBar').classList.toggle('hidden', selected.size===0); $('selCount').textContent = selected.size; }
-    async function docAction(act, id) {
+    async function docAction(act, id, title) {
+      // Publishing decides what a public bot may repeat to a customer, so even the
+      // single-row toggle confirms and says out loud what "public" means.
+      if (act==='publish' || act==='unpublish') {
+        const vis = act==='publish' ? 'public' : 'internal';
+        const msg = vt(`confirm.${act}.one`).replace('{title}', title || '');
+        if (!(await CQ.confirm(msg, { ok: vt(act), danger: act==='unpublish' }))) return;
+        const r = await fetch(`${K()}/documents/${id}/visibility`, { method:'PUT', headers: JH(), body: JSON.stringify({ visibility: vis }) });
+        if (r.ok) { CQ.toast(vt(`done.${act}`), 'ok'); loadDocuments(); }
+        else { const d = await r.json().catch(()=>({})); CQ.toast(d.detail || t('toast.error'), 'err'); }
+        return;
+      }
       if (act==='del') { if(!(await CQ.confirm(t('kba.delete')+'?', {ok:t('kba.delete')}))) return;
         await fetch(`${K()}/documents/${id}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok'); loadDocuments(); return; }
       if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json(); CQ.toast(`${d.reembedded_chunks} chunks`, 'ok'); return; }
@@ -428,6 +496,8 @@
     // bulk
     $('bulkDelete').addEventListener('click', () => bulk('delete'));
     $('bulkReembed').addEventListener('click', () => bulk('reembed'));
+    $('bulkPublish').addEventListener('click', () => bulk('publish'));
+    $('bulkUnpublish').addEventListener('click', () => bulk('unpublish'));
     function promptTags() {
       return new Promise(resolve => {
         const bg = showModal(`<h3>${t('kba.bulk.retag')}</h3>
@@ -446,6 +516,13 @@
     });
     async function bulk(action, tags) {
       if (action==='delete' && !(await CQ.confirm(`${t('kba.bulk.delete')} ${selected.size}?`, {ok:t('kba.delete')}))) return;
+      // Bulk publish is the single most consequential control on this page: it is the
+      // moment internal text becomes something a customer can be shown word for word.
+      // The confirmation states that plainly rather than just counting rows.
+      if (action==='publish' || action==='unpublish') {
+        const msg = vt(`confirm.${action}`).replace('{n}', selected.size);
+        if (!(await CQ.confirm(msg, { ok: vt(action), danger: action==='publish' }))) return;
+      }
       const r = await fetch(`${K()}/bulk`, { method:'POST', headers: JH(), body: JSON.stringify({ action, document_ids:[...selected], tags }) });
       const d = await r.json(); if (r.ok) { CQ.toast(`${action}: ${d.affected}`, 'ok'); loadDocuments(); } else CQ.toast(d.detail||'failed','err');
     }
@@ -837,6 +914,7 @@
       const r = await fetch(`${API}/admin/tenants`, { headers: H() });
       if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
       await loadTenants();
+      paintVisLabels();
     })();
   </script>
 </body>

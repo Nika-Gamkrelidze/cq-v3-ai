@@ -89,6 +89,39 @@
     .cd-note { font-size:11.5px; color:var(--muted); line-height:1.6; }
     .cd-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--mist); word-break:break-all; }
     .cd-modal-wide { max-width:560px; text-align:left; }
+
+    /* ---- autopilot (P3) ----
+       The answer bubble is styled as the customer would see it, so the demo shows the product
+       and the instrumentation side by side rather than only the instrumentation. */
+    .cd-mode { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .cd-mode .tab { font-size:13px; padding:8px 16px; }
+    .cd-mode-note { font-size:11.5px; color:var(--muted); flex:1 1 240px; }
+
+    .cd-answer { border:1px solid color-mix(in oklab,var(--ok) 38%,var(--hairline)); border-radius:var(--r-md);
+                 background:color-mix(in oklab,var(--ok) 6%,var(--input-bg)); padding:12px 13px; margin-top:8px; }
+    .cd-answer.ungrounded { border-color:color-mix(in oklab,var(--pending) 45%,var(--hairline));
+                            background:color-mix(in oklab,var(--pending) 7%,var(--input-bg)); }
+    .cd-answer-text { font-size:14.5px; line-height:1.62; color:var(--paper); white-space:pre-wrap; word-break:break-word; min-height:1.2em; }
+    .cd-answer-text.streaming:after { content:'▍'; color:var(--beam); animation:cdblink 1s steps(1) infinite; }
+    .cd-answer-foot { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+
+    .cd-ai { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+             padding:3px 9px; border-radius:999px; background:color-mix(in oklab,var(--beam) 14%,transparent); color:var(--beam); }
+
+    .cd-handoff { border:1px solid color-mix(in oklab,var(--pending) 45%,transparent); border-radius:var(--r-md);
+                  background:color-mix(in oklab,var(--pending) 8%,var(--input-bg)); padding:11px 12px; margin-top:10px; font-size:13.5px; line-height:1.6; }
+    .cd-handoff .cd-h-h { font-weight:700; color:var(--pending); margin-bottom:5px; }
+    .cd-handoff .cd-h-goal { color:var(--mist); margin-top:6px; }
+
+    .cd-blocked { border:1px solid color-mix(in oklab,var(--alert) 45%,transparent); border-radius:var(--r-md);
+                  background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); padding:12px 13px; font-size:13.5px; line-height:1.6; }
+    .cd-blocked .cd-b-h { font-weight:700; color:var(--coral); margin-bottom:6px; }
+
+    /* ---- voice row: mic in, speaker out. Both reuse endpoints that already shipped. ---- */
+    .cd-voice { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+    .cd-voice .rec-status { margin:0; }
+    #ttsHost { margin-top:12px; }
+    #ttsHost:empty { display:none; }
   </style>
 </head>
 <body>
@@ -114,11 +147,28 @@
             <option value="messenger">messenger</option><option value="whatsapp">whatsapp</option></select></div>
         <div><label data-i18n="cd.conv"></label><div class="cd-mono" id="convRef" style="padding-top:9px"></div></div>
       </div>
+      <div class="row" style="margin-top:12px">
+        <div><label data-i18n="cd.f.voicekey"></label>
+          <input type="password" id="f_voicekey" autocomplete="off" spellcheck="false" placeholder="X-API-Key" /></div>
+      </div>
       <div class="actions">
         <button class="ghost" id="newConv" data-i18n="cd.newconv"></button>
         <button class="ghost" id="reopen" data-i18n="cd.reopen"></button>
       </div>
       <div class="hint" data-i18n="cd.creds.hint"></div>
+      <div class="hint" data-i18n="cd.voicekey.hint"></div>
+    </div>
+
+    <!-- ---------------- mode switch: copilot (P1) vs autopilot (P3) ---------------- -->
+    <div class="card">
+      <div class="cd-head"><h3 data-i18n="cd.mode"></h3></div>
+      <div class="cd-mode">
+        <div class="tabs" style="margin:0">
+          <button class="tab active" data-mode="assist" data-i18n="cd.mode.assist"></button>
+          <button class="tab" data-mode="autopilot" data-i18n="cd.mode.autopilot"></button>
+        </div>
+        <span class="cd-mode-note" id="modeNote"></span>
+      </div>
     </div>
 
     <div class="cd-grid">
@@ -130,15 +180,25 @@
           <label data-i18n="cd.inbound"></label>
           <textarea id="inbound" data-i18n-ph="cd.inbound.ph" style="min-height:88px"></textarea>
         </div>
+        <!-- Voice IN: records with CQ.attachRecorder, posts to the EXISTING /v1/transcriptions,
+             then drops the transcript into the textarea above. No new CQ endpoint. -->
+        <div class="cd-voice">
+          <button class="ghost" id="micBtn"></button>
+          <span class="rec-status hint" id="micStatus"></span>
+        </div>
         <div class="actions"><button class="primary" id="sendBtn" data-i18n="cd.send"></button></div>
         <div class="msg err" id="sendErr"></div>
       </section>
 
-      <!-- ---------------- copilot rail ---------------- -->
+      <!-- ---------------- copilot rail / autopilot answer ---------------- -->
       <section class="card">
-        <div class="cd-head"><h3 data-i18n="cd.rail"></h3></div>
+        <div class="cd-head"><h3 id="railTitle"></h3></div>
         <div class="cd-stages" id="stages"></div>
         <div id="rail"></div>
+        <!-- Voice OUT lives OUTSIDE #rail: renderRail() replaces that subtree on every event,
+             which would tear down a playing <audio>. One host, one CQ.player, reloaded in
+             place — that is why a second play bar never appears. -->
+        <div id="ttsHost"></div>
       </section>
     </div>
   </main>
@@ -209,6 +269,33 @@
       'cd.close':'Close',
       'cd.streamfail':'Stream unavailable — falling back to polling the warm path.',
       'cd.err':'Copilot error','cd.role.customer':'Customer','cd.role.operator':'Operator','cd.role.bot':'Bot',
+      /* --- P3 autopilot --- */
+      'cd.f.voicekey':'X-API-Key (tenant — voice only)',
+      'cd.voicekey.hint':'Optional. Only the mic uses it: /v1/transcriptions authenticates as the tenant, not as a chat integration. Speech playback needs no key.',
+      'cd.send.auto':'Send as the customer',
+      'cd.mode':'Mode','cd.mode.assist':'Copilot — suggest to the operator','cd.mode.autopilot':'Autopilot — answer the customer',
+      'cd.mode.note.assist':'A human reads every word before it is sent. Keyword-only retrieval is acceptable here.',
+      'cd.mode.note.autopilot':'The bot replies to the customer with no human in the loop. Public documents only, strict grounding forced, refusal instead of guessing.',
+      'cd.rail.auto':'Autopilot','cd.auto.empty':'The answer appears here the moment a customer message lands.',
+      'cd.answer':'Reply sent to the customer','cd.answer.ai':'AI assistant',
+      'cd.answer.kb':'answered from the knowledge base','cd.answer.nokb':'not grounded in the knowledge base',
+      'cd.speak':'▶ Play reply','cd.speaking':'Synthesizing…',
+      'cd.refuse':'Refused — no KB answer','cd.refuse.note':'The gate refused before any model call: the customer gets the tenant’s refusal copy and a human. Never a guess from general knowledge.',
+      'cd.handoff.h':'Handed to a human','cd.handoff.summary':'Summary the operator inherits','cd.handoff.goal':'Customer’s goal',
+      'cd.handoff.none':'No summary was generated (a refusal spends nothing — not even on a summary).',
+      'cd.blocked':'Autopilot is not available for this tenant',
+      'cd.blocked.off':'Autopilot is switched off for this tenant. It is off by default and only a human can turn it on.',
+      'cd.blocked.nopublic':'This tenant has no documents marked public, so the bot would refuse every question. Publish at least one knowledge-base document first.',
+      'cd.blocked.killed':'Autopilot is suppressed by the operator kill switch.',
+      'cd.blocked.scope':'This integration key does not carry the chat:answer scope.',
+      'cd.stt':'Transcribing…','cd.stt.needkey':'Add a tenant X-API-Key above to use the mic.',
+      'cd.stt.empty':'Nothing was transcribed — try again.','cd.tts.fail':'Speech synthesis failed',
+      'cd.cite.customer':'Passage text is deliberately not sent to the customer. The chip resolves against the server-held hits list, so a forged [n] can only mis-index — it can never fake grounding.',
+      'cd.r.ok':'grounded','cd.r.kb_empty':'the knowledge base is empty','cd.r.no_hits':'nothing in the KB matched',
+      'cd.r.low_score':'matched, but not well enough to speak','cd.r.keyword_only':'keyword match only — not grounding for a public bot',
+      'cd.r.autopilot_off':'autopilot disabled for this tenant','cd.r.autopilot_killed':'operator kill switch',
+      'cd.r.escalation':'the customer asked for a human','cd.r.llm_error':'the model call failed',
+      'cd.r.ungrounded_answer':'answered outside the knowledge base','cd.r.commitment':'the reply looked like a commitment',
     },
     ka: {
       'cd.creds':'ინტეგრაციის სერტიფიკატები',
@@ -239,6 +326,33 @@
       'cd.close':'დახურვა',
       'cd.streamfail':'ნაკადი მიუწვდომელია — ვიყენებთ ქეშის გამოკითხვას.',
       'cd.err':'კოპილოტის შეცდომა','cd.role.customer':'მომხმარებელი','cd.role.operator':'ოპერატორი','cd.role.bot':'ბოტი',
+      /* --- P3 autopilot --- */
+      'cd.f.voicekey':'X-API-Key (ტენანტი — მხოლოდ ხმისთვის)',
+      'cd.voicekey.hint':'არასავალდებულო. მას იყენებს მხოლოდ მიკროფონი: /v1/transcriptions ავთენტიფიცირდება ტენანტად და არა ჩატის ინტეგრაციად. ხმის დაკვრას გასაღები არ სჭირდება.',
+      'cd.send.auto':'გაგზავნა მომხმარებლის სახელით',
+      'cd.mode':'რეჟიმი','cd.mode.assist':'კოპილოტი — მიაწოდე ოპერატორს','cd.mode.autopilot':'ავტოპილოტი — უპასუხე მომხმარებელს',
+      'cd.mode.note.assist':'ყოველ სიტყვას ადამიანი კითხულობს გაგზავნამდე. აქ საკვანძო სიტყვებით ძებნაც მისაღებია.',
+      'cd.mode.note.autopilot':'ბოტი პასუხობს მომხმარებელს ადამიანის ჩარევის გარეშე. მხოლოდ საჯარო დოკუმენტები, მკაცრი დაფუძნება, გამოცნობის ნაცვლად — უარი.',
+      'cd.rail.auto':'ავტოპილოტი','cd.auto.empty':'პასუხი გამოჩნდება მომხმარებლის შეტყობინების მოსვლისთანავე.',
+      'cd.answer':'მომხმარებელს გაგზავნილი პასუხი','cd.answer.ai':'AI ასისტენტი',
+      'cd.answer.kb':'პასუხი ცოდნის ბაზიდან','cd.answer.nokb':'არ ეყრდნობა ცოდნის ბაზას',
+      'cd.speak':'▶ პასუხის მოსმენა','cd.speaking':'ხმა გენერირდება…',
+      'cd.refuse':'უარი — ბაზაში პასუხი არ არის','cd.refuse.note':'ზღვარმა უარი თქვა მოდელის გამოძახებამდე: მომხმარებელი იღებს ტენანტის უარის ტექსტს და ოპერატორს. ზოგადი ცოდნიდან გამოცნობა — არასდროს.',
+      'cd.handoff.h':'გადაეცა ოპერატორს','cd.handoff.summary':'შეჯამება ოპერატორისთვის','cd.handoff.goal':'მომხმარებლის მიზანი',
+      'cd.handoff.none':'შეჯამება არ დაგენერირებულა (უარი არაფერს ხარჯავს — შეჯამებასაც კი).',
+      'cd.blocked':'ავტოპილოტი ამ ტენანტისთვის მიუწვდომელია',
+      'cd.blocked.off':'ავტოპილოტი ამ ტენანტს გამორთული აქვს. ის ნაგულისხმევად გამორთულია და მხოლოდ ადამიანს შეუძლია ჩართოს.',
+      'cd.blocked.nopublic':'ამ ტენანტს საჯაროდ მონიშნული დოკუმენტები არ აქვს, ამიტომ ბოტი ყველა კითხვაზე უარს იტყოდა. ჯერ გამოაქვეყნეთ მინიმუმ ერთი დოკუმენტი.',
+      'cd.blocked.killed':'ავტოპილოტი შეჩერებულია ოპერატორის სტოპ-ღილაკით.',
+      'cd.blocked.scope':'ამ ინტეგრაციის გასაღებს არ აქვს chat:answer სფერო.',
+      'cd.stt':'გადაიწერება…','cd.stt.needkey':'მიკროფონისთვის ზემოთ დაამატეთ ტენანტის X-API-Key.',
+      'cd.stt.empty':'ტექსტი ვერ ამოიცნო — სცადეთ თავიდან.','cd.tts.fail':'ხმის გენერაცია ვერ მოხერხდა',
+      'cd.cite.customer':'ამონარიდის ტექსტი მომხმარებელს განზრახ არ ეგზავნება. ჩიპი ებმის სერვერზე შენახულ სიას, ამიტომ გაყალბებულ [n]-ს მხოლოდ არასწორი ინდექსი გამოაქვს — დაფუძნებას ვერასდროს გააყალბებს.',
+      'cd.r.ok':'დაფუძნებულია','cd.r.kb_empty':'ცოდნის ბაზა ცარიელია','cd.r.no_hits':'ბაზაში დამთხვევა ვერ მოიძებნა',
+      'cd.r.low_score':'დაემთხვა, მაგრამ არასაკმარისად','cd.r.keyword_only':'მხოლოდ საკვანძო სიტყვები — საჯარო ბოტისთვის ეს არ არის დაფუძნება',
+      'cd.r.autopilot_off':'ავტოპილოტი გამორთულია','cd.r.autopilot_killed':'ოპერატორის სტოპ-ღილაკი',
+      'cd.r.escalation':'მომხმარებელმა ოპერატორი მოითხოვა','cd.r.llm_error':'მოდელის გამოძახება ჩავარდა',
+      'cd.r.ungrounded_answer':'პასუხი ცოდნის ბაზის გარეთ','cd.r.commitment':'პასუხი ვალდებულებას ჰგავდა',
     },
     ru: {
       'cd.creds':'Учётные данные интеграции',
@@ -269,6 +383,33 @@
       'cd.close':'Закрыть',
       'cd.streamfail':'Поток недоступен — переходим на опрос кэша.',
       'cd.err':'Ошибка копилота','cd.role.customer':'Клиент','cd.role.operator':'Оператор','cd.role.bot':'Бот',
+      /* --- P3 autopilot --- */
+      'cd.f.voicekey':'X-API-Key (арендатор — только для голоса)',
+      'cd.voicekey.hint':'Необязательно. Используется только микрофоном: /v1/transcriptions аутентифицируется как арендатор, а не как чат-интеграция. Для воспроизведения речи ключ не нужен.',
+      'cd.send.auto':'Отправить от имени клиента',
+      'cd.mode':'Режим','cd.mode.assist':'Копилот — подсказка оператору','cd.mode.autopilot':'Автопилот — ответ клиенту',
+      'cd.mode.note.assist':'Каждое слово читает человек перед отправкой. Здесь допустим и поиск по ключевым словам.',
+      'cd.mode.note.autopilot':'Бот отвечает клиенту без человека в контуре. Только публичные документы, строгое обоснование, отказ вместо догадки.',
+      'cd.rail.auto':'Автопилот','cd.auto.empty':'Ответ появится сразу после сообщения клиента.',
+      'cd.answer':'Ответ, отправленный клиенту','cd.answer.ai':'AI-ассистент',
+      'cd.answer.kb':'ответ из базы знаний','cd.answer.nokb':'не обосновано базой знаний',
+      'cd.speak':'▶ Прослушать ответ','cd.speaking':'Синтез речи…',
+      'cd.refuse':'Отказ — в базе нет ответа','cd.refuse.note':'Проверка отказала до вызова модели: клиент получает текст отказа арендатора и оператора. Никаких догадок из общих знаний.',
+      'cd.handoff.h':'Передано человеку','cd.handoff.summary':'Резюме, которое получает оператор','cd.handoff.goal':'Цель клиента',
+      'cd.handoff.none':'Резюме не создавалось (отказ не тратит ничего — даже на резюме).',
+      'cd.blocked':'Автопилот недоступен для этого арендатора',
+      'cd.blocked.off':'Автопилот выключен для этого арендатора. По умолчанию он выключен, включить может только человек.',
+      'cd.blocked.nopublic':'У этого арендатора нет документов, помеченных как публичные, поэтому бот отказывал бы на каждый вопрос. Сначала опубликуйте хотя бы один документ базы знаний.',
+      'cd.blocked.killed':'Автопилот остановлен аварийным выключателем оператора.',
+      'cd.blocked.scope':'У этого ключа интеграции нет области chat:answer.',
+      'cd.stt':'Распознавание…','cd.stt.needkey':'Добавьте выше X-API-Key арендатора, чтобы пользоваться микрофоном.',
+      'cd.stt.empty':'Ничего не распознано — попробуйте снова.','cd.tts.fail':'Не удалось синтезировать речь',
+      'cd.cite.customer':'Текст фрагмента намеренно не отправляется клиенту. Чип разрешается по серверному списку совпадений, поэтому подделанный [n] даёт лишь неверный индекс и никогда не подделывает обоснование.',
+      'cd.r.ok':'обосновано','cd.r.kb_empty':'база знаний пуста','cd.r.no_hits':'в базе ничего не совпало',
+      'cd.r.low_score':'совпало, но недостаточно уверенно','cd.r.keyword_only':'только ключевые слова — для публичного бота это не обоснование',
+      'cd.r.autopilot_off':'автопилот отключён у арендатора','cd.r.autopilot_killed':'аварийный выключатель оператора',
+      'cd.r.escalation':'клиент попросил человека','cd.r.llm_error':'вызов модели не удался',
+      'cd.r.ungrounded_answer':'ответ вне базы знаний','cd.r.commitment':'ответ похож на обязательство',
     },
   };
   /* Page dict first, shared brand.js DICT second — so 'btn.cancel' & friends still resolve. */
@@ -286,25 +427,59 @@
         const r = Math.random()*16|0; return (c === 'x' ? r : (r&0x3|0x8)).toString(16); }));
 
   const S = {
+    mode: 'assist',             // 'assist' = copilot (P1) · 'autopilot' = public bot (P3)
     convRef: '', endUser: 'demo-operator-' + Math.random().toString(36).slice(2, 8),
     thread: [],                 // [{role, text}]
     suggestRef: null, turn: null,
     t0: 0, marks: {}, srvStages: null,
     grounding: null, tier1: [], citations: [], variants: [],
     usage: null, handoff: null, refusal: null,
-    es: null, shownSent: false, editing: null, editText: '',
+    answer: null,               // autopilot: {text, citations, answered_from_kb, streaming}
+    blocked: null,              // autopilot: {status, detail} — a 4xx the tenant must understand
+    speaking: false, player: null,
+    es: null, abort: null, shownSent: false, editing: null, editText: '',
     busy: false, err: '',
   };
 
-  function newConversation() {
+  /* Everything a turn produces, cleared in one place so a mode switch or a new conversation
+     cannot leave a stale answer sitting under a fresh question. */
+  function resetTurn() {
     if (S.es) { S.es.close(); S.es = null; }
+    if (S.abort) { S.abort.abort(); S.abort = null; }
+    // suggest_ref belongs to the turn that produced it: keeping it across a mode switch would
+    // leave the copilot rail rendering an autopilot turn's ref (and vice versa).
+    S.suggestRef = null; S.turn = null;
+    S.marks = {}; S.srvStages = null; S.grounding = null; S.tier1 = [];
+    S.citations = []; S.variants = []; S.usage = null; S.handoff = null; S.refusal = null;
+    S.answer = null; S.blocked = null; S.shownSent = false; S.editing = null; S.err = '';
+    $('ttsHost').innerHTML = ''; S.player = null; S.speaking = false;
+  }
+
+  function newConversation() {
+    resetTurn();
     S.convRef = 'demo-' + uuid().slice(0, 8);
-    S.thread = []; S.suggestRef = null; S.turn = null; S.marks = {}; S.srvStages = null;
-    S.grounding = null; S.tier1 = []; S.citations = []; S.variants = [];
-    S.usage = null; S.handoff = null; S.refusal = null; S.shownSent = false; S.editing = null; S.err = '';
+    S.thread = [];
     $('convRef').textContent = S.convRef;
     renderThread(); renderStages(); renderRail();
   }
+
+  function setMode(mode) {
+    if (mode !== 'assist' && mode !== 'autopilot') return;
+    S.mode = mode;
+    resetTurn();
+    document.querySelectorAll('.cd-mode .tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    renderModeChrome(); renderStages(); renderRail();
+  }
+  function renderModeChrome() {
+    $('railTitle').textContent = t(S.mode === 'autopilot' ? 'cd.rail.auto' : 'cd.rail');
+    $('modeNote').textContent = t('cd.mode.note.' + S.mode);
+    // The warm read is a copilot affordance — it re-reads a cached *suggestion* row. There is
+    // no equivalent for an answer that has already been said to a customer. (`display`, not
+    // the `hidden` attribute: brand.css gives buttons an explicit display that would win.)
+    $('reopen').style.display = S.mode === 'autopilot' ? 'none' : '';
+    if (!S.busy) $('sendBtn').textContent = sendLabel();
+  }
+  const sendLabel = () => t(S.mode === 'autopilot' ? 'cd.send.auto' : 'cd.send');
 
   /* ---------------------------------------------------------------------------------------
      Transport helpers
@@ -335,16 +510,19 @@
     if (!text) { $('sendErr').textContent = t('cd.needtext'); return; }
     if (S.busy) return;
 
-    if (S.es) { S.es.close(); S.es = null; }
-    S.busy = true; S.marks = {}; S.srvStages = null; S.grounding = null; S.tier1 = [];
-    S.citations = []; S.variants = []; S.usage = null; S.handoff = null; S.refusal = null;
-    S.shownSent = false; S.editing = null; S.err = '';
+    resetTurn();
+    S.busy = true;
     S.thread.push({ role: 'customer', text });
     $('inbound').value = '';
     renderThread(); renderStages(); renderRail();
 
-    const btn = $('sendBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('cd.send') + '…';
+    const btn = $('sendBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + sendLabel() + '…';
     S.t0 = now();
+    if (S.mode === 'autopilot') {
+      try { await answerTurn(text); }
+      finally { S.busy = false; btn.disabled = false; btn.textContent = sendLabel(); }
+      return;
+    }
     try {
       const r = await fetch(`${API}/v1/chat/turns`, {
         method: 'POST',
@@ -372,7 +550,7 @@
     } catch (e) {
       S.err = e.message; renderRail(); CQ.toast(e.message, 'err');
     } finally {
-      S.busy = false; btn.disabled = false; btn.textContent = t('cd.send');
+      S.busy = false; btn.disabled = false; btn.textContent = sendLabel();
     }
   }
 
@@ -498,6 +676,279 @@
     const node = document.getElementById('cd-vt-' + index);
     if (node) { node.textContent = S.variants[i].text; node.classList.add('streaming'); }
     else renderRail();
+  }
+
+  /* =========================================================================================
+     AUTOPILOT (P3) — POST /v1/chat/answer?stream=1
+     -----------------------------------------------------------------------------------------
+     The copilot streams over EventSource because its stream is a GET with a ticket. The answer
+     route is a POST, and EventSource cannot POST — so the SSE frames are read off the fetch
+     body here. Same wire format either way (`event: <name>\ndata: <json>\n\n`), same event
+     vocabulary, and the terminal `done` payload is byte-identical to the blocking envelope,
+     which is why absorbAnswer() is the single consumer of both.
+
+     The safety story this renders, honestly:
+       * grounding block         — the gate's decision, not a vibe: method / top_score / hits.
+       * refusal + 0 tokens      — an out-of-scope question costs nothing at all. The badge is
+                                   derived from the SERVER's stage timings (no `llm` stage ⇒ no
+                                   model call), not from a hardcoded string.
+       * handoff summary         — what the operator inherits when the bot steps aside.
+       * citation chips          — resolved against the server-held citations list.
+     ========================================================================================= */
+  async function answerTurn(text) {
+    const ctrl = new AbortController(); S.abort = ctrl;
+    let r;
+    try {
+      r = await fetch(`${API}/v1/chat/answer?stream=1`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: headers({ 'Content-Type': 'application/json', 'Accept': 'text/event-stream',
+                           'Idempotency-Key': uuid() }),
+        body: JSON.stringify({
+          conversation_ref: S.convRef,
+          turn_ref: 't-' + uuid(),
+          role: 'customer',
+          content: text,
+          channel: $('f_channel').value,
+          locale: $('f_locale').value,
+          mode: 'autopilot',
+        }),
+      });
+    } catch (e) {
+      S.err = e.message; renderRail(); CQ.toast(e.message, 'err'); return;
+    }
+    mark('ingest');
+
+    // A 4xx here is a configuration answer, not a crash: autopilot off, no public documents,
+    // a key without chat:answer. Render it as the sentence an operator can act on.
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const body = await r.text();
+        const d = (body || '').trimStart()[0] === '{' ? JSON.parse(body) : null;
+        detail = (d && (d.detail || d.message || d.error)) || body || '';
+      } catch (e) { detail = ''; }
+      if (typeof detail === 'object') detail = JSON.stringify(detail);
+      S.blocked = { status: r.status, detail: String(detail || '') };
+      renderRail(); return;
+    }
+
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('text/event-stream')) {
+      // Blocking adapter (or a proxy that buffered the stream away). Same envelope.
+      const body = await r.text();
+      const d = (body || '').trimStart()[0] === '{' ? safeJSON(body) : null;
+      if (!d) { S.err = t('err.badresp') || 'bad response'; renderRail(); return; }
+      mark('done'); absorbAnswer(d); renderRail(); return;
+    }
+    await readSSE(r, onAnswerEvent);
+    S.abort = null;
+  }
+
+  /* Minimal SSE reader over a fetch body. Frames are separated by a blank line; `:` lines are
+     comments (the server's 15 s keep-alive ping) and are skipped. */
+  async function readSSE(resp, onEvent) {
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+        let name = 'message'; const data = [];
+        frame.split('\n').forEach(line => {
+          if (!line || line[0] === ':') return;
+          if (line.startsWith('event:')) name = line.slice(6).trim();
+          else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+        });
+        if (data.length) onEvent(name, safeJSON(data.join('\n')));
+      }
+    }
+  }
+
+  function onAnswerEvent(name, d) {
+    if (!d) return;
+    if (name === 'open') { S.suggestRef = d.suggest_ref || S.suggestRef; renderRail(); return; }
+    if (name === 'grounding') { S.grounding = d.grounding || d; mark('grounding'); renderRail(); return; }
+    if (name === 'delta') {
+      if (S.marks.first == null) mark('first');
+      // Deltas are RAW model text — the authoritative, sanitized, citation-resolved text
+      // arrives on `done` and REPLACES this. Never treat a delta as final.
+      if (!S.answer) { S.answer = { text: '', citations: [], answered_from_kb: false, streaming: true }; renderRail(); }
+      S.answer.text += (d.text ?? d.delta ?? ''); S.answer.streaming = true;
+      const node = document.getElementById('cd-answer-text');
+      if (node) { node.textContent = S.answer.text; node.classList.add('streaming'); }
+      else renderRail();
+      return;
+    }
+    if (name === 'error') {
+      S.err = d.message || d.detail || t('cd.err');
+      renderRail(); CQ.toast(S.err, 'err');
+      return;   // a non-fatal error is still followed by `done`
+    }
+    if (name === 'done') { mark('done'); absorbAnswer(d.turn || d); renderRail(); }
+  }
+
+  /* The terminal envelope. Same object the blocking call returns and the same one the store
+     files, so there is exactly one shape to trust. */
+  function absorbAnswer(d) {
+    if (!d || typeof d !== 'object') return;
+    S.turn = d;
+    S.suggestRef = d.suggest_ref || S.suggestRef;
+    if (d.grounding) S.grounding = d.grounding;
+    if (Array.isArray(d.citations)) S.citations = d.citations;
+    if (d.handoff) S.handoff = d.handoff;
+    if (d.usage) S.usage = d.usage;
+    S.srvStages = (d.usage && d.usage.latency_ms) || null;
+    const reply = d.reply || null;
+    S.answer = reply ? {
+      text: reply.text || '',
+      citations: Array.isArray(reply.citations) ? reply.citations : [],
+      answered_from_kb: !!reply.answered_from_kb,
+      streaming: false,
+    } : null;
+    // The two engine reasons that mean "this bot is not allowed to speak at all" deserve the
+    // configuration panel, not a refusal bubble — the tenant has nothing to fix in their KB.
+    const reason = (d.grounding && d.grounding.reason) || '';
+    if (reason === 'autopilot_off' || reason === 'autopilot_killed') {
+      S.blocked = { status: 0, detail: reason };
+    }
+    if (S.answer && S.answer.text) S.thread.push({ role: 'bot', text: S.answer.text });
+    renderThread(); renderStages();
+  }
+
+  /* Did this turn actually spend anything? Derived from the server's own stage timings: the
+     refusal path runs neither the answer call nor the handoff-summary call, so neither stage
+     exists. `usage.input_tokens` is deliberately null on the wire (tokens are metered into
+     `llm_usage` server-side), so counting stages is the honest signal, not a decoration. */
+  function spentTokens() {
+    const st = S.srvStages || {};
+    return st.llm != null || st.handoff_summary != null;
+  }
+
+  function reasonLabel(reason) {
+    const k = 'cd.r.' + (reason || '');
+    const v = t(k);
+    return v === k ? (reason || '—') : v;
+  }
+
+  function blockedHTML() {
+    const b = S.blocked; if (!b) return '';
+    const d = (b.detail || '').toLowerCase();
+    let key = 'cd.blocked.off';
+    if (d.includes('public')) key = 'cd.blocked.nopublic';
+    else if (d.includes('kill')) key = 'cd.blocked.killed';
+    else if (d.includes('scope') || b.status === 403) key = 'cd.blocked.scope';
+    return `<div class="cd-blocked">
+      <div class="cd-b-h">${esc(t('cd.blocked'))}</div>
+      <div>${esc(t(key))}</div>
+      ${b.detail ? `<div class="cd-mono" style="margin-top:8px">${b.status ? 'HTTP ' + esc(b.status) + ' · ' : ''}${esc(b.detail)}</div>` : ''}
+    </div>`;
+  }
+
+  function handoffHTML() {
+    const h = S.handoff;
+    if (!h || !h.recommended) return '';
+    return `<div class="cd-handoff">
+      <div class="cd-h-h">${esc(t('cd.handoff.h'))}${h.reason ? ' · ' + esc(reasonLabel(h.reason)) : ''}</div>
+      <div class="cd-note" style="margin-bottom:4px">${esc(t('cd.handoff.summary'))}</div>
+      <div>${h.summary ? esc(h.summary) : `<span class="cd-note">${esc(t('cd.handoff.none'))}</span>`}</div>
+      ${h.goal ? `<div class="cd-h-goal">${esc(t('cd.handoff.goal'))}: ${esc(h.goal)}</div>` : ''}
+    </div>`;
+  }
+
+  function answerHTML() {
+    const a = S.answer;
+    const grounded = !!(S.grounding && S.grounding.grounded);
+    const refused = !!a && !a.answered_from_kb && !grounded;
+    if (!a) {
+      return `<div class="cd-sec"><div class="cd-sec-head"><h4>${esc(t('cd.answer'))}</h4></div>
+        <div class="empty">${esc(S.busy ? t('cd.waiting') : t('cd.auto.empty'))}</div></div>`;
+    }
+    const head = refused
+      ? `<h4>${esc(t('cd.refuse'))}</h4>${spentTokens() ? '' : `<span class="cd-badge zero">${esc(t('cd.notokens'))}</span>`}`
+      : `<h4>${esc(t('cd.answer'))}</h4><span class="cd-badge${a.answered_from_kb ? '' : ' zero'}">${esc(t(a.answered_from_kb ? 'cd.answer.kb' : 'cd.answer.nokb'))}</span>`;
+    return `<div class="cd-sec">
+      <div class="cd-sec-head">${head}</div>
+      <div class="cd-answer${refused || !a.answered_from_kb ? ' ungrounded' : ''}">
+        <div class="cd-answer-text${a.streaming ? ' streaming' : ''}" id="cd-answer-text">${esc(a.text)}</div>
+        ${citeChipsHTML(a.citations)}
+        <div class="cd-answer-foot">
+          <span class="cd-ai">${esc(t('cd.answer.ai'))}</span>
+          <button class="ghost" data-speak ${S.speaking ? 'disabled' : ''}>${esc(S.speaking ? t('cd.speaking') : t('cd.speak'))}</button>
+        </div>
+      </div>
+      ${refused ? `<div class="cd-note" style="margin-top:8px">${esc(t('cd.refuse.note'))}</div>` : ''}
+      ${handoffHTML()}
+    </div>`;
+  }
+
+  function renderAuto() {
+    const rail = $('rail');
+    if (S.blocked) { rail.innerHTML = blockedHTML(); return; }
+    if (!S.grounding && !S.answer && !S.err && !S.busy) {
+      rail.innerHTML = `<div class="empty">${esc(t('cd.auto.empty'))}</div>`; return;
+    }
+    rail.innerHTML = (S.err ? `<div class="msg err">${esc(S.err)}</div>` : '')
+      + groundHTML() + answerHTML()
+      + (S.suggestRef ? `<div class="cd-note" style="margin-top:14px">suggest_ref <span class="cd-mono">${esc(S.suggestRef)}</span></div>` : '');
+    rail.querySelectorAll('button[data-cite]').forEach(b =>
+      b.addEventListener('click', () => showCitation(Number(b.dataset.cite))));
+    const sp = rail.querySelector('button[data-speak]');
+    if (sp) sp.addEventListener('click', speakAnswer);
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     Voice OUT — the EXISTING /v1/tts route (anonymous-capable). Georgian is handled entirely
+     server-side there (eleven_v3 + a Georgian-capable voice), which is exactly why this page
+     sends the locale and nothing else: no model id, no voice id, no client-side special case.
+     One CQ.player, reloaded in place, so a second play bar can never appear.
+     --------------------------------------------------------------------------------------- */
+  async function speakAnswer() {
+    const a = S.answer; if (!a || !a.text || S.speaking) return;
+    S.speaking = true; renderRail();
+    try {
+      const r = await fetch(`${API}/v1/tts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: a.text.slice(0, 5000), language_code: $('f_locale').value }),
+      });
+      if (!r.ok) {
+        const body = await r.text();
+        const d = (body || '').trimStart()[0] === '{' ? safeJSON(body) : null;
+        throw new Error((d && d.detail) || t('cd.tts.fail'));
+      }
+      const url = URL.createObjectURL(await r.blob());
+      if (S.player) S.player.load(url);
+      else S.player = CQ.player($('ttsHost'), url, { name: 'reply.mp3' });
+    } catch (e) {
+      CQ.toast(e.message || t('cd.tts.fail'), 'err');
+    } finally { S.speaking = false; renderRail(); }
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     Voice IN — CQ.attachRecorder (brand.js, unmodified) records, then the clip goes to the
+     EXISTING POST /v1/transcriptions and the transcript lands in the inbound box as if it had
+     been typed. That route authenticates as the TENANT (X-API-Key), not as a chat integration,
+     which is why there is a separate optional key field rather than a silent 401.
+     --------------------------------------------------------------------------------------- */
+  async function transcribeClip(file) {
+    const key = $('f_voicekey').value.trim();
+    if (!key) { $('micStatus').textContent = t('cd.stt.needkey'); $('micStatus').className = 'rec-status hint err'; return; }
+    $('micStatus').textContent = t('cd.stt'); $('micStatus').className = 'rec-status hint';
+    try {
+      const fd = new FormData(); fd.append('file', file, file.name);
+      const r = await fetch(`${API}/v1/transcriptions`, { method: 'POST', headers: { 'X-API-Key': key }, body: fd });
+      const d = await CQ.readResp(r);
+      const text = (d.transcript || '').trim();
+      if (!text) { $('micStatus').textContent = t('cd.stt.empty'); $('micStatus').className = 'rec-status hint err'; return; }
+      $('inbound').value = text;
+      $('micStatus').textContent = (d.language ? d.language + ' · ' : '') + text.length + ' chars';
+      $('micStatus').className = 'rec-status hint ok';
+    } catch (e) {
+      $('micStatus').textContent = e.message; $('micStatus').className = 'rec-status hint err';
+    }
   }
 
   /* ---------------------------------------------------------------------------------------
@@ -644,6 +1095,7 @@
   }
 
   function renderRail() {
+    if (S.mode === 'autopilot') return renderAuto();
     const rail = $('rail');
     if (!S.suggestRef && !S.grounding && !S.tier1.length && !S.err) {
       rail.innerHTML = `<div class="empty">${esc(t('cd.rail.empty'))}</div>`; return;
@@ -691,7 +1143,8 @@
       <p class="cd-mono">${esc(t('cd.cite.doc'))}: ${esc(c.document_id || '—')}<br />
          ${esc(t('cd.cite.chunk'))}: ${esc(c.chunk_id || p.chunk_id || '—')}<br />
          ${esc(t('cd.cite.score'))}: ${c.score != null ? Number(c.score).toFixed(3) : '—'}</p>
-      <p>${esc(p.snippet || p.content || t('cd.cite.nosnip'))}</p>
+      <p>${esc(p.snippet || p.content
+              || t(S.mode === 'autopilot' ? 'cd.cite.customer' : 'cd.cite.nosnip'))}</p>
       <div class="actions"><button class="primary" data-c>${esc(t('cd.close'))}</button></div></div>`;
     document.body.appendChild(bg);
     const close = () => bg.remove();
@@ -722,10 +1175,19 @@
   $('inbound').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); });
   $('newConv').addEventListener('click', newConversation);
   $('reopen').addEventListener('click', reopen);
-  document.addEventListener('cq:lang', () => { applyLocal(); renderThread(); renderStages(); renderRail(); });
+  document.querySelectorAll('.cd-mode .tab').forEach(b =>
+    b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.addEventListener('cq:lang', () => {
+    applyLocal(); renderModeChrome(); renderThread(); renderStages(); renderRail();
+  });
+
+  // brand.js's recorder, used exactly as the analyzer uses it: no fileInput (there is no file
+  // form here), the clip is handed straight to /v1/transcriptions via onReady.
+  CQ.attachRecorder({ button: $('micBtn'), status: $('micStatus'), onReady: file => transcribeClip(file) });
 
   CQ.enhanceSelects && CQ.enhanceSelects(document);
   applyLocal();
+  renderModeChrome();
   newConversation();
   </script>
 </body>

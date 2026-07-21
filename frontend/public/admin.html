@@ -22,6 +22,7 @@
         <div class="tab" data-tab="anon" data-i18n="adm.anon"></div>
         <div class="tab" data-tab="integrations" data-i18n="adm.integrations"></div>
         <div class="tab" data-tab="voices" data-i18n="adm.voices"></div>
+        <div class="tab" data-tab="bot" data-i18n="adm.bot"></div>
       </div>
 
       <!-- TENANTS -->
@@ -134,6 +135,27 @@
           <div class="msg" id="voicesMsg"></div>
         </div>
       </section>
+      <!-- BOT CONTROL — the 3am brake. State first, one click to act, no settings blob. -->
+      <section class="panel" id="panel-bot">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:flex-start">
+            <div style="flex:1">
+              <h3 style="margin:0" data-i18n="kill.heading"></h3>
+              <p class="hint" style="margin:6px 0 0" data-i18n="kill.desc"></p>
+            </div>
+            <div class="inline" style="flex:0; gap:8px">
+              <span class="pill" id="killGlobalPill">—</span>
+              <button class="ghost" id="reloadKill" data-i18n="btn.refresh"></button>
+            </div>
+          </div>
+          <div class="actions"><button class="danger" id="killGlobalBtn" data-i18n="kill.global"></button></div>
+          <div class="msg" id="killMsg"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="kill.tenants"></h3>
+          <div id="killList" style="margin-top:12px"></div>
+        </div>
+      </section>
     </div>
   </main>
 
@@ -157,8 +179,12 @@
       document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
       tb.classList.add('active'); $('panel-' + tb.dataset.tab).classList.add('active');
+      if (tb.dataset.tab === 'bot') loadKill();
     }));
-    document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) loadTenants(); });
+    document.addEventListener('cq:lang', () => { if ($('app').classList.contains('hidden')) return;
+      loadTenants();
+      // The kill-switch pills/buttons are built in JS, so data-i18n cannot retranslate them.
+      if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); } });
 
     async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants(), loadVoices()]); }
 
@@ -385,6 +411,108 @@
           else { CQ.toast(t('toast.created'),'ok'); tenantAction('users', id, name); loadTenants(); }
         });
       }
+    }
+
+    // ---- BOT CONTROL: autopilot kill switch + per-tenant state -------------------------
+    // The switch itself is one `app_settings` blob: {global_disabled, disabled_clients:[id]}.
+    // The per-tenant column is read from each tenant's own chat config, so this page shows the
+    // two facts an operator needs at 3am — is it allowed to answer, and is it stopped — with no
+    // third place to look. N+1 by design: the tenant list is tens of rows, not thousands.
+    const KILL = `${API}/admin/chat/kill-switch`;
+    let killState = { global_disabled: false, disabled_clients: [] }, killTenants = [];
+
+    async function loadKill() {
+      const m = $('killMsg'); m.className = 'msg'; m.textContent = '';
+      let ok = true;
+      try {
+        const r = await fetch(KILL, { headers: hdr() });
+        if (!r.ok) throw new Error(r.status === 404 ? t('kill.unavailable') : t('kill.loadfail'));
+        const d = await r.json();
+        killState = {
+          global_disabled: !!(d && d.global_disabled),
+          disabled_clients: (d && Array.isArray(d.disabled_clients)) ? d.disabled_clients.map(String) : [],
+        };
+      } catch (e) { ok = false; m.className = 'msg err'; m.textContent = e.message || t('kill.loadfail'); }
+      renderKillGlobal(ok);
+      await loadKillTenants();
+    }
+
+    function renderKillGlobal(reachable) {
+      const p = $('killGlobalPill');
+      p.className = 'pill ' + (!reachable ? 'error' : killState.global_disabled ? 'error' : 'ready');
+      p.textContent = !reachable ? '—' : killState.global_disabled ? t('kill.global.on') : t('kill.global.off');
+      const b = $('killGlobalBtn');
+      b.className = killState.global_disabled ? 'primary' : 'danger';
+      b.textContent = killState.global_disabled ? t('kill.resume') : t('kill.global');
+      b.disabled = !reachable;
+    }
+
+    async function loadKillTenants() {
+      const box = $('killList');
+      const r = await fetch(`${API}/admin/tenants`, { headers: hdr() });
+      if (!r.ok) { box.innerHTML = `<div class="msg err">${esc(t('kill.overviewfail'))}</div>`; return; }
+      const l = await r.json();
+      const tenants = Array.isArray(l) ? l : [];
+      killTenants = await Promise.all(tenants.map(async x => {
+        let on = false, reachable = true;
+        try {
+          const rr = await fetch(`${API}/admin/chat/${x.id}/config`, { headers: hdr() });
+          if (rr.ok) { const c = await rr.json(); on = !!(c && c.autopilot_enabled); } else reachable = false;
+        } catch { reachable = false; }
+        return { id: String(x.id), name: x.name, autopilot: on, reachable };
+      }));
+      renderKillTenants();
+    }
+
+    function killRowState(x) {
+      if (!x.autopilot) return { cls: 'notinkb', label: t('kill.state.off') };
+      if (killState.global_disabled || killState.disabled_clients.includes(x.id))
+        return { cls: 'error', label: t('kill.state.stopped') };
+      return { cls: 'ready', label: t('kill.state.live') };
+    }
+
+    function renderKillTenants() {
+      const box = $('killList');
+      if (!killTenants.length) { box.innerHTML = `<div class="empty">—</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.name')}</th><th>${t('th.autopilot')}</th><th>${t('th.status')}</th><th></th></tr></thead><tbody>` +
+        killTenants.map(x => {
+          const st = killRowState(x);
+          const stopped = killState.disabled_clients.includes(x.id);
+          return `<tr>
+            <td>${esc(x.name)}${x.reachable ? '' : ` <span class="hint">${esc(t('kill.overviewfail'))}</span>`}</td>
+            <td><span class="pill ${x.autopilot ? 'on' : 'off'}">${x.autopilot ? '●' : '○'}</span></td>
+            <td><span class="pill ${st.cls}">${esc(st.label)}</span></td>
+            <td class="inline"><button class="${stopped ? 'primary' : 'danger'}" data-kill="${stopped ? 'resume' : 'stop'}" data-id="${esc(x.id)}" data-name="${esc(x.name)}">${stopped ? t('kill.resume') : t('kill.stop')}</button></td>
+          </tr>`;
+        }).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('button[data-kill]').forEach(b => b.addEventListener('click', () => killTenant(b.dataset.kill, b.dataset.id, b.dataset.name)));
+    }
+
+    async function putKill(patch) {
+      const m = $('killMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await fetch(KILL, { method: 'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      if (!r.ok) { m.className = 'msg err';
+        m.textContent = r.status === 404 ? t('kill.unavailable') : t('toast.error');
+        CQ.toast(m.textContent, 'err'); return false; }
+      m.className = 'msg ok'; m.textContent = t('kill.saved'); CQ.toast(t('kill.saved'), 'ok');
+      await loadKill(); return true;
+    }
+
+    $('reloadKill').addEventListener('click', loadKill);
+    $('killGlobalBtn').addEventListener('click', async () => {
+      const next = !killState.global_disabled;
+      const msg = next ? t('kill.confirm.global') : t('kill.confirm.resume.global');
+      if (!(await CQ.confirm(msg, { ok: next ? t('kill.stop') : t('kill.resume'), danger: next }))) return;
+      await putKill({ global_disabled: next });
+    });
+
+    async function killTenant(act, id, name) {
+      const stop = act === 'stop';
+      const msg = (stop ? t('kill.confirm.tenant') : t('kill.confirm.resume')).replace('{name}', name || '');
+      if (!(await CQ.confirm(msg, { ok: stop ? t('kill.stop') : t('kill.resume'), danger: stop }))) return;
+      const set = new Set(killState.disabled_clients);
+      stop ? set.add(id) : set.delete(id);
+      await putKill({ disabled_clients: [...set] });
     }
 
     boot();

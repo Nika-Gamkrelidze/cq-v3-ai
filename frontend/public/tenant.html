@@ -48,6 +48,7 @@
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
         <div class="tab" data-tab="playground"><span>🧪</span> <span data-i18n="tab.playground"></span></div>
         <div class="tab" data-tab="health"><span>🩺</span> <span data-i18n="cur.tab"></span></div>
+        <div class="tab" data-tab="bot"><span>🤖</span> <span data-i18n="tab.bot"></span></div>
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
       </div>
 
@@ -154,6 +155,98 @@
         </div>
       </section>
 
+      <!-- BOT (public autopilot configuration) -->
+      <section class="panel" id="panel-bot">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:flex-start">
+            <div style="flex:1">
+              <h3 style="margin:0" data-i18n="bot.heading"></h3>
+              <p class="hint" style="margin:6px 0 0" data-i18n="bot.desc"></p>
+            </div>
+            <div class="inline" style="flex:0; gap:8px">
+              <span class="pill" id="botState">—</span>
+              <button class="ghost" id="reloadBot" data-i18n="btn.refresh"></button>
+            </div>
+          </div>
+          <div class="msg err hidden" id="botLoadMsg"></div>
+        </div>
+
+        <div id="botForm" class="hidden">
+          <!-- Autopilot: the one switch that points a model at the public internet. -->
+          <div class="card">
+            <label class="inline" style="gap:8px"><input type="checkbox" id="b_autopilot" style="width:auto" /> <span data-i18n="bot.autopilot"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="bot.autopilot.hint"></div>
+            <div class="msg err hidden" id="botKilled" data-i18n="bot.killed.note"></div>
+            <!-- Filled on a 409 from the server: WHY it cannot be enabled, plus the way out. -->
+            <div class="msg err hidden" id="botNeedPublic"></div>
+          </div>
+
+          <div class="card">
+            <label data-i18n="bot.persona"></label>
+            <textarea id="b_persona" data-i18n-ph="bot.persona.ph" style="min-height:90px"></textarea>
+            <h4 data-i18n="bot.languages"></h4>
+            <div class="inline" style="gap:18px">
+              <label class="inline" style="gap:6px"><input type="checkbox" class="b-lang" data-lang="en" style="width:auto" /> <span data-i18n="bot.lang.en"></span></label>
+              <label class="inline" style="gap:6px"><input type="checkbox" class="b-lang" data-lang="ka" style="width:auto" /> <span data-i18n="bot.lang.ka"></span></label>
+              <label class="inline" style="gap:6px"><input type="checkbox" class="b-lang" data-lang="ru" style="width:auto" /> <span data-i18n="bot.lang.ru"></span></label>
+            </div>
+          </div>
+
+          <!-- Greeting + refusal side by side in all three languages: this is the copy a real
+               customer reads, and a missing translation is invisible unless it is shown here. -->
+          <div class="card">
+            <h3 data-i18n="bot.greeting"></h3>
+            <div class="row">
+              <div><label data-i18n="bot.lang.en"></label><textarea id="b_greet_en"></textarea></div>
+              <div><label data-i18n="bot.lang.ka"></label><textarea id="b_greet_ka"></textarea></div>
+              <div><label data-i18n="bot.lang.ru"></label><textarea id="b_greet_ru"></textarea></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="bot.refusal"></h3>
+            <p class="hint" data-i18n="bot.refusal.hint"></p>
+            <div class="row">
+              <div><label data-i18n="bot.lang.en"></label><textarea id="b_ref_en"></textarea></div>
+              <div><label data-i18n="bot.lang.ka"></label><textarea id="b_ref_ka"></textarea></div>
+              <div><label data-i18n="bot.lang.ru"></label><textarea id="b_ref_ru"></textarea></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 data-i18n="bot.escalation"></h3>
+            <input id="b_escalation" data-i18n-ph="bot.escalation.ph" />
+            <div class="hint" data-i18n="bot.escalation.hint"></div>
+            <h4 data-i18n="bot.retrieval"></h4>
+            <div class="row">
+              <div><label data-i18n="bot.minscore"></label><input id="b_minscore" type="number" step="0.01" min="0" max="1" /></div>
+              <div><label data-i18n="bot.minhits"></label><input id="b_minhits" type="number" min="0" /></div>
+              <div><label data-i18n="bot.topk"></label><input id="b_topk" type="number" min="1" /></div>
+              <div><label data-i18n="bot.suggestions"></label><input id="b_sugg" type="number" min="1" /></div>
+              <div><label data-i18n="bot.maxchars"></label><input id="b_maxchars" type="number" min="1" /></div>
+            </div>
+            <h4 data-i18n="bot.caps"></h4>
+            <div class="row">
+              <div><label data-i18n="bot.cap.tenant"></label><input id="b_cap_tenant" type="number" min="0" /></div>
+              <div><label data-i18n="bot.cap.enduser"></label><input id="b_cap_enduser" type="number" min="0" /></div>
+            </div>
+          </div>
+
+          <!-- The refusal-vs-general-knowledge choice, stated as the risk it is. Off by default. -->
+          <div class="card">
+            <label class="inline" style="gap:8px"><input type="checkbox" id="b_general" style="width:auto" /> <span data-i18n="bot.general"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="bot.general.risk"></div>
+            <label class="inline" style="gap:8px; margin-top:14px"><input type="checkbox" id="b_handoff" style="width:auto" /> <span data-i18n="bot.handoff"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="bot.handoff.hint"></div>
+          </div>
+
+          <div class="card">
+            <div class="actions"><button class="primary" id="saveBot" data-i18n="bot.save"></button></div>
+            <div class="msg" id="botMsg"></div>
+            <div class="hint" id="botVersion"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- HISTORY -->
       <section class="panel" id="panel-history">
         <div class="card">
@@ -186,13 +279,15 @@
       tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active');
       if (tb.dataset.tab==='kb') loadDocs(); if (tb.dataset.tab==='history') loadJobs();
       if (tb.dataset.tab==='health') loadCuration();
+      if (tb.dataset.tab==='bot') loadBot();
     }));
     document.querySelectorAll('#panel-kb .subtab').forEach(s => s.addEventListener('click', () => {
       document.querySelectorAll('#panel-kb .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
     }));
     document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) { loadDocs(); loadJobs();
-      if ($('panel-health').classList.contains('active')) loadCuration(); } });
+      if ($('panel-health').classList.contains('active')) loadCuration();
+      if (botCfg) botStatePill(); } });   // the state pill is built in JS, not data-i18n
 
     // dropzone
     const audioInput = $('audio');
@@ -592,6 +687,140 @@
       try { await curPost(`${CUR}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
+    });
+
+    // ---- BOT: the tenant's own autopilot configuration ---------------------------------
+    // Reads/writes `chat_configs` through the tenant-scoped mirror of the superadmin route
+    // (`/admin/chat/{tenant_id}/config`), exactly as `/scoring/config` mirrors its admin twin.
+    // If that route is not deployed yet the tab says so rather than throwing: a tenant seeing
+    // a dead tab must be told it is the server, not their browser.
+    const BOTCFG = `${API}/chat/config`;
+    const BOT_LANGS = ['en','ka','ru'];
+    let botCfg = null;
+
+    function botStatePill() {
+      const el = $('botState');
+      const killed = !!(botCfg && botCfg.killed);          // set by the superadmin kill switch
+      const on = $('b_autopilot').checked;
+      el.className = 'pill ' + (killed ? 'error' : on ? 'ready' : 'notinkb');
+      el.textContent = killed ? t('bot.state.killed') : on ? t('bot.state.live') : t('bot.state.off');
+      $('botKilled').classList.toggle('hidden', !killed);
+    }
+
+    function fillBot(cfg) {
+      botCfg = cfg || {};
+      const s = (botCfg.settings && typeof botCfg.settings === 'object') ? botCfg.settings : {};
+      const g = (botCfg.greeting && typeof botCfg.greeting === 'object') ? botCfg.greeting : {};
+      const rf = (botCfg.refusal_copy && typeof botCfg.refusal_copy === 'object') ? botCfg.refusal_copy : {};
+      const limits = (s.limits && typeof s.limits === 'object') ? s.limits : {};
+      const langs = Array.isArray(botCfg.languages) && botCfg.languages.length ? botCfg.languages : BOT_LANGS;
+      $('b_autopilot').checked = !!botCfg.autopilot_enabled;
+      $('b_persona').value = botCfg.persona || '';
+      BOT_LANGS.forEach(l => { $('b_greet_'+l).value = g[l] || ''; $('b_ref_'+l).value = rf[l] || ''; });
+      document.querySelectorAll('.b-lang').forEach(cb => { cb.checked = langs.includes(cb.dataset.lang); });
+      const kw = s.escalation_keywords;
+      $('b_escalation').value = Array.isArray(kw) ? kw.join(', ') : (typeof kw === 'string' ? kw : '');
+      $('b_minscore').value = botCfg.min_score ?? 0.35;
+      $('b_minhits').value  = botCfg.min_hits ?? 1;
+      $('b_topk').value     = botCfg.top_k ?? 8;
+      $('b_sugg').value     = botCfg.suggestion_count ?? 2;
+      $('b_maxchars').value = s.max_reply_chars ?? 1200;
+      $('b_cap_tenant').value  = limits.tenant_per_minute ?? '';
+      $('b_cap_enduser').value = limits.enduser_per_hour ?? '';
+      // Never `??`-default this to true: the safe value is false and a missing key means false.
+      $('b_general').checked = s.allow_general_knowledge === true;
+      $('b_handoff').checked = s.handoff_summary !== false;
+      $('botVersion').textContent = botCfg.version ? `${t('bot.version')} ${botCfg.version}` : '';
+      $('botNeedPublic').classList.add('hidden');
+      botStatePill();
+    }
+
+    $('reloadBot').addEventListener('click', loadBot);
+    async function loadBot() {
+      const m = $('botLoadMsg'); m.classList.add('hidden'); m.textContent = '';
+      let d = null;
+      try {
+        const r = await fetch(BOTCFG, { headers: authH() });
+        if (r.status === 404 || r.status === 405) { throw new Error(t('bot.unavailable')); }
+        if (!r.ok) throw new Error(t('bot.loadfail'));
+        d = await r.json();
+      } catch (e) {
+        $('botForm').classList.add('hidden');
+        m.classList.remove('hidden'); m.textContent = e.message || t('bot.loadfail'); return;
+      }
+      if (!d || typeof d !== 'object') { m.classList.remove('hidden'); m.textContent = t('bot.loadfail'); return; }
+      $('botForm').classList.remove('hidden');
+      fillBot(d);
+    }
+
+    $('b_autopilot').addEventListener('change', () => { $('botNeedPublic').classList.add('hidden'); botStatePill(); });
+
+    // Turning general knowledge ON is a deliberate risk decision, so it costs a confirmation.
+    // Turning it OFF never does — the safe direction is always one click.
+    $('b_general').addEventListener('change', async () => {
+      if (!$('b_general').checked) return;
+      $('b_general').checked = false;
+      if (await CQ.confirm(t('bot.general.confirm'), { ok: t('bot.general.on') })) $('b_general').checked = true;
+    });
+
+    function botNeedPublicHTML() {
+      return `<b>${esc(t('bot.needpublic.title'))}</b><div style="margin-top:6px">${esc(t('bot.needpublic.body'))}</div>
+        <div class="actions"><button class="ghost" id="botToKb">${esc(t('bot.needpublic.link'))}</button></div>`;
+    }
+
+    $('saveBot').addEventListener('click', async () => {
+      const m = $('botMsg'); m.className = 'msg'; m.textContent = '';
+      $('botNeedPublic').classList.add('hidden');
+      const langs = [...document.querySelectorAll('.b-lang')].filter(cb => cb.checked).map(cb => cb.dataset.lang);
+      if (!langs.length) { m.className = 'msg err'; m.textContent = t('bot.languages.pickone'); return; }
+      const greeting = {}, refusal = {};
+      BOT_LANGS.forEach(l => {
+        const g = $('b_greet_'+l).value.trim(), rf = $('b_ref_'+l).value.trim();
+        if (g) greeting[l] = g; if (rf) refusal[l] = rf;
+      });
+      // A public bot with no refusal copy in a language it answers in would improvise the most
+      // frequently-read sentence in the product. Block it here rather than discover it live.
+      if ($('b_autopilot').checked) {
+        const missing = langs.find(l => !refusal[l]);
+        if (missing) { m.className = 'msg err'; m.textContent = t('bot.refusal.missing').replace('{lang}', t('bot.lang.'+missing)); return; }
+      }
+      const num = (id, dflt) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : dflt; };
+      const optInt = id => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : undefined; };
+      const prev = (botCfg && typeof botCfg.settings === 'object' && botCfg.settings) ? botCfg.settings : {};
+      const limits = {};
+      if (optInt('b_cap_tenant') !== undefined) limits.tenant_per_minute = optInt('b_cap_tenant');
+      if (optInt('b_cap_enduser') !== undefined) limits.enduser_per_hour = optInt('b_cap_enduser');
+      const body = {
+        persona: $('b_persona').value.trim() || null,
+        greeting, refusal_copy: refusal, languages: langs,
+        canned: Array.isArray(botCfg && botCfg.canned) ? botCfg.canned : [],
+        autopilot_enabled: $('b_autopilot').checked,
+        settings: { ...prev,                                   // unknown knobs survive a save
+          min_score: num('b_minscore', 0.35), min_hits: num('b_minhits', 1),
+          top_k: num('b_topk', 8), suggestion_count: num('b_sugg', 2),
+          max_reply_chars: num('b_maxchars', 1200),
+          escalation_keywords: $('b_escalation').value.split(',').map(s => s.trim()).filter(Boolean),
+          allow_general_knowledge: $('b_general').checked,
+          handoff_summary: $('b_handoff').checked,
+          limits },
+      };
+      const b = $('saveBot'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await fetch(BOTCFG, { method:'PUT', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+        // 409 == "no published documents". Explain the reason and point at the fix; a toggle
+        // that only fails is the difference between a broken product and one that teaches.
+        if (r.status === 409) {
+          $('b_autopilot').checked = false; botStatePill();
+          const np = $('botNeedPublic'); np.innerHTML = botNeedPublicHTML(); np.classList.remove('hidden');
+          $('botToKb').addEventListener('click', () => { const tb = document.querySelector('.tab[data-tab="kb"]'); if (tb) tb.click(); });
+          return;
+        }
+        const d = await CQ.readResp(r);
+        fillBot(d && typeof d === 'object' ? d : body);
+        m.className = 'msg ok'; m.textContent = t('bot.saved'); CQ.toast(t('bot.saved'), 'ok');
+      } catch (e) {
+        m.className = 'msg err'; m.textContent = e.message || t('toast.error'); CQ.toast(e.message || t('toast.error'), 'err');
+      } finally { b.disabled = false; b.textContent = t('bot.save'); }
     });
 
     // history

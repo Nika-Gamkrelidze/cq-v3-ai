@@ -163,9 +163,21 @@ async def _retrieve_ranked(client_id: str, query: str, top_k: int, min_score: fl
     # the embed below is outbound HTTP with a multi-second budget, and holding one of the
     # pool's few connections across it would let a slow TEI backend starve every other
     # request in the process (auth, /health, analyze) — see services/embeddings.
+    # Scoped to the SAME visibility the retrieval below will use, or the probe answers a
+    # different question than the caller asked: a tenant whose KB is entirely 'internal' has
+    # nothing the public bot may read, and reporting `kb_present: True` there turns "this
+    # tenant has published nothing" into "the KB had nothing to say". Those are different
+    # operational facts — they select different refusal copy and the P2 curation miner counts
+    # them differently — and the publishing one is the actionable half.
     async with pool().acquire() as conn:
-        kb_present = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM kb_chunks WHERE client_id = $1)", client_id)
+        if visibility is None:
+            kb_present = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM kb_chunks WHERE client_id = $1)", client_id)
+        else:
+            kb_present = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM kb_chunks c JOIN kb_documents d "
+                "ON d.id = c.document_id WHERE c.client_id = $1 AND d.visibility = $2)",
+                client_id, visibility)
     if not kb_present:
         return _empty_ranked(False)
 
