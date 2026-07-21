@@ -46,13 +46,26 @@ async def analyze_audio(file: UploadFile = File(...),
     return result
 
 
-def _scope(principal: Principal):
-    """Return (where_sql, args) restricting jobs to what this principal may see."""
+def _scope(principal: Principal, first: int = 1):
+    """Return (where_sql, args) restricting jobs to what this principal may see.
+
+    `first` is the placeholder number the predicate may start at, so /jobs/{id} can put the job
+    id in $1 and still share this one policy — two hand-written copies is how a scope check ends
+    up fixed in only one of them.
+
+    An integration credential is REJECTED rather than falling through to the anonymous branch.
+    It read as safe only by accident (its anon_key is None and `anon_key = NULL` matches no row),
+    which is a property of the data, not a decision — and the next principal kind added would
+    inherit the same silent default.
+    """
     if principal.is_superadmin:
         return "TRUE", []
     if principal.is_tenant:
-        return "client_id = $1", [principal.client_id]
-    return "anon_key = $1 AND principal_type = 'anonymous'", [principal.anon_key]
+        return f"client_id = ${first}", [principal.client_id]
+    if principal.kind == "integration":
+        raise HTTPException(status_code=403,
+                            detail="This integration credential cannot read audio jobs.")
+    return f"anon_key = ${first} AND principal_type = 'anonymous'", [principal.anon_key]
 
 
 @router.get("/jobs")
@@ -73,12 +86,7 @@ async def get_job(job_id: str, principal: Principal = Depends(resolve_principal)
     # Build the scope predicate with placeholders after $1 (job_id).
     cols = ("id, filename, content_type, size_bytes, status, language, transcript, "
             "analysis, kb_used, kb_check, scoring, stt_model, llm_model, error, processing_ms, created_at")
-    if principal.is_superadmin:
-        where, args = "TRUE", []
-    elif principal.is_tenant:
-        where, args = "client_id = $2", [principal.client_id]
-    else:
-        where, args = "anon_key = $2 AND principal_type = 'anonymous'", [principal.anon_key]
+    where, args = _scope(principal, first=2)
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             f"SELECT {cols} FROM audio_jobs WHERE id = $1 AND {where}", job_id, *args)

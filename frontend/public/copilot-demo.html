@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Copilot demo</title>
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <script src="brand.js"></script>
+
+  <!-- Page-scoped styles only. brand.css has no message-list / bubble / rail vocabulary, and this
+       page is a demo harness rather than a shipped surface, so nothing here is promoted into the
+       shared sheet yet. Everything below is built from the existing light/dark custom properties
+       (--paper/--mist/--muted/--hairline/--input-bg/--beam/--ok/--alert…) so both themes work
+       without a single hardcoded colour. -->
+  <style>
+    main { max-width: 1180px; }
+
+    .cd-grid { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; }
+    @media (max-width: 980px) { .cd-grid { grid-template-columns: minmax(0,1fr); } }
+
+    .cd-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+    .cd-head h3 { margin:0; }
+
+    /* ---- thread ---- */
+    .cd-thread-list { display:flex; flex-direction:column; gap:10px; min-height:120px; max-height:46vh; overflow-y:auto; padding-right:4px; }
+    .cd-msg { max-width:86%; padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.55;
+              border:1px solid var(--hairline); background:var(--input-bg); color:var(--paper); white-space:pre-wrap; word-break:break-word; }
+    .cd-msg .cd-who { display:block; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+    .cd-msg.customer { border-bottom-left-radius:4px; }
+    .cd-msg.operator { margin-left:auto; border-bottom-right-radius:4px;
+                       background:color-mix(in oklab,var(--beam) 13%,var(--input-bg));
+                       border-color:color-mix(in oklab,var(--beam) 42%,var(--hairline)); }
+
+    /* ---- stage timings: the product claim, made legible ---- */
+    .cd-stages { display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 12px; }
+    .cd-stage { display:inline-flex; align-items:baseline; gap:6px; padding:4px 10px; border-radius:999px;
+                font-size:11.5px; border:1px solid var(--hairline); background:var(--input-bg); color:var(--muted);
+                font-variant-numeric:tabular-nums; }
+    .cd-stage b { color:var(--paper); font-weight:700; }
+    .cd-stage.first { border-color:color-mix(in oklab,var(--ok) 55%,transparent); color:var(--ok); }
+    .cd-stage.first b { color:var(--ok); }
+    .cd-stage.warm { border-color:color-mix(in oklab,var(--beam) 55%,transparent); color:var(--beam); }
+    .cd-stage.warm b { color:var(--beam); }
+
+    /* ---- grounding banner ---- */
+    .cd-ground { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 12px; border-radius:var(--r-md);
+                 border:1px solid var(--hairline); background:var(--input-bg); font-size:13px; margin-bottom:12px; }
+    .cd-ground.yes { border-color:color-mix(in oklab,var(--ok) 45%,transparent); background:color-mix(in oklab,var(--ok) 8%,var(--input-bg)); }
+    .cd-ground.no  { border-color:color-mix(in oklab,var(--alert) 45%,transparent); background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); }
+    .cd-ground .cd-num { color:var(--muted); font-variant-numeric:tabular-nums; }
+
+    /* ---- tier-1 KB passage cards (rendered BEFORE any model output) ---- */
+    .cd-sec { margin-top:16px; }
+    .cd-sec-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .cd-sec-head h4 { margin:0; font-family:var(--font-display); font-size:13px; letter-spacing:.02em; color:var(--paper); }
+    .cd-badge { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:3px 9px; border-radius:999px;
+                background:color-mix(in oklab,var(--ok) 16%,transparent); color:var(--ok); }
+    .cd-badge.zero { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+    .cd-pass { border:1px solid var(--hairline); border-left:3px solid var(--ok); border-radius:var(--r-md);
+               padding:10px 12px; margin-top:8px; background:var(--input-bg); font-size:13.5px; line-height:1.55; }
+    .cd-pass .cd-pass-t { font-weight:700; color:var(--paper); margin-bottom:3px; }
+    .cd-pass .cd-pass-n { color:var(--beam); font-weight:800; margin-right:6px; }
+    .cd-pass .cd-pass-s { color:var(--mist); }
+
+    /* ---- draft variants ---- */
+    .cd-var { border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px 13px; margin-top:10px; background:var(--input-bg); }
+    .cd-var-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+    .cd-var-kind { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--beam); }
+    .cd-var-text { font-size:14px; line-height:1.6; color:var(--paper); white-space:pre-wrap; word-break:break-word; min-height:1.2em; }
+    .cd-var-text.streaming:after { content:'▍'; color:var(--beam); animation:cdblink 1s steps(1) infinite; }
+    @keyframes cdblink { 50% { opacity:0; } }
+    .cd-var .actions { margin-top:10px; }
+    .cd-var textarea { min-height:92px; margin-top:8px; }
+
+    .cd-cites { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .cd-cite { cursor:pointer; border:1px solid color-mix(in oklab,var(--beam) 45%,var(--hairline)); background:transparent;
+               color:var(--beam); font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:999px; font-family:inherit; }
+    .cd-cite:hover { background:color-mix(in oklab,var(--beam) 12%,transparent); }
+
+    .cd-refusal { border:1px solid color-mix(in oklab,var(--alert) 45%,transparent); border-radius:var(--r-md);
+                  background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); padding:12px 13px; margin-top:10px; font-size:13.5px; line-height:1.6; }
+    .cd-refusal .cd-r-h { font-weight:700; color:var(--coral); margin-bottom:6px; }
+
+    .cd-note { font-size:11.5px; color:var(--muted); line-height:1.6; }
+    .cd-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--mist); word-break:break-all; }
+    .cd-modal-wide { max-width:560px; text-align:left; }
+  </style>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main>
+    <!-- ---------------- credentials + conversation ---------------- -->
+    <div class="card">
+      <div class="cd-head">
+        <h3 data-i18n="cd.creds"></h3>
+        <span class="cd-note" data-i18n="cd.note"></span>
+      </div>
+      <div class="row">
+        <div style="flex:2"><label data-i18n="cd.f.key"></label>
+          <input type="password" id="f_key" autocomplete="off" spellcheck="false" placeholder="cqi_…" /></div>
+        <div><label data-i18n="cd.f.tenant"></label><input id="f_tenant" autocomplete="off" spellcheck="false" /></div>
+        <div><label data-i18n="cd.f.expect"></label><input id="f_expect" autocomplete="off" spellcheck="false" /></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div style="max-width:150px"><label data-i18n="cd.f.locale"></label>
+          <select id="f_locale"><option value="ka">ka</option><option value="ru">ru</option><option value="en">en</option></select></div>
+        <div style="max-width:190px"><label data-i18n="cd.f.channel"></label>
+          <select id="f_channel"><option value="web">web</option><option value="instagram">instagram</option>
+            <option value="messenger">messenger</option><option value="whatsapp">whatsapp</option></select></div>
+        <div><label data-i18n="cd.conv"></label><div class="cd-mono" id="convRef" style="padding-top:9px"></div></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="newConv" data-i18n="cd.newconv"></button>
+        <button class="ghost" id="reopen" data-i18n="cd.reopen"></button>
+      </div>
+      <div class="hint" data-i18n="cd.creds.hint"></div>
+    </div>
+
+    <div class="cd-grid">
+      <!-- ---------------- thread ---------------- -->
+      <section class="card">
+        <div class="cd-head"><h3 data-i18n="cd.thread"></h3></div>
+        <div class="cd-thread-list" id="thread"></div>
+        <div style="margin-top:14px">
+          <label data-i18n="cd.inbound"></label>
+          <textarea id="inbound" data-i18n-ph="cd.inbound.ph" style="min-height:88px"></textarea>
+        </div>
+        <div class="actions"><button class="primary" id="sendBtn" data-i18n="cd.send"></button></div>
+        <div class="msg err" id="sendErr"></div>
+      </section>
+
+      <!-- ---------------- copilot rail ---------------- -->
+      <section class="card">
+        <div class="cd-head"><h3 data-i18n="cd.rail"></h3></div>
+        <div class="cd-stages" id="stages"></div>
+        <div id="rail"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  /* ============================================================================================
+     CQ v3 AI — operator copilot reference harness (P1 demo).
+
+     WHY THIS PAGE EXISTS
+     This is the artefact the chat-site team copies. Production callers are server-to-server: the
+     integration key lives in THEIR backend and never reaches a browser. Here an operator pastes a
+     key for local testing and it is held in a JS variable only — never localStorage, never
+     sessionStorage, never a query string.
+
+     It deliberately renders the tier ladder honestly, in the order the architecture produces it:
+        POST /v1/chat/turns  ->  grounding gate (deterministic, no LLM)
+                             ->  tier-1 KB passage cards   (NO model call, 0 tokens)
+                             ->  streamed draft variants   (the only tokens spent)
+     …with a measured millisecond readout per stage, because "the tier-1 cards land before the
+     model does" is the product claim and a demo that hides it proves nothing.
+
+     STREAMING: CQ.readResp() does `await r.text()` on the whole body, so it cannot be used for
+     SSE. The stream is read with the platform's own EventSource (which is why /stream takes a
+     single-use ticket in the query string — EventSource cannot set headers). brand.js is NOT
+     modified by this page.
+     ============================================================================================ */
+  const API = CQ.API;
+  const $ = id => document.getElementById(id);
+  const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  CQ.mountHeader({ tag: 'Copilot', nav: [
+    { i18n: 'nav.public', href: 'index.html' },
+    { label: 'Tenant', href: 'tenant.html' },
+  ]});
+
+  /* ---------------------------------------------------------------------------------------
+     Page-local i18n. brand.js's shared DICT is not owned by this track, so these strings live
+     here. FOLD THESE INTO brand.js's DICT (all three languages, keys kept in sync) when the
+     copilot graduates from a demo into a shipped operator surface.
+     --------------------------------------------------------------------------------------- */
+  const PD = {
+    en: {
+      'cd.creds':'Integration credentials',
+      'cd.creds.hint':'Operator harness. The key is kept in memory for this tab only — never stored, never put in a URL. Production callers send X-CQ-Key server-to-server; it must never reach a browser.',
+      'cd.note':'Reference harness for the chat-site team',
+      'cd.f.key':'X-CQ-Key','cd.f.tenant':'X-CQ-Tenant (client id or slug)','cd.f.expect':'X-CQ-Expect-Tenant (optional)',
+      'cd.f.locale':'Locale','cd.f.channel':'Channel','cd.conv':'Conversation ref',
+      'cd.newconv':'New conversation','cd.reopen':'Re-open conversation',
+      'cd.thread':'Thread','cd.thread.empty':'No messages yet.',
+      'cd.inbound':'Inbound customer message','cd.inbound.ph':'Paste a customer message in Georgian, Russian or English…',
+      'cd.send':'Send to copilot',
+      'cd.needkey':'Paste an integration key and a tenant selector first.',
+      'cd.needtext':'Type a customer message first.',
+      'cd.needturn':'Send a message first — there is nothing cached to re-open.',
+      'cd.rail':'Copilot','cd.rail.empty':'Suggestions appear here the moment a customer message lands.',
+      'cd.waiting':'waiting for the copilot…',
+      'cd.stage.ingest':'ingest','cd.stage.ticket':'ticket','cd.stage.grounding':'gate','cd.stage.tier1':'tier-1 cards',
+      'cd.stage.first':'first token','cd.stage.done':'done','cd.stage.warm':'warm read','cd.stage.srv':'server',
+      'cd.grounded':'Grounded in this tenant’s KB','cd.ungrounded':'Not grounded — no KB support',
+      'cd.method':'method','cd.top':'top score','cd.hits':'hits','cd.kbempty':'KB empty',
+      'cd.tier1':'KB passages','cd.tier1.badge':'no model call · 0 tokens','cd.tier1.none':'No KB passage cleared the gate.',
+      'cd.variants':'Draft replies','cd.variants.none':'No draft was generated.',
+      'cd.refusal':'Refused before any Claude call','cd.handoff':'Hand off to a human','cd.reason':'reason',
+      'cd.tokens':'tokens','cd.notokens':'0 tokens — no model was called',
+      'cd.insert':'Insert','cd.edit':'Edit & send','cd.ignore':'Ignore','cd.sendedit':'Send edited','cd.cancelEdit':'Cancel',
+      'cd.fb.inserted':'Insert recorded','cd.fb.edited':'Edit recorded','cd.fb.ignored':'Ignored',
+      'cd.cite':'Citation','cd.cite.doc':'document','cd.cite.chunk':'chunk','cd.cite.score':'score','cd.cite.nosnip':'No passage text was returned for this citation.',
+      'cd.close':'Close',
+      'cd.streamfail':'Stream unavailable — falling back to polling the warm path.',
+      'cd.err':'Copilot error','cd.role.customer':'Customer','cd.role.operator':'Operator','cd.role.bot':'Bot',
+    },
+    ka: {
+      'cd.creds':'ინტეგრაციის სერტიფიკატები',
+      'cd.creds.hint':'ოპერატორის სატესტო გარემო. გასაღები ინახება მხოლოდ ამ ჩანართის მეხსიერებაში — არსად არ ინახება და არასდროს ხვდება URL-ში. რეალურ ინტეგრაციაში X-CQ-Key იგზავნება სერვერიდან სერვერზე და ბრაუზერამდე არ უნდა მოვიდეს.',
+      'cd.note':'საცნობარო გარემო ჩატის გუნდისთვის',
+      'cd.f.key':'X-CQ-Key','cd.f.tenant':'X-CQ-Tenant (client id ან slug)','cd.f.expect':'X-CQ-Expect-Tenant (არასავალდებულო)',
+      'cd.f.locale':'ენა','cd.f.channel':'არხი','cd.conv':'საუბრის ID',
+      'cd.newconv':'ახალი საუბარი','cd.reopen':'საუბრის ხელახლა გახსნა',
+      'cd.thread':'მიმოწერა','cd.thread.empty':'ჯერ შეტყობინებები არ არის.',
+      'cd.inbound':'შემომავალი შეტყობინება','cd.inbound.ph':'ჩასვით მომხმარებლის შეტყობინება ქართულად, რუსულად ან ინგლისურად…',
+      'cd.send':'გაგზავნა კოპილოტთან',
+      'cd.needkey':'ჯერ ჩასვით ინტეგრაციის გასაღები და ტენანტი.',
+      'cd.needtext':'ჯერ აკრიფეთ შეტყობინება.',
+      'cd.needturn':'ჯერ გაგზავნეთ შეტყობინება — ქეშში არაფერია.',
+      'cd.rail':'კოპილოტი','cd.rail.empty':'შემოთავაზებები გამოჩნდება მომხმარებლის შეტყობინების მოსვლისთანავე.',
+      'cd.waiting':'ველოდებით კოპილოტს…',
+      'cd.stage.ingest':'მიღება','cd.stage.ticket':'ბილეთი','cd.stage.grounding':'შემოწმება','cd.stage.tier1':'tier-1 ბარათები',
+      'cd.stage.first':'პირველი ტოკენი','cd.stage.done':'დასრულდა','cd.stage.warm':'ქეშიდან','cd.stage.srv':'სერვერი',
+      'cd.grounded':'დაფუძნებულია ამ ტენანტის ბაზაზე','cd.ungrounded':'არ არის დაფუძნებული — ბაზაში დადასტურება ვერ მოიძებნა',
+      'cd.method':'მეთოდი','cd.top':'მაქს. ქულა','cd.hits':'დამთხვევები','cd.kbempty':'ბაზა ცარიელია',
+      'cd.tier1':'ცოდნის ბაზის ამონარიდები','cd.tier1.badge':'მოდელის გარეშე · 0 ტოკენი','cd.tier1.none':'ვერცერთმა ამონარიდმა გაიარა ზღვარი.',
+      'cd.variants':'პასუხის ვარიანტები','cd.variants.none':'ვარიანტი არ დაგენერირდა.',
+      'cd.refusal':'უარი — Claude-ის გამოძახების გარეშე','cd.handoff':'გადაეცი ოპერატორს','cd.reason':'მიზეზი',
+      'cd.tokens':'ტოკენები','cd.notokens':'0 ტოკენი — მოდელი არ გამოძახებულა',
+      'cd.insert':'ჩასმა','cd.edit':'რედაქტირება და გაგზავნა','cd.ignore':'იგნორი','cd.sendedit':'გაგზავნა','cd.cancelEdit':'გაუქმება',
+      'cd.fb.inserted':'ჩასმა დაფიქსირდა','cd.fb.edited':'რედაქტირება დაფიქსირდა','cd.fb.ignored':'იგნორი დაფიქსირდა',
+      'cd.cite':'წყარო','cd.cite.doc':'დოკუმენტი','cd.cite.chunk':'ფრაგმენტი','cd.cite.score':'ქულა','cd.cite.nosnip':'ამ წყაროსთვის ტექსტი არ დაბრუნებულა.',
+      'cd.close':'დახურვა',
+      'cd.streamfail':'ნაკადი მიუწვდომელია — ვიყენებთ ქეშის გამოკითხვას.',
+      'cd.err':'კოპილოტის შეცდომა','cd.role.customer':'მომხმარებელი','cd.role.operator':'ოპერატორი','cd.role.bot':'ბოტი',
+    },
+    ru: {
+      'cd.creds':'Учётные данные интеграции',
+      'cd.creds.hint':'Операторский стенд. Ключ хранится только в памяти этой вкладки — нигде не сохраняется и никогда не попадает в URL. В продакшене X-CQ-Key передаётся сервер-серверу и не должен попадать в браузер.',
+      'cd.note':'Эталонный стенд для команды чат-платформы',
+      'cd.f.key':'X-CQ-Key','cd.f.tenant':'X-CQ-Tenant (client id или slug)','cd.f.expect':'X-CQ-Expect-Tenant (необязательно)',
+      'cd.f.locale':'Язык','cd.f.channel':'Канал','cd.conv':'ID диалога',
+      'cd.newconv':'Новый диалог','cd.reopen':'Открыть диалог заново',
+      'cd.thread':'Диалог','cd.thread.empty':'Сообщений пока нет.',
+      'cd.inbound':'Входящее сообщение клиента','cd.inbound.ph':'Вставьте сообщение клиента на грузинском, русском или английском…',
+      'cd.send':'Отправить копилоту',
+      'cd.needkey':'Сначала вставьте ключ интеграции и укажите тенанта.',
+      'cd.needtext':'Сначала введите сообщение клиента.',
+      'cd.needturn':'Сначала отправьте сообщение — в кэше пока ничего нет.',
+      'cd.rail':'Копилот','cd.rail.empty':'Подсказки появятся сразу после сообщения клиента.',
+      'cd.waiting':'ждём копилот…',
+      'cd.stage.ingest':'приём','cd.stage.ticket':'тикет','cd.stage.grounding':'проверка','cd.stage.tier1':'карточки tier-1',
+      'cd.stage.first':'первый токен','cd.stage.done':'готово','cd.stage.warm':'из кэша','cd.stage.srv':'сервер',
+      'cd.grounded':'Обосновано базой знаний тенанта','cd.ungrounded':'Не обосновано — подтверждения в базе нет',
+      'cd.method':'метод','cd.top':'макс. оценка','cd.hits':'совпадения','cd.kbempty':'база пуста',
+      'cd.tier1':'Фрагменты базы знаний','cd.tier1.badge':'без вызова модели · 0 токенов','cd.tier1.none':'Ни один фрагмент не прошёл порог.',
+      'cd.variants':'Варианты ответа','cd.variants.none':'Вариант не сгенерирован.',
+      'cd.refusal':'Отказ — без вызова Claude','cd.handoff':'Передать оператору','cd.reason':'причина',
+      'cd.tokens':'токены','cd.notokens':'0 токенов — модель не вызывалась',
+      'cd.insert':'Вставить','cd.edit':'Изменить и отправить','cd.ignore':'Пропустить','cd.sendedit':'Отправить','cd.cancelEdit':'Отмена',
+      'cd.fb.inserted':'Вставка учтена','cd.fb.edited':'Правка учтена','cd.fb.ignored':'Пропуск учтён',
+      'cd.cite':'Источник','cd.cite.doc':'документ','cd.cite.chunk':'фрагмент','cd.cite.score':'оценка','cd.cite.nosnip':'Текст для этого источника не вернулся.',
+      'cd.close':'Закрыть',
+      'cd.streamfail':'Поток недоступен — переходим на опрос кэша.',
+      'cd.err':'Ошибка копилота','cd.role.customer':'Клиент','cd.role.operator':'Оператор','cd.role.bot':'Бот',
+    },
+  };
+  /* Page dict first, shared brand.js DICT second — so 'btn.cancel' & friends still resolve. */
+  const t = k => (PD[CQ.lang()] && PD[CQ.lang()][k]) || PD.en[k] || CQ.t(k);
+  function applyLocal(root = document) {
+    root.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+    root.querySelectorAll('[data-i18n-ph]').forEach(el => { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     State. KEY never leaves this object — no storage, no URL, no logging.
+     --------------------------------------------------------------------------------------- */
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random()*16|0; return (c === 'x' ? r : (r&0x3|0x8)).toString(16); }));
+
+  const S = {
+    convRef: '', endUser: 'demo-operator-' + Math.random().toString(36).slice(2, 8),
+    thread: [],                 // [{role, text}]
+    suggestRef: null, turn: null,
+    t0: 0, marks: {}, srvStages: null,
+    grounding: null, tier1: [], citations: [], variants: [],
+    usage: null, handoff: null, refusal: null,
+    es: null, shownSent: false, editing: null, editText: '',
+    busy: false, err: '',
+  };
+
+  function newConversation() {
+    if (S.es) { S.es.close(); S.es = null; }
+    S.convRef = 'demo-' + uuid().slice(0, 8);
+    S.thread = []; S.suggestRef = null; S.turn = null; S.marks = {}; S.srvStages = null;
+    S.grounding = null; S.tier1 = []; S.citations = []; S.variants = [];
+    S.usage = null; S.handoff = null; S.refusal = null; S.shownSent = false; S.editing = null; S.err = '';
+    $('convRef').textContent = S.convRef;
+    renderThread(); renderStages(); renderRail();
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     Transport helpers
+     --------------------------------------------------------------------------------------- */
+  const KEY = () => $('f_key').value.trim();
+  const TENANT = () => $('f_tenant').value.trim();
+  const EXPECT = () => $('f_expect').value.trim() || TENANT();   // 403 unless it matches the resolved tenant
+
+  function headers(extra = {}) {
+    return {
+      'X-CQ-Key': KEY(),
+      'X-CQ-Tenant': TENANT(),
+      'X-CQ-Expect-Tenant': EXPECT(),   // MANDATORY on writes — makes a caller's mapping bug loud
+      'X-CQ-End-User': S.endUser,       // metering only, NEVER authorization
+      ...extra,
+    };
+  }
+  const now = () => performance.now();
+  const mark = name => { S.marks[name] = Math.round(now() - S.t0); renderStages(); };
+
+  /* ---------------------------------------------------------------------------------------
+     1) POST /v1/chat/turns  — the single ingest. 202 in ~15 ms, precompute fires behind it.
+     --------------------------------------------------------------------------------------- */
+  async function send() {
+    const text = $('inbound').value.trim();
+    $('sendErr').textContent = '';
+    if (!KEY() || !TENANT()) { $('sendErr').textContent = t('cd.needkey'); return; }
+    if (!text) { $('sendErr').textContent = t('cd.needtext'); return; }
+    if (S.busy) return;
+
+    if (S.es) { S.es.close(); S.es = null; }
+    S.busy = true; S.marks = {}; S.srvStages = null; S.grounding = null; S.tier1 = [];
+    S.citations = []; S.variants = []; S.usage = null; S.handoff = null; S.refusal = null;
+    S.shownSent = false; S.editing = null; S.err = '';
+    S.thread.push({ role: 'customer', text });
+    $('inbound').value = '';
+    renderThread(); renderStages(); renderRail();
+
+    const btn = $('sendBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('cd.send') + '…';
+    S.t0 = now();
+    try {
+      const r = await fetch(`${API}/v1/chat/turns`, {
+        method: 'POST',
+        headers: headers({ 'Content-Type': 'application/json', 'Idempotency-Key': uuid() }),
+        body: JSON.stringify({
+          conversation_ref: S.convRef,
+          turn_ref: 't-' + uuid(),
+          role: 'customer',
+          content: text,
+          channel: $('f_channel').value,
+          locale: $('f_locale').value,
+          mode: 'assist',
+        }),
+      });
+      const d = await CQ.readResp(r);
+      mark('ingest');
+      S.turn = d;
+      S.suggestRef = d.suggest_ref || d.suggestion_ref || null;
+      if (d.grounding) S.grounding = d.grounding;
+      if (Array.isArray(d.tier1) && d.tier1.length) { S.tier1 = d.tier1; mark('tier1'); }
+      if (Array.isArray(d.citations)) S.citations = d.citations;
+      renderRail();
+      if (!S.suggestRef) throw new Error(t('cd.err') + ': no suggest_ref returned');
+      await streamSuggestion(S.suggestRef);
+    } catch (e) {
+      S.err = e.message; renderRail(); CQ.toast(e.message, 'err');
+    } finally {
+      S.busy = false; btn.disabled = false; btn.textContent = t('cd.send');
+    }
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     2+3+4) stream-ticket -> EventSource. EventSource cannot set headers, which is exactly why
+     /v1/chat/stream-tickets exists: a 60 s single-use ticket in the query string instead of the
+     integration credential in nginx access logs and browser history.
+
+     NOTE on the 'error' event: a server-sent event NAMED "error" is dispatched on EventSource as
+     an event of type "error" — the same type the browser uses for transport failures. They are
+     told apart by `e.data`: a transport error carries none.
+     --------------------------------------------------------------------------------------- */
+  async function streamSuggestion(ref) {
+    let ticket = null;
+    try {
+      const r = await fetch(`${API}/v1/chat/stream-tickets`, {
+        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ suggest_ref: ref }),
+      });
+      const d = await CQ.readResp(r);
+      ticket = d.ticket || d.stream_ticket || null;
+      mark('ticket');
+    } catch (e) { /* fall through to the warm-path poll below */ }
+
+    if (!ticket) { CQ.toast(t('cd.streamfail'), 'err'); return pollSuggestion(ref); }
+
+    return new Promise(resolve => {
+      const es = new EventSource(`${API}/v1/chat/stream?ticket=${encodeURIComponent(ticket)}`);
+      S.es = es;
+      const finish = () => { es.close(); if (S.es === es) S.es = null; resolve(); };
+
+      es.addEventListener('grounding', ev => {
+        const d = safeJSON(ev.data); if (!d) return;
+        S.grounding = d.grounding || d; mark('grounding'); renderRail();
+      });
+      es.addEventListener('tier1', ev => {
+        const d = safeJSON(ev.data); if (!d) return;
+        // The wire name is `cards` (engine + replay agree); `tier1` is the envelope's name and
+        // is kept as a fallback so this handler also works if the page is fed a Turn object.
+        S.tier1 = Array.isArray(d) ? d : (d.cards || d.tier1 || []);
+        if (Array.isArray(d.citations)) S.citations = d.citations;
+        mark('tier1'); renderRail();
+      });
+      es.addEventListener('delta', ev => {
+        const d = safeJSON(ev.data); if (!d) return;
+        if (S.marks.first == null) mark('first');
+        applyDelta(d.index ?? 0, d.text ?? d.delta ?? '');
+      });
+      es.addEventListener('suggestion', ev => {
+        const d = safeJSON(ev.data); if (!d) return;
+        upsertVariant({ index: d.index ?? S.variants.length, kind: d.kind || 'answer',
+                        text: d.text || '', citations: d.citations || [], streaming: false });
+        renderRail();
+      });
+      es.addEventListener('done', ev => {
+        const d = safeJSON(ev.data);
+        mark('done');
+        if (d) absorbTurn(d.turn || d);
+        renderRail(); sendShownOnce();
+        finish();
+      });
+      es.addEventListener('error', ev => {
+        // Named server "error" event (has data) vs. transport failure (does not).
+        const d = ev.data ? safeJSON(ev.data) : null;
+        if (d) { S.err = d.detail || d.error || t('cd.err'); renderRail(); CQ.toast(S.err, 'err'); finish(); return; }
+        if (es.readyState === EventSource.CLOSED) { finish(); return; }
+        // Transient: let EventSource retry, but stop it from reconnecting forever on a dead route.
+        es.close(); if (S.es === es) S.es = null;
+        CQ.toast(t('cd.streamfail'), 'err');
+        pollSuggestion(ref).then(resolve, resolve);
+      });
+    });
+  }
+
+  /* Warm path / fallback: GET /v1/chat/suggestions/{ref}. `state: running` carries retry_after_ms.
+     This is also exactly what a reconnecting client does — there is no stream-resume protocol. */
+  async function pollSuggestion(ref, { once = false } = {}) {
+    const deadline = now() + 20000;
+    for (;;) {
+      const r = await fetch(`${API}/v1/chat/suggestions/${encodeURIComponent(ref)}`, { headers: headers() });
+      const d = await CQ.readResp(r);
+      if (d.grounding && !S.grounding) { S.grounding = d.grounding; mark('grounding'); }
+      if (Array.isArray(d.tier1) && d.tier1.length && !S.tier1.length) { S.tier1 = d.tier1; mark('tier1'); }
+      if (Array.isArray(d.citations) && d.citations.length) S.citations = d.citations;
+      const state = d.state || (Array.isArray(d.suggestions) && d.suggestions.length ? 'ready' : 'running');
+      if (once || state !== 'running' || now() > deadline) {
+        absorbTurn(d); if (S.marks.done == null) mark('done');
+        renderRail(); sendShownOnce(); return d;
+      }
+      renderRail();
+      await new Promise(res => setTimeout(res, Math.max(60, Math.min(1000, d.retry_after_ms || 150))));
+    }
+  }
+
+  function absorbTurn(d) {
+    if (!d || typeof d !== 'object') return;
+    S.turn = d;
+    if (d.grounding) S.grounding = d.grounding;
+    if (Array.isArray(d.tier1) && d.tier1.length) S.tier1 = d.tier1;
+    if (Array.isArray(d.citations) && d.citations.length) S.citations = d.citations;
+    if (Array.isArray(d.suggestions) && d.suggestions.length) {
+      S.variants = d.suggestions.map((s, i) => ({ index: s.index ?? i, kind: s.kind || 'answer',
+        text: s.text || '', citations: s.citations || [], streaming: false }));
+    }
+    if (d.usage) S.usage = d.usage;
+    if (d.handoff) S.handoff = d.handoff;
+    if (d.reply && d.reply.text && !S.variants.length) S.refusal = d.reply.text;
+    if (d.stages || (d.usage && d.usage.latency_ms)) S.srvStages = d.stages || d.usage.latency_ms;
+    renderStages();
+  }
+
+  function safeJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+
+  function upsertVariant(v) {
+    const i = S.variants.findIndex(x => x.index === v.index);
+    if (i >= 0) S.variants[i] = { ...S.variants[i], ...v }; else S.variants.push(v);
+    S.variants.sort((a, b) => a.index - b.index);
+  }
+  function applyDelta(index, text) {
+    const i = S.variants.findIndex(x => x.index === index);
+    if (i < 0) { upsertVariant({ index, kind: 'answer', text, citations: [], streaming: true }); renderRail(); return; }
+    S.variants[i].text += text; S.variants[i].streaming = true;
+    const node = document.getElementById('cd-vt-' + index);
+    if (node) { node.textContent = S.variants[i].text; node.classList.add('streaming'); }
+    else renderRail();
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     6) POST /v1/chat/feedback — 204. P2's curation loop is trained on exactly this signal, so
+     every button here really fires; nothing is faked for the demo.
+     --------------------------------------------------------------------------------------- */
+  async function feedback(action, variantIndex, finalText) {
+    if (!S.suggestRef) return;
+    try {
+      const r = await fetch(`${API}/v1/chat/feedback`, {
+        method: 'POST', headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          suggest_ref: S.suggestRef,
+          variant_index: variantIndex,
+          suggestion_index: variantIndex,   // envelope calls it `index`, the store `variant_index`,
+                                            // the column `suggestion_index` — send both, ignore the spare
+          action,
+          final_text: finalText ?? null,
+        }),
+      });
+      if (!r.ok && r.status !== 204) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || `HTTP ${r.status}`);
+      }
+    } catch (e) { CQ.toast(e.message, 'err'); }
+  }
+  function sendShownOnce() {
+    if (S.shownSent || !S.variants.length) return;
+    S.shownSent = true;
+    S.variants.forEach(v => feedback('shown', v.index, null));
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     Rendering
+     --------------------------------------------------------------------------------------- */
+  function renderThread() {
+    const box = $('thread');
+    if (!S.thread.length) { box.innerHTML = `<div class="empty">${esc(t('cd.thread.empty'))}</div>`; return; }
+    box.innerHTML = S.thread.map(m => `<div class="cd-msg ${m.role === 'customer' ? 'customer' : 'operator'}">
+      <span class="cd-who">${esc(t('cd.role.' + m.role) || m.role)}</span>${esc(m.text)}</div>`).join('');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function stageChip(key, ms, cls = '') {
+    return `<span class="cd-stage ${cls}">${esc(t('cd.stage.' + key))} <b>${ms} ms</b></span>`;
+  }
+  function renderStages() {
+    const m = S.marks; const out = [];
+    if (m.ingest != null) out.push(stageChip('ingest', m.ingest));
+    if (m.ticket != null) out.push(stageChip('ticket', m.ticket));
+    if (m.grounding != null) out.push(stageChip('grounding', m.grounding));
+    if (m.tier1 != null) out.push(stageChip('tier1', m.tier1, 'first'));   // the claim: BEFORE any token
+    if (m.first != null) out.push(stageChip('first', m.first));
+    if (m.done != null) out.push(stageChip('done', m.done));
+    if (m.warm != null) out.push(stageChip('warm', m.warm, 'warm'));
+    if (S.srvStages && typeof S.srvStages === 'object') {
+      Object.entries(S.srvStages).forEach(([k, v]) => {
+        if (typeof v === 'number') out.push(`<span class="cd-stage">${esc(t('cd.stage.srv'))} · ${esc(k)} <b>${Math.round(v)} ms</b></span>`);
+      });
+    }
+    $('stages').innerHTML = out.join('');
+  }
+
+  function groundHTML() {
+    const g = S.grounding;
+    if (!g) return '';
+    const ok = !!g.grounded;
+    return `<div class="cd-ground ${ok ? 'yes' : 'no'}">
+      <span class="dot ${ok ? 'ok' : 'bad'}"></span>
+      <b style="color:var(--paper)">${esc(ok ? t('cd.grounded') : t('cd.ungrounded'))}</b>
+      <span class="cd-num">${esc(t('cd.method'))}: ${esc(g.method || '—')}</span>
+      <span class="cd-num">${esc(t('cd.top'))}: ${g.top_score != null ? Number(g.top_score).toFixed(3) : '—'}</span>
+      <span class="cd-num">${esc(t('cd.hits'))}: ${g.hit_count ?? 0}</span>
+      ${g.kb_present === false ? `<span class="pill error">${esc(t('cd.kbempty'))}</span>` : ''}
+    </div>`;
+  }
+
+  function citeChipsHTML(ns) {
+    const arr = (ns || []).map(n => (typeof n === 'object' ? n.n : n)).filter(n => n != null);
+    if (!arr.length) return '';
+    return `<div class="cd-cites">` + arr.map(n => {
+      const c = S.citations.find(x => x.n === n) || {};
+      return `<button class="cd-cite" data-cite="${esc(n)}">[${esc(n)}] ${esc(c.title || t('cd.cite'))}</button>`;
+    }).join('') + `</div>`;
+  }
+
+  function tier1HTML() {
+    const zero = !S.tier1.length;
+    const cards = zero
+      ? `<div class="empty">${esc(t('cd.tier1.none'))}</div>`
+      : S.tier1.map(p => `<div class="cd-pass">
+          <div class="cd-pass-t"><span class="cd-pass-n">[${esc(p.n ?? '')}]</span>${esc(p.title || '—')}</div>
+          <div class="cd-pass-s">${esc(p.snippet || p.content || '')}</div>
+        </div>`).join('');
+    return `<div class="cd-sec">
+      <div class="cd-sec-head">
+        <h4>${esc(t('cd.tier1'))}</h4>
+        <span class="cd-badge ${zero ? 'zero' : ''}">${esc(t('cd.tier1.badge'))}</span>
+        ${S.marks.tier1 != null ? `<span class="cd-stage first">${S.marks.tier1} ms</span>` : ''}
+      </div>${cards}</div>`;
+  }
+
+  function tokenLine() {
+    const u = S.usage || {};
+    const inTok = u.input_tokens ?? 0, outTok = u.output_tokens ?? 0;
+    if (inTok === 0 && outTok === 0) return `<span class="cd-badge zero">${esc(t('cd.notokens'))}</span>`;
+    return `<span class="cd-stage">${esc(t('cd.tokens'))} <b>${inTok} / ${outTok}</b></span>`;
+  }
+
+  function variantsHTML() {
+    if (!S.variants.length) {
+      if (S.grounding && S.grounding.grounded === false) {
+        const h = S.handoff || {};
+        return `<div class="cd-sec">
+          <div class="cd-sec-head"><h4>${esc(t('cd.refusal'))}</h4>${tokenLine()}</div>
+          <div class="cd-refusal">
+            <div class="cd-r-h">${esc(t('cd.handoff'))}</div>
+            ${S.refusal ? `<div>${esc(S.refusal)}</div>` : ''}
+            ${h.reason ? `<div class="hint">${esc(t('cd.reason'))}: ${esc(h.reason)}</div>` : ''}
+            ${h.summary ? `<div style="margin-top:6px">${esc(h.summary)}</div>` : ''}
+          </div></div>`;
+      }
+      return `<div class="cd-sec"><div class="cd-sec-head"><h4>${esc(t('cd.variants'))}</h4></div>
+        <div class="empty">${esc(S.busy ? t('cd.waiting') : t('cd.variants.none'))}</div></div>`;
+    }
+    return `<div class="cd-sec">
+      <div class="cd-sec-head"><h4>${esc(t('cd.variants'))}</h4>${S.usage ? tokenLine() : ''}</div>
+      ${S.variants.map(v => {
+        const editing = S.editing === v.index;
+        return `<div class="cd-var">
+          <div class="cd-var-head"><span class="cd-var-kind">${esc(v.kind)}</span></div>
+          <div class="cd-var-text${v.streaming ? ' streaming' : ''}" id="cd-vt-${esc(v.index)}">${esc(v.text)}</div>
+          ${citeChipsHTML(v.citations)}
+          ${editing ? `<textarea id="cd-ed-${esc(v.index)}">${esc(S.editText)}</textarea>` : ''}
+          <div class="actions">
+            ${editing
+              ? `<button class="primary" data-act="send-edit" data-i="${esc(v.index)}">${esc(t('cd.sendedit'))}</button>
+                 <button class="ghost" data-act="cancel-edit" data-i="${esc(v.index)}">${esc(t('cd.cancelEdit'))}</button>`
+              : `<button class="primary" data-act="insert" data-i="${esc(v.index)}">${esc(t('cd.insert'))}</button>
+                 <button class="ghost" data-act="edit" data-i="${esc(v.index)}">${esc(t('cd.edit'))}</button>
+                 <button class="ghost" data-act="ignore" data-i="${esc(v.index)}">${esc(t('cd.ignore'))}</button>`}
+          </div></div>`;
+      }).join('')}</div>`;
+  }
+
+  function renderRail() {
+    const rail = $('rail');
+    if (!S.suggestRef && !S.grounding && !S.tier1.length && !S.err) {
+      rail.innerHTML = `<div class="empty">${esc(t('cd.rail.empty'))}</div>`; return;
+    }
+    rail.innerHTML = (S.err ? `<div class="msg err">${esc(S.err)}</div>` : '')
+      + groundHTML() + tier1HTML() + variantsHTML()
+      + (S.suggestRef ? `<div class="cd-note" style="margin-top:14px">suggest_ref <span class="cd-mono">${esc(S.suggestRef)}</span></div>` : '');
+
+    rail.querySelectorAll('button[data-act]').forEach(b =>
+      b.addEventListener('click', () => variantAction(b.dataset.act, Number(b.dataset.i))));
+    rail.querySelectorAll('button[data-cite]').forEach(b =>
+      b.addEventListener('click', () => showCitation(Number(b.dataset.cite))));
+    const ed = rail.querySelector('textarea[id^="cd-ed-"]');
+    if (ed) { ed.addEventListener('input', () => { S.editText = ed.value; }); ed.focus(); }
+  }
+
+  async function variantAction(act, index) {
+    const v = S.variants.find(x => x.index === index); if (!v) return;
+    if (act === 'insert') {
+      S.thread.push({ role: 'operator', text: v.text }); renderThread();
+      await feedback('inserted', index, v.text);
+      await feedback('sent_asis', index, v.text);
+      CQ.toast(t('cd.fb.inserted'), 'ok'); return;
+    }
+    if (act === 'edit') { S.editing = index; S.editText = v.text; renderRail(); return; }
+    if (act === 'cancel-edit') { S.editing = null; S.editText = ''; renderRail(); return; }
+    if (act === 'send-edit') {
+      const final = (document.getElementById('cd-ed-' + index) || {}).value ?? S.editText;
+      S.editing = null; S.editText = '';
+      S.thread.push({ role: 'operator', text: final }); renderThread(); renderRail();
+      await feedback('edited_sent', index, final);
+      CQ.toast(t('cd.fb.edited'), 'ok'); return;
+    }
+    if (act === 'ignore') { await feedback('ignored', index, null); CQ.toast(t('cd.fb.ignored'), 'ok'); }
+  }
+
+  /* Citation chips resolve against the SERVER-HELD hits list echoed in the envelope — a forged
+     [n] in model text can only produce a wrong index, never a spoofed grounding state. */
+  function showCitation(n) {
+    const c = S.citations.find(x => x.n === n) || {};
+    const p = S.tier1.find(x => x.n === n || (c.chunk_id && x.chunk_id === c.chunk_id)) || {};
+    const bg = document.createElement('div'); bg.className = 'cq-modal-bg';
+    bg.innerHTML = `<div class="cq-modal cd-modal-wide" role="dialog" aria-modal="true">
+      <h3 style="margin:0 0 8px">[${esc(n)}] ${esc(c.title || p.title || t('cd.cite'))}</h3>
+      <p class="cd-mono">${esc(t('cd.cite.doc'))}: ${esc(c.document_id || '—')}<br />
+         ${esc(t('cd.cite.chunk'))}: ${esc(c.chunk_id || p.chunk_id || '—')}<br />
+         ${esc(t('cd.cite.score'))}: ${c.score != null ? Number(c.score).toFixed(3) : '—'}</p>
+      <p>${esc(p.snippet || p.content || t('cd.cite.nosnip'))}</p>
+      <div class="actions"><button class="primary" data-c>${esc(t('cd.close'))}</button></div></div>`;
+    document.body.appendChild(bg);
+    const close = () => bg.remove();
+    bg.querySelector('[data-c]').addEventListener('click', close);
+    bg.addEventListener('click', e => { if (e.target === bg) close(); });
+    bg.querySelector('[data-c]').focus();
+  }
+
+  /* Re-open the conversation: one indexed SELECT off Postgres. This is the 25 ms number, measured
+     in the browser rather than asserted in a slide. */
+  async function reopen() {
+    $('sendErr').textContent = '';
+    if (!S.suggestRef) { $('sendErr').textContent = t('cd.needturn'); return; }
+    const btn = $('reopen'); btn.disabled = true;
+    S.t0 = now(); S.marks = {}; S.srvStages = null; S.shownSent = true;   // already counted as shown
+    try {
+      await pollSuggestion(S.suggestRef, { once: true });
+      S.marks.warm = Math.round(now() - S.t0); delete S.marks.done;
+      renderStages(); renderRail();
+    } catch (e) { $('sendErr').textContent = e.message; }
+    finally { btn.disabled = false; }
+  }
+
+  /* ---------------------------------------------------------------------------------------
+     Wiring
+     --------------------------------------------------------------------------------------- */
+  $('sendBtn').addEventListener('click', send);
+  $('inbound').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); });
+  $('newConv').addEventListener('click', newConversation);
+  $('reopen').addEventListener('click', reopen);
+  document.addEventListener('cq:lang', () => { applyLocal(); renderThread(); renderStages(); renderRail(); });
+
+  CQ.enhanceSelects && CQ.enhanceSelects(document);
+  applyLocal();
+  newConversation();
+  </script>
+</body>
+</html>

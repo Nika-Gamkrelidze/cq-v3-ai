@@ -9,6 +9,10 @@ Two mechanisms live here, deliberately kept separate:
     tenant/integration dimensions (end-user/hour, tenant/minute, tenant/day) that the chat
     endpoints enforce.
 
+`reserve()` is also the scope gate for the paid features, not only a counter: an integration
+credential (chat scopes only) is rejected outright, because "no branch matched" must never mean
+"allowed, unmetered".
+
 `reserve()` no longer no-ops for tenants: a tenant call is counted on `usage_counters` under
 `tenant:<client_id>`, and rejected only when that tenant has a cap configured in
 `clients.settings`. Counting unconditionally is the point — an uncapped tenant is still a
@@ -38,6 +42,17 @@ _KIND = {
 
 async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
     col, max_key, feature = _KIND[kind]
+    if principal.kind == "integration":
+        # A chat integration credential holds `chat:*` scopes ONLY — never `analyses` or `tts`.
+        # It used to fall through the bottom of this function to a bare `return`, which is the
+        # worst possible outcome for a quota gate: no cap, no counter, and the caller proceeds
+        # to the provider. So a scoped credential reached /analyze and /v1/tts and spent
+        # Anthropic and ElevenLabs money outside its scope and outside all metering. Rejecting
+        # here (rather than in each route) means a new paid route inherits the refusal instead
+        # of having to remember it.
+        raise HTTPException(
+            status_code=403,
+            detail="This integration credential is not permitted to use this feature.")
     if principal.kind == "tenant" and principal.client_id:
         await reserve_counter(f"tenant:{principal.client_id}", kind,
                               await _tenant_limit(principal.client_id, max_key))

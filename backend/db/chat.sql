@@ -186,6 +186,19 @@ DO $$ BEGIN
             REFERENCES chat_turns(id, client_id) ON DELETE CASCADE;
     END IF;
 END $$;
+-- The generation's own INPUTS, captured when the row is claimed. Without them the SSE path has
+-- nowhere to read the caller's locale/mode back from — a stream started from a stored row would
+-- silently regenerate every turn in the default language — and `regenerate` could not inherit
+-- them either. `envelope` is the generation's OUTPUT: the exact Turn object the engine built,
+-- stored verbatim so the warm read, the SSE replay and the live `done` frame are the same bytes
+-- instead of three reconstructions that drift. The dedicated columns beside it (grounding,
+-- tier1, suggestions, citations, handoff, stages) stay, because they are what the curation
+-- queries index and aggregate on; `envelope` is never queried into.
+ALTER TABLE copilot_suggestions ADD COLUMN IF NOT EXISTS locale text;
+ALTER TABLE copilot_suggestions ADD COLUMN IF NOT EXISTS mode text;
+ALTER TABLE copilot_suggestions ADD COLUMN IF NOT EXISTS integration_id uuid;
+ALTER TABLE copilot_suggestions ADD COLUMN IF NOT EXISTS envelope jsonb NOT NULL DEFAULT '{}'::jsonb;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_copilot_suggest_ref ON copilot_suggestions(client_id, suggest_ref);
 CREATE INDEX IF NOT EXISTS idx_copilot_suggestions_conv ON copilot_suggestions(conversation_id, created_at DESC);
 -- The reaper's index: the worker sweeps abandoned generations, and this keeps that scan

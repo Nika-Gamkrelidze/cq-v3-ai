@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routers import (admin, analyze, auth, calls, kb, kb_admin, partner, scoring,
-                     tenants, tts)
+from .routers import (admin, analyze, auth, calls, chat, kb, kb_admin, partner,
+                     scoring, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
 
@@ -72,15 +72,11 @@ app.include_router(partner.router)                 # /v1/account, /v1/analyses, 
 app.include_router(kb.router, prefix="/v1")        # /v1/kb/*
 app.include_router(tts.router, prefix="/v1")       # /v1/tts, /v1/voices, /v1/languages
 
-
-# The one endpoint behind nginx's `/api/v1/chat/` location. P0 ships that location and its
-# streaming/Upgrade settings before any chat code exists, and "the transport is proven in
-# production" is only true if something actually answers through it — otherwise the first real
-# request in P1 is also the first test of the proxy. Deliberately trivial and unauthenticated:
-# it asserts routing and buffering behaviour, nothing about the product.
-@app.get("/v1/chat/health", include_in_schema=False)
-async def chat_transport_health():
-    return {"status": "ok", "transport": "chat"}
+# ---- Conversational AI (the chat site's server-to-server surface) -----------
+# Everything behind nginx's `/api/v1/chat/` location, including the P0 transport probe that used
+# to be declared inline here — it moved into the router unchanged and still answers at
+# `/v1/chat/health`, which the post-deploy smoke and the proxy test both depend on.
+app.include_router(chat.router)                    # /v1/chat/turns, /v1/chat/stream, ...
 
 
 def _custom_openapi():

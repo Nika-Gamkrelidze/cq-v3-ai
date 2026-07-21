@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from ..config import settings
-from ..services import claude, elevenlabs, settings_store
+from ..services import chat_credentials, chat_store, claude, elevenlabs, settings_store
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -197,3 +197,103 @@ async def put_voices(patch: VoicePatch):
             raise HTTPException(status_code=400, detail=f"Invalid voice id: {i[:24]}")
     await settings_store.set_voice_config(patch.model_dump(exclude_none=True))
     return await get_voices()
+
+
+# ---------------------------------------------------------------------------
+# Integration credentials (the chat site)
+#
+# Superadmin-only, and the ONLY place a credential is minted. The plaintext key is returned
+# exactly once — at creation and at rotation — and is never recoverable afterwards, because only
+# sha256(secret) is stored. If an operator loses it, the answer is rotate, not recover.
+#
+# See services/chat_credentials.py for why the tenant is a grant row rather than a column.
+# ---------------------------------------------------------------------------
+class IntegrationCreate(BaseModel):
+    name: str
+    scopes: list[str]
+    grants: list[str]        # tenant selectors: uuid or clients.slug
+
+
+@router.post("/integrations", dependencies=[Depends(require_admin)], status_code=201)
+async def create_integration(body: IntegrationCreate):
+    # P1 issues SINGLE-GRANT credentials. The verify path is already multi-tenant and needs no
+    # change to support more, so the pilot's blast radius is one tenant — bounded by DATA (how
+    # many grant rows exist) rather than by code. Widening it later is deleting this check plus
+    # an INSERT, and it should be a deliberate decision with its own review, not the default.
+    if len(body.grants or []) != 1:
+        raise HTTPException(status_code=400,
+                            detail="Exactly one tenant grant per credential (P1 policy).")
+    try:
+        key_id, plaintext = await chat_credentials.issue(body.name, body.scopes, body.grants)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    integration_id = await chat_credentials.integration_for_key_id(key_id)
+    return {"integration_id": integration_id, "key_id": key_id, "api_key": plaintext,
+            "warning": "Store this key now — it is shown once and cannot be recovered."}
+
+
+@router.get("/integrations", dependencies=[Depends(require_admin)])
+async def list_integrations():
+    return {"integrations": await chat_credentials.list_integrations()}
+
+
+@router.post("/integrations/{integration_id}/rotate", dependencies=[Depends(require_admin)])
+async def rotate_integration(integration_id: str, overlap_days: int = 7):
+    try:
+        plaintext = await chat_credentials.rotate(integration_id, overlap_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"integration_id": integration_id, "api_key": plaintext,
+            "overlap_days": overlap_days,
+            "warning": "Both keys verify during the overlap. Store this one now — shown once."}
+
+
+@router.delete("/integrations/{integration_id}", dependencies=[Depends(require_admin)])
+async def deactivate_integration(integration_id: str):
+    """Deactivate, never hard-delete: the grant and usage history is the audit trail."""
+    if not await chat_credentials.deactivate(integration_id):
+        raise HTTPException(status_code=404, detail="Integration not found")
+    return {"integration_id": integration_id, "is_active": False}
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant chat config
+#
+# The writer for `chat_configs`. Without it the table exists, `get_chat_config` reads it, and
+# nothing can ever put a row in — so every tenant permanently runs on CHAT_CONFIG_DEFAULTS and
+# persona, refusal copy, canned snippets and the gate thresholds are unreachable features.
+#
+# Superadmin-only and deliberately so: `refusal_copy` is the text a lawyer signed off on, and
+# `settings.limits` is a commercial term. Neither belongs to the tenant's own portal, and
+# neither is reachable with a chat integration key (`admin:*` is never issuable).
+# ---------------------------------------------------------------------------
+class ChatConfigBody(BaseModel):
+    persona: str | None = None
+    greeting: dict = {}              # {en,ka,ru}
+    refusal_copy: dict = {}          # {en,ka,ru}
+    languages: list[str] = ["en", "ka", "ru"]
+    canned: list = []
+    autopilot_enabled: bool = False
+    # Free-form knob blob: min_score / min_hits / top_k / suggestion_count / strict, plus
+    # `limits` ({tenant_per_minute, enduser_per_hour}). Kept as one jsonb rather than columns
+    # because every one of them is a tuning value the engine already reads through `_cfg`.
+    settings: dict = {}
+
+
+@router.get("/chat/{tenant_id}/config", dependencies=[Depends(require_admin)])
+async def get_chat_config(tenant_id: str):
+    return await chat_store.get_chat_config(tenant_id)
+
+
+@router.put("/chat/{tenant_id}/config", dependencies=[Depends(require_admin)])
+async def put_chat_config(tenant_id: str, body: ChatConfigBody):
+    """Save a new active version. `autopilot_enabled` is accepted here but the public bot route
+    it unlocks is P3 and not mounted — so turning it on today changes nothing, by design."""
+    try:
+        return await chat_store.save_chat_config(
+            tenant_id, persona=body.persona, greeting=body.greeting,
+            refusal_copy=body.refusal_copy, languages=body.languages, canned=body.canned,
+            autopilot_enabled=body.autopilot_enabled, settings=body.settings,
+            updated_by="superadmin")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

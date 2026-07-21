@@ -49,6 +49,33 @@ services:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
 
+  # Periodic/long-running chat work (stale-suggestion reaper; KB curation later). Same image
+  # as `api`, different command — so it can never compete for the uvicorn worker's event loop
+  # or crowd the pool that an operator's in-flight suggestion is drawing from.
+  #
+  # A compose service rather than a systemd timer on the host: `deploy/deploy.sh` only does
+  # `git pull` + `docker compose up -d --build`, so a compose service redeploys itself on every
+  # push to main, while a unit file would need an SSH session — and SSH is firewalled to the CQ
+  # VPN's egress IP. Anything that needs a human on the VPN to ship is not part of this pipeline.
+  worker:
+    build: ./backend
+    container_name: cq-worker
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://cq:cq@db:5432/cq
+      EMBEDDING_BASE_URL: http://embeddings:80
+      # Its own small pool: the worker's duties are periodic and low-concurrency, and the
+      # database's connection budget belongs to the request path.
+      DB_POOL_MAX: "5"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Cooperative shutdown: the worker finishes the current sweep on SIGTERM (it bails out at
+    # 45s), so give it room rather than letting compose SIGKILL it mid-statement.
+    stop_grace_period: 60s
+    restart: unless-stopped
+
   web:
     image: nginx:alpine
     container_name: cq-web
