@@ -23,6 +23,19 @@
     .selbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; }
     td.tight, th.tight { white-space:nowrap; }
     .warn-flag { color:var(--coral); font-weight:600; }
+    /* KB Health (curation review queue) — mirrors the tenant portal's markup. */
+    .cur-q { background:var(--input-bg); border:1px solid var(--hairline); border-left:3px solid var(--beam);
+      border-radius:var(--r-md); padding:9px 11px; margin:7px 0; }
+    .cur-q q { display:block; color:var(--paper); font-style:normal; }
+    .cur-q .cur-src { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-bottom:5px; }
+    .cur-a { margin-top:5px; padding-left:10px; border-left:2px solid var(--hairline); color:var(--mist); font-size:13px; }
+    .cur-diff { white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-size:12.5px; line-height:1.55; background:var(--input-bg); border:1px solid var(--hairline);
+      border-radius:var(--r-md); padding:10px; max-height:300px; overflow:auto; }
+    .cur-diff ins { background:color-mix(in oklab,var(--ok) 26%,transparent); color:var(--paper); text-decoration:none; }
+    .cur-diff del { background:color-mix(in oklab,var(--alert) 22%,transparent); color:var(--coral); }
+    .cur-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:11.5px; color:var(--muted); }
+    .cur-reason { display:flex; align-items:center; gap:8px; padding:7px 2px; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -43,6 +56,7 @@
         <div class="tab" data-tab="import" data-i18n="kba.tab.import"></div>
         <div class="tab" data-tab="playground" data-i18n="kba.tab.playground"></div>
         <div class="tab" data-tab="duplicates" data-i18n="kba.tab.duplicates"></div>
+        <div class="tab" data-tab="curation" data-i18n="cur.tab"></div>
         <div class="tab" data-tab="activity" data-i18n="kba.tab.activity"></div>
         <div class="tab" data-tab="scoring" data-i18n="kba.tab.scoring"></div>
       </div>
@@ -140,6 +154,38 @@
         </div>
       </section>
 
+      <!-- CURATION (KB Health) -->
+      <section class="panel" id="panel-curation">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:flex-start">
+            <div style="flex:1">
+              <h3 style="margin:0" data-i18n="cur.heading"></h3>
+              <p class="hint" style="margin:6px 0 0" data-i18n="cur.desc"></p>
+            </div>
+            <div style="flex:0" class="inline">
+              <button class="ghost" id="curRun" data-i18n="cur.run"></button>
+              <button class="ghost" id="reloadCur" data-i18n="kba.refresh"></button>
+            </div>
+          </div>
+          <div class="row" style="align-items:flex-end; margin-top:8px">
+            <div style="flex:0; min-width:190px"><label data-i18n="cur.filter.state"></label>
+              <select id="curState">
+                <option value="pending" data-i18n="cur.st.pending"></option>
+                <option value="accepted" data-i18n="cur.st.accepted"></option>
+                <option value="declined" data-i18n="cur.st.declined"></option>
+                <option value="apply_failed" data-i18n="cur.st.apply_failed"></option>
+                <option value="superseded" data-i18n="cur.st.superseded"></option>
+              </select></div>
+          </div>
+          <div class="selbar hidden" id="curSelBar">
+            <span><b id="curSelCount">0</b> <span data-i18n="kba.selected"></span></span>
+            <button class="primary" id="curBulkAccept" data-i18n="cur.bulk.accept"></button>
+            <span class="hint" data-i18n="cur.bulk.note"></span>
+          </div>
+          <div id="curList" style="margin-top:12px"></div>
+        </div>
+      </section>
+
       <!-- ACTIVITY -->
       <section class="panel" id="panel-activity">
         <div class="card">
@@ -218,6 +264,7 @@
       if (tab==='overview') loadOverview();
       else if (tab==='documents') loadDocuments();
       else if (tab==='duplicates') loadDuplicates();
+      else if (tab==='curation') loadCuration();
       else if (tab==='activity') loadActivity();
       else if (tab==='scoring') loadScoring();
     }
@@ -472,6 +519,234 @@
       if (d.near_scan_skipped) html += `<div class="hint">Near-dup scan skipped (KB too large).</div>`;
       box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
     }
+
+    // ---- CURATION (KB Health) -----------------------------------------------------------
+    // Same review queue as the tenant portal, but operator-side: scoped to the selected
+    // tenant and able to kick a run. Cards are per-cluster; the verbatim customer quotes are
+    // the point of the card and are never summarised away.
+    const CUR = () => `${API}/admin/curation/${TID}/proposals`;
+    const CH_ICON = { web:'🌐', instagram:'📸', messenger:'💬', whatsapp:'🟩', phone:'☎️', call:'☎️', email:'✉️' };
+    const OP_PILL = { add:'ready', update:'processing', remove:'contradicted' };
+    let curProposals = [], curSel = new Set();
+
+    /* Character-level diff, trimmed to the changed middle so the LCS matrix stays small.
+       A long middle falls back to word tokens — a 4000x4000 character matrix would hang the tab. */
+    function diffParts(a, b) {
+      a = a || ''; b = b || '';
+      const min = Math.min(a.length, b.length);
+      let s = 0; while (s < min && a[s] === b[s]) s++;
+      let e = 0; while (e < min - s && a[a.length-1-e] === b[b.length-1-e]) e++;
+      const head = a.slice(0, s), tail = e ? a.slice(a.length - e) : '';
+      const am = a.slice(s, a.length - e), bm = b.slice(s, b.length - e);
+      const byWord = am.length > 800 || bm.length > 800;
+      const split = x => byWord ? (x.match(/\s+|\S+/g) || []) : x.split('');
+      const A = split(am), B = split(bm), n = A.length, m = B.length;
+      const dp = new Uint32Array((n+1)*(m+1));
+      for (let i=n-1; i>=0; i--) for (let j=m-1; j>=0; j--)
+        dp[i*(m+1)+j] = A[i]===B[j] ? dp[(i+1)*(m+1)+j+1]+1 : Math.max(dp[(i+1)*(m+1)+j], dp[i*(m+1)+j+1]);
+      const parts = []; let i=0, j=0;
+      while (i<n && j<m) {
+        if (A[i]===B[j]) { parts.push(['=', A[i]]); i++; j++; }
+        else if (dp[(i+1)*(m+1)+j] >= dp[i*(m+1)+j+1]) parts.push(['-', A[i++]]);
+        else parts.push(['+', B[j++]]);
+      }
+      while (i<n) parts.push(['-', A[i++]]);
+      while (j<m) parts.push(['+', B[j++]]);
+      return { head, tail, parts };
+    }
+    function diffHTML(oldT, newT) {
+      const d = diffParts(oldT, newT);
+      let html = esc(d.head), run = '', op = '';
+      const flush = () => { if (!run) return;
+        html += op==='=' ? esc(run) : op==='-' ? `<del>${esc(run)}</del>` : `<ins>${esc(run)}</ins>`; run=''; };
+      d.parts.forEach(p => { if (p[0] !== op) { flush(); op = p[0]; } run += p[1]; });
+      flush();
+      return html + esc(d.tail);
+    }
+
+    // Only ever follow http(s) links the API gave us; anything else renders as plain text.
+    const safeUrl = u => (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u : '';
+    function evidenceHTML(evs) {
+      if (!Array.isArray(evs) || !evs.length) return `<div class="hint">${t('cur.evidence.none')}</div>`;
+      return evs.slice(0, 3).map(ev => {
+        const ch = (ev.channel || '').toLowerCase();
+        const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : '';
+        const url = safeUrl(ev.url || (ev.metadata && ev.metadata.url));
+        const ref = ev.conversation_id || ev.source_id || '';
+        const foreign = ev.same_tenant === false ? ` <span class="warn-flag">${t('cur.foreign')}</span>` : '';
+        return `<div class="cur-q">
+          <div class="cur-src"><span>${CH_ICON[ch] || '💬'} ${esc(ev.channel || ev.source_kind || '')}${ev.locale?' · '+esc(ev.locale):''}${when?' · '+esc(when):''}${foreign}</span>
+            <span>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${t('cur.opensource')} ↗</a>` : (ref ? `<code>${esc(String(ref).slice(0,8))}</code>` : '')}</span></div>
+          <q>${esc(ev.question)}</q>
+          ${ev.answer ? `<div class="cur-a">${esc(ev.answer)}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    /* `target.content` is the CURRENT text, read server-side at view time — never a snapshot
+       taken when the card was mined — so the reviewer approves a diff against what is really
+       in the KB right now. If it is missing we show the proposal alone rather than a fake diff. */
+    function curBodyHTML(p) {
+      const proposed = p.proposed_content || '';
+      if ((p.op || '') !== 'update') return esc(proposed);
+      const cur = p.target && typeof p.target.content === 'string' ? p.target.content : null;
+      return cur === null ? `<span class="hint">${t('cur.diff.nochunk')}</span>\n\n${esc(proposed)}`
+                          : diffHTML(cur, proposed);
+    }
+
+    function curCard(p) {
+      const op = (p.op || 'add').toLowerCase();
+      const bulkable = op !== 'remove' && (p.state || 'pending') === 'pending';
+      const decided = (p.state || 'pending') !== 'pending';
+      const pct = v => v == null ? '—' : Math.round(v * 100) + '%';
+      return `<div class="card" data-pid="${esc(p.id)}">
+        <div class="inline" style="gap:8px; flex-wrap:wrap">
+          ${bulkable ? `<input type="checkbox" class="cur-sel" data-id="${esc(p.id)}" style="width:auto" />` : ''}
+          <span class="pill ${OP_PILL[op] || 'notinkb'}">${t('cur.op.' + op)}</span>
+          <b>${esc(p.title)}</b>
+        </div>
+        <div class="cur-meta" style="margin-top:8px">
+          <span class="chip">${t('cur.asked').replace('{n}', p.occurrences ?? 0)}</span>
+          <span>${t('cur.sources').replace('{n}', p.distinct_sources ?? 0)}</span>
+          <span>· ${t('cur.priority')} ${p.priority != null ? Number(p.priority).toFixed(2) : '—'}</span>
+          <span>· ${t('cur.confidence')} ${pct(p.confidence)}</span>
+          ${p.risk ? `<span>· ${t('cur.risk')} ${esc(p.risk)}</span>` : ''}
+          ${decided ? `<span class="pill ${p.state==='apply_failed'?'error':'notinkb'}">${t('cur.st.' + p.state)}</span>` : ''}
+        </div>
+        ${p.rationale ? `<p class="hint" style="margin:10px 0 0">${esc(p.rationale)}</p>` : ''}
+        ${p.apply_error ? `<div class="msg err">${esc(p.apply_error)}</div>` : ''}
+        <h4>${t('cur.evidence')}</h4>
+        ${evidenceHTML(p.evidence)}
+        <h4>${op === 'update' ? t('cur.diff') : t('cur.proposed')}</h4>
+        ${p.target && p.target.title ? `<div class="hint">${t('cur.target')}: ${esc(p.target.title)}</div>` : ''}
+        <div class="cur-diff">${curBodyHTML(p)}</div>
+        ${(p.suggested_tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')}
+        ${op === 'remove' ? `<div class="hint" style="margin-top:8px">${t('cur.remove.note')}</div>` : ''}
+        ${decided ? '' : `<div class="actions">
+          <button class="ghost" data-cact="decline" data-id="${esc(p.id)}">${t('cur.decline')}</button>
+          <button class="ghost" data-cact="edit" data-id="${esc(p.id)}">${t('cur.acceptedit')}</button>
+          <button class="primary" data-cact="accept" data-id="${esc(p.id)}">${t('cur.accept')}</button>
+        </div>`}
+      </div>`;
+    }
+
+    $('reloadCur').addEventListener('click', loadCuration);
+    $('curState').addEventListener('change', loadCuration);
+    async function loadCuration() {
+      const box = $('curList'); curSel.clear(); curSelBar();
+      CQ.enhanceSelects($('panel-curation')); CQ.syncSelect($('curState'));
+      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      let d;
+      try {
+        const r = await fetch(`${CUR()}?state=${encodeURIComponent($('curState').value || 'pending')}`, { headers: H() });
+        if (!r.ok) throw new Error(t('cur.loadfail'));
+        d = await r.json();
+      } catch (e) { box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+      // An expired token / error body must never reach .map — a fixed QA bug.
+      const listed = Array.isArray(d) ? d : (Array.isArray(d && d.items) ? d.items : []);
+      if (!listed.length) { box.innerHTML = `<div class="empty">${t('cur.none')}</div>`; return; }
+      // The list is deliberately light; body, quotes and the live target text come from the
+      // per-proposal GET. The open queue is hard-capped at ~10 cards, so this stays cheap.
+      curProposals = await Promise.all(listed.map(async p => {
+        try { const rr = await fetch(`${CUR()}/${p.id}`, { headers: H() });
+          if (rr.ok) { const full = await rr.json(); if (full && full.id) return full; } } catch {}
+        return p;
+      }));
+      box.innerHTML = curProposals.map(curCard).join('');
+      box.querySelectorAll('button[data-cact]').forEach(b => b.addEventListener('click', () => curAction(b.dataset.cact, b.dataset.id)));
+      box.querySelectorAll('.cur-sel').forEach(cb => cb.addEventListener('change', () => {
+        cb.checked ? curSel.add(cb.dataset.id) : curSel.delete(cb.dataset.id); curSelBar(); }));
+    }
+    function curSelBar() { $('curSelBar').classList.toggle('hidden', curSel.size === 0); $('curSelCount').textContent = curSel.size; }
+
+    function declineModal() {
+      const reasons = ['not_true','already_covered','dont_want','temporary'];
+      const labels = { not_true:'cur.decline.r.nottrue', already_covered:'cur.decline.r.covered',
+                       dont_want:'cur.decline.r.dontsay', temporary:'cur.decline.r.temporary' };
+      return new Promise(resolve => {
+        const bg = showModal(`<h3>${t('cur.decline.heading')}</h3>
+          ${reasons.map(r => `<label class="cur-reason"><input type="radio" name="dr" value="${r}" style="width:auto" /> <span>${t(labels[r])}</span></label>`).join('')}
+          <div class="msg err" id="dr_msg"></div>
+          <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="danger" id="dr_ok">${t('cur.decline')}</button></div>`);
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(null));
+        bg.querySelector('#dr_ok').addEventListener('click', () => {
+          const sel = bg.querySelector('input[name=dr]:checked');
+          if (!sel) { bg.querySelector('#dr_msg').textContent = t('cur.decline.pick'); return; }
+          done(sel.value);
+        });
+      });
+    }
+    // `remove` is never bulk and never a one-click action: it takes content out of every answer.
+    function typedConfirm() {
+      const word = t('cur.remove.word');
+      return new Promise(resolve => {
+        const bg = showModal(`<h3>${t('cur.remove.heading')}</h3>
+          <p class="hint">${t('cur.remove.note')}</p>
+          <label>${t('cur.remove.confirm').replace('{word}', esc(word))}</label>
+          <input id="tc_input" autocomplete="off" />
+          <div class="msg err" id="tc_msg"></div>
+          <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="danger" id="tc_ok">${t('cur.op.remove')}</button></div>`);
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(false));
+        bg.querySelector('#tc_ok').addEventListener('click', () => {
+          if (bg.querySelector('#tc_input').value.trim().toLowerCase() !== word.toLowerCase()) {
+            bg.querySelector('#tc_msg').textContent = t('cur.remove.mismatch'); return; }
+          done(true);
+        });
+        bg.querySelector('#tc_input').focus();
+      });
+    }
+    function editModal(p) {
+      return new Promise(resolve => {
+        const bg = showModal(`<h3>${t('cur.edit.heading')}</h3>
+          <p class="hint">${t('cur.edit.hint')}</p>
+          <label>${t('cur.proposed')}</label>
+          <textarea id="ce_body" style="min-height:220px">${esc(p.proposed_content || '')}</textarea>
+          <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="ce_ok">${t('cur.accept')}</button></div>`);
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(null));
+        bg.querySelector('#ce_ok').addEventListener('click', () => done(bg.querySelector('#ce_body').value));
+      });
+    }
+
+    async function curAction(act, id) {
+      const p = curProposals.find(x => x.id === id); if (!p) return;
+      const op = (p.op || '').toLowerCase();
+      try {
+        if (act === 'decline') {
+          const reason = await declineModal(); if (!reason) return;
+          await curPost(`${CUR()}/${id}/decline`, { reason });
+          CQ.toast(t('cur.declinedok'), 'ok'); return loadCuration();
+        }
+        // Accept-with-edits posts the edited body to the SAME endpoint — `content` present == edited.
+        let content;
+        if (act === 'edit') { content = await editModal(p); if (content == null) return; }
+        if (op === 'remove' && !(await typedConfirm())) return;
+        await curPost(`${CUR()}/${id}/accept`, content == null ? {} : { content });
+        CQ.toast(t('cur.applied'), 'ok'); loadCuration();
+      } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
+    }
+    async function curPost(url, body) {
+      const r = await fetch(url, { method:'POST', headers: JH(), body: JSON.stringify(body) });
+      return CQ.readResp(r);
+    }
+    $('curBulkAccept').addEventListener('click', async () => {
+      const ids = [...curSel]; if (!ids.length) return;
+      if (!(await CQ.confirm(`${t('cur.bulk.accept')} — ${ids.length}?`, { ok: t('cur.accept'), danger: false }))) return;
+      try { await curPost(`${CUR()}/bulk`, { action: 'accept', ids });
+        CQ.toast(t('cur.applied'), 'ok'); loadCuration();
+      } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
+    });
+    $('curRun').addEventListener('click', async () => {
+      const btn = $('curRun'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await fetch(`${API}/admin/curation/run`, { method:'POST', headers: JH(), body: JSON.stringify({ client_id: TID }) });
+        if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || t('toast.error'));
+        CQ.toast(t('cur.run.started'), 'ok');
+      } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
+      finally { btn.disabled = false; btn.textContent = t('cur.run'); }
+    });
 
     // ---- ACTIVITY ----
     $('reloadAct').addEventListener('click', loadActivity);

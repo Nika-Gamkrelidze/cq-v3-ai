@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routers import (admin, analyze, auth, calls, chat, kb, kb_admin, partner,
-                     scoring, tenants, tts)
+from .routers import (admin, analyze, auth, calls, chat, curation, kb, kb_admin,
+                     partner, scoring, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
 
@@ -77,6 +77,12 @@ app.include_router(tts.router, prefix="/v1")       # /v1/tts, /v1/voices, /v1/la
 # to be declared inline here — it moved into the router unchanged and still answers at
 # `/v1/chat/health`, which the post-deploy smoke and the proxy test both depend on.
 app.include_router(chat.router)                    # /v1/chat/turns, /v1/chat/stream, ...
+
+# ---- KB curation review queue (ADR endpoint 11) ----------------------------
+# Declares BOTH its surfaces internally (tenant `/v1/curation/*` + the superadmin mirror
+# `/admin/curation/{tenant_id}/*`), like scoring.router, so it is included exactly once and
+# never behind the `/v1` prefix — an admin-gated path must not appear on the partner surface.
+app.include_router(curation.router)
 
 
 def _custom_openapi():

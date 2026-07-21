@@ -75,6 +75,9 @@ async def run_startup_migrations() -> list[str]:
         # This list is hardcoded (no glob): a new db/*.sql file that isn't added here
         # is inert — it silently never runs, on every environment.
         await _apply(conn, "chat.sql")
+        # curation.sql AFTER chat.sql: it is the same feature's second half and its comments
+        # reference the chat tables the miner reads.
+        await _apply(conn, "curation.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)
