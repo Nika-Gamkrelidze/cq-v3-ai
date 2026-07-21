@@ -13,9 +13,7 @@ Works across org types (no hardcoded claim categories) and across Georgian/Russi
 """
 import logging
 
-import anthropic
-
-from . import retrieval
+from . import llm, retrieval
 
 log = logging.getLogger("cq")
 
@@ -111,18 +109,16 @@ def _norm_speaker(v) -> str:
     return v if v in ("agent", "customer") else "unknown"
 
 
-async def _extract_claims(client, transcript: str, model: str) -> list[dict]:
-    msg = await client.messages.create(
-        model=model, max_tokens=4096, system=_EXTRACT_SYS,
-        tools=[CLAIMS_TOOL], tool_choice={"type": "tool", "name": "submit_claims"},
-        messages=[{"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"}])
-    for block in msg.content:
-        if block.type == "tool_use" and block.name == "submit_claims":
-            return list(dict(block.input).get("claims") or [])
-    return []
+async def _extract_claims(client_id: str, api_key: str, transcript: str, model: str) -> list[dict]:
+    raw = await llm.call_tool(
+        feature="factcheck_claims", client_id=client_id, api_key=api_key, model=model,
+        system=_EXTRACT_SYS,
+        user=f"<transcript>\n{transcript}\n</transcript>",
+        tool=CLAIMS_TOOL, opts=llm.ANALYSIS)
+    return list(raw.get("claims") or [])
 
 
-async def _verify(client, model: str, items: list[dict]) -> list[dict]:
+async def _verify(client_id: str, api_key: str, model: str, items: list[dict]) -> list[dict]:
     blocks = []
     for i, it in enumerate(items):
         ev = it["evidence"]
@@ -134,14 +130,10 @@ async def _verify(client, model: str, items: list[dict]) -> list[dict]:
             ev_txt = "   (no relevant knowledge base entry found)"
         blocks.append(f"Claim {i}: {it['claim']}\nKB evidence for claim {i}:\n{ev_txt}")
     user = _VERIFY_INTRO + "\n\n".join(blocks)
-    msg = await client.messages.create(
-        model=model, max_tokens=4096,
-        tools=[VERIFY_TOOL], tool_choice={"type": "tool", "name": "submit_verifications"},
-        messages=[{"role": "user", "content": user}])
-    for block in msg.content:
-        if block.type == "tool_use" and block.name == "submit_verifications":
-            return list(dict(block.input).get("verifications") or [])
-    return []
+    raw = await llm.call_tool(
+        feature="factcheck_verdict", client_id=client_id, api_key=api_key, model=model,
+        system="", user=user, tool=VERIFY_TOOL, opts=llm.ANALYSIS)
+    return list(raw.get("verifications") or [])
 
 
 async def run_factcheck(transcript: str, client_id: str, api_key: str, model: str) -> dict | None:
@@ -149,9 +141,8 @@ async def run_factcheck(transcript: str, client_id: str, api_key: str, model: st
     if not (transcript or "").strip() or not client_id or not api_key:
         return None
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        raw = await _extract_claims(client, transcript, model)
+        raw = await _extract_claims(client_id, api_key, transcript, model)
         claims = []
         for c in raw[:MAX_CLAIMS]:
             text = str((c or {}).get("claim") or "").strip()
@@ -169,7 +160,7 @@ async def run_factcheck(transcript: str, client_id: str, api_key: str, model: st
             hits = await retrieval.retrieve(client_id, c["claim"], top_k=EVIDENCE_K)
             items.append({"claim": c["claim"], "evidence": hits})
 
-        verifs = await _verify(client, model, items)
+        verifs = await _verify(client_id, api_key, model, items)
         by_idx = {}
         for v in verifs:
             try:
@@ -213,7 +204,5 @@ async def run_factcheck(transcript: str, client_id: str, api_key: str, model: st
             "claims": out_claims,
             "contradicted": [c for c in out_claims if c["verdict"] == "CONTRADICTED"],
         }
-    except anthropic.APIError as exc:
-        raise FactCheckError(f"Fact-check request failed: {getattr(exc, 'message', str(exc))}") from exc
-    finally:
-        await client.close()
+    except llm.LLMError as exc:
+        raise FactCheckError(f"Fact-check request failed: {exc}") from exc

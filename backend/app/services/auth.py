@@ -121,6 +121,9 @@ async def resolve_principal(
             return Principal(kind="tenant", client_id=payload.get("client_id"),
                              user_id=payload.get("user_id"), role=payload.get("role", "member"),
                              via="token")
+        # TODO(P1): no `else` here — an invalid/expired Bearer falls through to the X-API-Key
+        # branch below instead of being rejected. Left as-is deliberately; the fix lands with the
+        # integration-credential work and its isolation tests.
 
     # 3. Tenant via API key
     if x_api_key:
@@ -128,7 +131,16 @@ async def resolve_principal(
         if row:
             return Principal(kind="tenant", client_id=str(row["id"]), role="apikey", via="apikey")
 
-    # 4. Anonymous — keyed by client IP
-    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    # 4. Anonymous — keyed by client IP.
+    # The IP is a quota key, so a caller must not be able to choose it. Both nginx configs set
+    # X-Real-IP from $remote_addr (the real peer), so that is the trusted source. They also set
+    # X-Forwarded-For with $proxy_add_x_forwarded_for, which *appends* our peer to whatever the
+    # client sent — so the FIRST element is attacker-supplied (reading it let anyone mint a fresh
+    # quota bucket per request) while the LAST element is the one our own proxy added. Hence:
+    # X-Real-IP, then the last XFF element, then the socket peer.
+    # App-side fix only: no nginx change and no container recreate needed to close this.
+    xff = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    ip = (request.headers.get("x-real-ip", "").strip()
+          or (xff[-1] if xff else "")
           or (request.client.host if request.client else "unknown"))
     return Principal(kind="anonymous", via="none", anon_key=ip)

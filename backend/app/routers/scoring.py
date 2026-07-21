@@ -84,7 +84,8 @@ async def _score_text(tid: str, text: str, do_factcheck: bool) -> dict:
 
     s = await settings_store.get_effective()
     try:
-        scorecard = await scoring.run_scoring(text, cfg, s["anthropic_api_key"], s["llm_model"])
+        scorecard = await scoring.run_scoring(text, cfg, s["anthropic_api_key"], s["llm_model"],
+                                              client_id=tid)
     except scoring.ScoringError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

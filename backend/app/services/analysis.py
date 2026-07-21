@@ -92,7 +92,7 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
     try:
         analysis = await claude.analyze(
             transcript, cfg["anthropic_api_key"], cfg["llm_model"],
-            cfg["analysis_instructions"], kb_context=kb_context)
+            cfg["analysis_instructions"], kb_context=kb_context, client_id=client_id)
     except Exception as exc:  # noqa: BLE001
         return await fail(f"Analysis failed: {exc}")
 
@@ -112,7 +112,8 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
             cfg_scoring = await scoring_store.get_active_config(client_id)
             if cfg_scoring and cfg_scoring.get("dimensions"):
                 scorecard = await scoring.run_scoring(
-                    transcript, cfg_scoring, cfg["anthropic_api_key"], cfg["llm_model"])
+                    transcript, cfg_scoring, cfg["anthropic_api_key"], cfg["llm_model"],
+                    client_id=client_id)
         except Exception:  # noqa: BLE001
             scorecard = None
 

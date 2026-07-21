@@ -4,6 +4,7 @@ Supports unstructured docs (PDF/DOCX/TXT/MD), pasted text, and semi-structured C
 (each row becomes a chunk with its fields preserved in JSONB metadata). Flexible by
 design: doc_type is free-text, and arbitrary metadata/tags ride on each document/chunk.
 """
+import asyncio
 import csv
 import hashlib
 import io
@@ -20,9 +21,36 @@ log = logging.getLogger("cq")
 CHUNK_SIZE = 1000        # characters
 CHUNK_OVERLAP = 150
 
+# Ingestion is the thing that starves everything else on this single event loop: a whole
+# document used to go to the CPU-bound TEI encoder in ONE request, so a 400-chunk PDF
+# monopolised the encoder for as long as it took. Cap it two ways — bounded batches, and
+# one document's batch in flight at a time — so a latency-critical query embed (the chat
+# copilot's read path) always has an encoder slot within roughly one batch's time.
+EMBED_BATCH = 32
+_embed_gate = asyncio.Semaphore(1)
+
 
 class IngestError(RuntimeError):
     pass
+
+
+async def _embed_batched(contents: list[str]) -> list[list[float]]:
+    """Embed in EMBED_BATCH-sized slices under the ingest gate, concatenated in order.
+
+    Order matters: callers zip the result against their chunk list positionally.
+    """
+    out: list[list[float]] = []
+    for start in range(0, len(contents), EMBED_BATCH):
+        batch = contents[start:start + EMBED_BATCH]
+        async with _embed_gate:
+            vecs = await embeddings.embed_texts(batch)
+        # Per-batch guard: without it two batches could drift in opposite directions and
+        # still produce a correct-looking total, silently misaligning content <-> vector.
+        if len(vecs) != len(batch):
+            raise IngestError(
+                f"embedding count mismatch in batch at {start} ({len(vecs)} != {len(batch)})")
+        out.extend(vecs)
+    return out
 
 
 # ---- text extraction -------------------------------------------------------
@@ -115,7 +143,13 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
                           *, text: str | None = None, csv_bytes: bytes | None = None,
                           base_metadata: dict | None = None, event_id: str | None = None) -> None:
     """Background task: build chunks, embed them, store. Updates document status and,
-    if given, the kb_events row (import history/audit)."""
+    if given, the kb_events row (import history/audit).
+
+    Known wart, deliberately preserved: every exception is swallowed into status='error'
+    rather than raised, so a caller cannot tell success from failure from the await alone.
+    Callers that need the outcome must re-read `kb_documents.status` — which is exactly what
+    the curation apply path does (see docs/ADR-001-conversational-ai.md, "Stage 6 — Apply").
+    """
     from . import kb_events
     base_metadata = base_metadata or {}
     started = time.monotonic()
@@ -130,7 +164,8 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
             full_text = "\n\n".join(contents)
         else:
             full_text = text or ""
-            contents = chunk_text(full_text)
+            # Pure-CPU string walk over a document that can be megabytes: off the loop.
+            contents = await asyncio.to_thread(chunk_text, full_text)
             metas = [dict(base_metadata) for _ in contents]
 
         ms = int((time.monotonic() - started) * 1000)
@@ -142,7 +177,8 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
                 await kb_events.finish(event_id, "ready", chunk_count=0, duration_ms=ms)
             return
 
-        vectors = await embeddings.embed_texts(contents)
+        vectors = await _embed_batched(contents)
+        # Kept as the contract-level guard over the concatenated result, not just per batch.
         if len(vectors) != len(contents):
             raise IngestError(f"embedding count mismatch ({len(vectors)} != {len(contents)})")
 
@@ -182,7 +218,7 @@ async def reembed_document(doc_id: str, client_id: str) -> int:
             doc_id, client_id)
     if not rows:
         return 0
-    vectors = await embeddings.embed_texts([r["content"] for r in rows])
+    vectors = await _embed_batched([r["content"] for r in rows])
     if len(vectors) != len(rows):
         raise IngestError(
             f"embedding count mismatch: got {len(vectors)} vectors for {len(rows)} chunks")

@@ -3,8 +3,11 @@
 Uses forced tool-use for a reliable structured result that works across model choices
 (structured `output_config.format` is only on a subset of models). The API key and
 model are passed in per call from runtime settings.
+
+The transport (client reuse, timeouts, admission control, usage accounting) lives in
+`services/llm.py` — this module only owns the schema and the prompt.
 """
-import anthropic
+from . import llm
 
 
 class ClaudeError(RuntimeError):
@@ -62,7 +65,7 @@ ANALYSIS_TOOL = {
 
 
 async def analyze(transcript: str, api_key: str, model: str, instructions: str,
-                  kb_context: str = "") -> dict:
+                  kb_context: str = "", client_id: str | None = None) -> dict:
     if not api_key:
         raise ClaudeError("Anthropic API key is not configured (set it in the admin panel).")
     if not transcript.strip():
@@ -83,25 +86,13 @@ async def analyze(transcript: str, api_key: str, model: str, instructions: str,
         "transcript above. Keep 'sentiment' as one of the allowed enum values."
     )
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        message = await client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=instructions,
-            tools=[ANALYSIS_TOOL],
-            tool_choice={"type": "tool", "name": "submit_analysis"},
-            messages=[{"role": "user", "content": user_content}],
-        )
-    except anthropic.APIError as exc:
-        raise ClaudeError(f"Claude request failed: {getattr(exc, 'message', str(exc))}") from exc
-    finally:
-        await client.close()
-
-    for block in message.content:
-        if block.type == "tool_use" and block.name == "submit_analysis":
-            return _normalize(dict(block.input))
-    raise ClaudeError("Claude did not return a structured analysis.")
+        raw = await llm.call_tool(
+            feature="analysis", client_id=client_id, api_key=api_key, model=model,
+            system=instructions, user=user_content, tool=ANALYSIS_TOOL, opts=llm.ANALYSIS)
+    except llm.LLMError as exc:
+        raise ClaudeError(f"Claude request failed: {exc}") from exc
+    return _normalize(raw)
 
 
 def _as_str_list(value) -> list[str]:

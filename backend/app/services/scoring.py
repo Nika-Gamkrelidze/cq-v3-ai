@@ -11,7 +11,7 @@ Georgian / Russian / English (the model scores meaning regardless of language).
 """
 import logging
 
-import anthropic
+from . import llm
 
 log = logging.getLogger("cq")
 
@@ -132,7 +132,8 @@ def _build_system(config: dict, dims: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def run_scoring(transcript: str, config: dict, api_key: str, model: str) -> dict | None:
+async def run_scoring(transcript: str, config: dict, api_key: str, model: str,
+                      client_id: str | None = None) -> dict | None:
     """Score the transcript against the tenant's rubric. Returns None if nothing to score."""
     if not (transcript or "").strip() or not api_key or not config:
         return None
@@ -141,22 +142,13 @@ async def run_scoring(transcript: str, config: dict, api_key: str, model: str) -
         return None
 
     system = _build_system(config, dims)
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        msg = await client.messages.create(
-            model=model, max_tokens=4096, system=system,
-            tools=[SCORE_TOOL], tool_choice={"type": "tool", "name": "submit_scores"},
-            messages=[{"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"}])
-    except anthropic.APIError as exc:
-        raise ScoringError(f"Scoring request failed: {getattr(exc, 'message', str(exc))}") from exc
-    finally:
-        await client.close()
-
-    raw = {}
-    for block in msg.content:
-        if block.type == "tool_use" and block.name == "submit_scores":
-            raw = dict(block.input)
-            break
+        raw = await llm.call_tool(
+            feature="scoring", client_id=client_id, api_key=api_key, model=model,
+            system=system, user=f"<transcript>\n{transcript}\n</transcript>",
+            tool=SCORE_TOOL, opts=llm.ANALYSIS)
+    except llm.LLMError as exc:
+        raise ScoringError(f"Scoring request failed: {exc}") from exc
 
     by_key = {}
     for s in (raw.get("scores") or []):

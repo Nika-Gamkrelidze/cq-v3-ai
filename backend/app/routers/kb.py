@@ -3,6 +3,7 @@
 Auth: tenant principal (X-API-Key or a tenant-user bearer token). Ingestion runs in a
 background task; documents report status pending -> processing -> ready|error.
 """
+import asyncio
 import json
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
@@ -66,7 +67,10 @@ async def upload_document(
     tag_list = _parse_json(tags, None) or [t.strip() for t in tags.split(",") if t.strip()]
     meta = _parse_json(metadata, {})
     try:
-        text = kb_ingest.extract_text(file.filename, file.content_type, data)
+        # pypdf/python-docx parsing is synchronous and CPU-bound; running it inline here
+        # blocked the single event loop for the whole parse, stalling every other request.
+        text = await asyncio.to_thread(
+            kb_ingest.extract_text, file.filename, file.content_type, data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
     doc_id = await _create_doc(client_id, doc_type, title or file.filename, "file",

@@ -73,6 +73,16 @@ app.include_router(kb.router, prefix="/v1")        # /v1/kb/*
 app.include_router(tts.router, prefix="/v1")       # /v1/tts, /v1/voices, /v1/languages
 
 
+# The one endpoint behind nginx's `/api/v1/chat/` location. P0 ships that location and its
+# streaming/Upgrade settings before any chat code exists, and "the transport is proven in
+# production" is only true if something actually answers through it — otherwise the first real
+# request in P1 is also the first test of the proxy. Deliberately trivial and unauthenticated:
+# it asserts routing and buffering behaviour, nothing about the product.
+@app.get("/v1/chat/health", include_in_schema=False)
+async def chat_transport_health():
+    return {"status": "ok", "transport": "chat"}
+
+
 def _custom_openapi():
     from fastapi.openapi.utils import get_openapi
     if app.openapi_schema:

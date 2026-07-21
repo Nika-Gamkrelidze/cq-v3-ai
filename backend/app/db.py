@@ -7,7 +7,14 @@ _pool: asyncpg.Pool | None = None
 
 async def connect() -> None:
     global _pool
-    _pool = await asyncpg.create_pool(settings.database_url, min_size=1, max_size=10)
+    # One pool for the whole process: HTTP request handlers, KB ingestion background
+    # tasks and (soon) chat precompute all draw from it, so max_size is the hard
+    # concurrency ceiling of the service — not just a database setting.
+    _pool = await asyncpg.create_pool(
+        settings.database_url,
+        min_size=settings.db_pool_min,
+        max_size=settings.db_pool_max,
+    )
 
 
 async def disconnect() -> None:

@@ -72,6 +72,9 @@ async def run_startup_migrations() -> list[str]:
         await _apply(conn, "kb.sql")
         await _apply(conn, "scoring.sql")
         await _apply(conn, "partner.sql")
+        # This list is hardcoded (no glob): a new db/*.sql file that isn't added here
+        # is inert — it silently never runs, on every environment.
+        await _apply(conn, "chat.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

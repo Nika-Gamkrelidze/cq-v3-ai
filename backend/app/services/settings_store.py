@@ -144,6 +144,12 @@ async def set_embedding_config(patch: dict) -> None:
         else:
             ov[key] = value
     await _save_key(EMBEDDINGS_KEY, ov)
+    # The embeddings package caches the built provider for a minute; without this
+    # an admin's provider/model/dim change would look like it did nothing for up
+    # to 60s. Imported here, not at module scope: embeddings imports settings_store.
+    from .embeddings import invalidate_provider_cache
+
+    invalidate_provider_cache()
 
 
 # ---------------------------------------------------------------------------

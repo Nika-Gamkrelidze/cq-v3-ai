@@ -4,6 +4,7 @@ Every endpoint is superadmin-gated and tenant-parameterized (/admin/kb/{tenant_i
 all queries are scoped by that tenant's client_id, so operations never cross tenants.
 Reuses services/kb_ingest, retrieval, embeddings, settings_store.
 """
+import asyncio
 import csv
 import io
 import json
@@ -282,7 +283,11 @@ async def upload(bg: BackgroundTasks, tid: str = Depends(scope), file: UploadFil
         raise HTTPException(status_code=413, detail="File exceeds 25 MB limit")
     meta = _parse_json(metadata, {})
     try:
-        text = kb_ingest.extract_text(file.filename, file.content_type, data)
+        # pypdf/python-docx parsing is synchronous and CPU-bound; running it inline here
+        # blocked the single event loop for the whole parse, stalling every other request
+        # (same fix as routers/kb.py — an operator upload is no cheaper than a tenant one).
+        text = await asyncio.to_thread(
+            kb_ingest.extract_text, file.filename, file.content_type, data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
     doc_id = await _new_doc(tid, doc_type, title or file.filename, "file", file.filename, meta, _tags(tags))

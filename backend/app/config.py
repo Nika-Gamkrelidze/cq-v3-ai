@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""              # only for the openai provider
     embedding_dim: int = 1024                # BGE-M3 dense dimension
 
+    # --- Capacity knobs (one uvicorn worker; these ARE the concurrency ceilings) ---
+    # The asyncpg pool is shared by HTTP traffic, KB ingestion and (soon) chat precompute,
+    # so max is env-driven: it is the one dial that can be turned without a code change.
+    db_pool_min: int = 2                     # warm, so the first chat turn never pays connect cost
+    db_pool_max: int = 10                    # env: DB_POOL_MAX
+    llm_max_concurrency: int = 8             # admission control — 429 fast rather than queue
+    embed_query_timeout_s: float = 10.0      # latency-critical query embeds fail fast, not hang
+
     # --- Auth: signing secret for tenant-user session tokens (HMAC) ---
     jwt_secret: str = "change-me-jwt-secret"
     token_ttl_hours: int = 24
