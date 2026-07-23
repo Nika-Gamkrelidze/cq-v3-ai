@@ -40,7 +40,7 @@ import json
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
                      Query, UploadFile)
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..db import pool
 from ..services import kb_console, kb_ingest, retrieval
@@ -339,14 +339,57 @@ async def bulk_set_visibility(body: BulkVisibilityBody,
 # Search / playground
 # --------------------------------------------------------------------------- #
 class SearchQuery(BaseModel):
+    # `top_k` is bounded HERE, in the contract, rather than clamped inside retrieval where a
+    # partner asking for 60 would silently receive 50 and a partner asking for 0 would
+    # silently receive 1. A 422 naming the limit is the only version of this a client can
+    # notice and correct. The bound is retrieval's own MAX_TOP_K, so the two cannot drift.
     query: str
-    top_k: int = 6
+    top_k: int = Field(6, ge=1, le=retrieval.MAX_TOP_K)
 
 
 @router.post("/search")
 async def search(body: SearchQuery, client_id: str = Depends(require_tenant)):
-    hits = await retrieval.retrieve(client_id, body.query, top_k=body.top_k)
-    return {"count": len(hits), "results": hits}
+    """Search this tenant's KB. Also `POST /v1/kb/search` — see the module docstring.
+
+    Backed by `retrieve_ranked()` rather than `retrieve()` so the caller finally gets the
+    mechanics along with the passages: `method` (vector or the trigram fallback), `top_score`,
+    `kb_present`, and `confidence`. That last one is the point — a BGE-M3 cosine score is not
+    calibrated in absolute terms, so this endpoint used to hand back four unrelated documents
+    in a 0.037-wide band with nothing to distinguish them from four real answers, and every UI
+    on top of it rendered noise as results.
+
+    ADDITIVE ONLY, because this is a partner-API route with external consumers: `count` and
+    `results` keep their meaning, and every field a result already carried (`content`,
+    `metadata`, `title`, `doc_type`, `score`) is still there. Ranked hits carry MORE —
+    `chunk_id`, `document_id`, `chunk_index` — which is what finally lets a result link back
+    to the document it came from.
+
+    Additive extends to WHICH PASSAGES COME BACK, which is why both of `retrieve_ranked`'s
+    chat-shaped filters are switched off here:
+
+    * `relative_gate=None` — the ranked path drops anything more than 0.08 below the best
+      hit. That is right when the hits become an LLM prompt and wrong for a search box: on a
+      good result set (0.82 / 0.78 / 0.42 / 0.38) it silently removes half the answers this
+      endpoint used to return, while the 0.037-wide noise band that motivated this whole
+      change sails straight through it. The absolute `SIM_THRESHOLD` floor, which is what
+      `retrieve()` applied, is all that remains.
+    * `keyword_min_score=0.0` — the ranked path requires trigram similarity >= 0.45; this
+      route never had a keyword floor. Keeping it would mean that during an embedding-service
+      outage a search that used to degrade to a trigram match returns nothing at all, and the
+      user is told "nothing matched, import a document" when the truth is that the encoder is
+      down — which is also precisely when `confidence.reason == "keyword_fallback"` needs to
+      reach the UI.
+
+    Still non-raising on a retrieval failure: `retrieve_ranked` degrades to `method: "none"`
+    with `kb_present: null` and `confidence.reason: "unavailable"` — "we could not look",
+    never "your knowledge base is empty".
+    """
+    r = await retrieval.retrieve_ranked(client_id, body.query, top_k=body.top_k,
+                                        relative_gate=None, keyword_min_score=0.0)
+    hits = r.get("hits") or []
+    return {"count": len(hits), "results": hits, "method": r.get("method"),
+            "top_score": r.get("top_score"), "kb_present": r.get("kb_present"),
+            "confidence": r.get("confidence")}
 
 
 class PlaygroundBody(BaseModel):
@@ -359,9 +402,13 @@ class PlaygroundBody(BaseModel):
 async def playground(body: PlaygroundBody, client_id: str = Depends(require_tenant)):
     """Exactly what retrieval would return, with per-chunk scores, ids and the method used.
 
-    Distinct from `/search` above, which answers "give me context" and hides the mechanics:
-    the playground is for a tenant debugging *why* an answer was wrong, so it exposes whether
-    the vector index or the trigram fallback produced each hit.
+    Distinct from `/search` above, which answers "give me context": the playground is for a
+    tenant debugging *why* an answer was wrong, so it exposes the raw ranking below the
+    threshold as well (`threshold` defaults to 0.0 — nothing is filtered out).
+
+    Carries the same `confidence` block, which matters MORE here than anywhere else: this
+    view deliberately shows unfiltered hits, and without it a wall of 0.36 scores looks
+    identical to a wall of real matches.
     """
     return await _call(kb_console.playground(client_id, body.query, top_k=body.top_k,
                                              threshold=body.threshold))

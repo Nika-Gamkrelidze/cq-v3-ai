@@ -366,8 +366,61 @@ async def playground(client_id: str, query: str, *, top_k: int = 8,
 
     Read-only and never logged to kb_events: it is a debugging read, and an audit log that
     fills up with playground queries stops being read.
+
+    Adds `confidence` (and the `kb_present` it needs) to `search_debug`'s `{method, results}`
+    — additively; both surfaces that read this shape keep every key they had. WHY it belongs
+    here rather than being left to each UI: a raw BGE-M3 cosine score is not calibrated in
+    absolute terms, so a screen full of 0.36–0.40 rows is the encoder reporting "none of
+    these match" while looking exactly like a result set (see `services/retrieval.py`).
+    The playground is where someone goes to find out why an answer was wrong; it is the last
+    place that should be silent about it.
+
+    Confidence is computed from the results `search_debug` ALREADY returned rather than by
+    calling `retrieve_ranked` a second time: a second embedding round-trip on an interactive
+    path is exactly the waste the query batching elsewhere exists to avoid.
+
+    The verdict is comparable with the tenant's own search box even though the two return
+    different numbers of rows — this view is deliberately unfiltered (`threshold=0.0`) while
+    `/kb/search` applies the absolute floor. That works because the flat-distribution test is
+    measured over a bounded window of the ranking rather than over the returned list; before
+    that, the console called the reported ticket `low_score` at the same instant the tenant's
+    search box called it `flat_distribution`, which is the operator reading a different
+    diagnosis than the person they are on the phone with. See `retrieval.FLAT_WINDOW`.
     """
-    return await retrieval.search_debug(client_id, query, top_k, threshold)
+    result = await retrieval.search_debug(client_id, query, top_k, threshold)
+    results = result.get("results") or []
+    kb_present = result.get("kb_present")
+    if kb_present is None:
+        # `search_debug` does not report it. Any hit proves the KB is non-empty, so the probe
+        # only runs when there is nothing to infer from — the one case where the answer
+        # actually changes the message ("you have imported nothing" vs "nothing matched").
+        kb_present = bool(results) or bool(await _kb_present(client_id))
+    result["kb_present"] = kb_present
+    # `search_debug` only reports method 'keyword' when the embed call FAILED. With no rows to
+    # describe either, that is not "nothing matched" — the index was never consulted — and
+    # saying so would send a tenant off to fix a KB that is fine. `kb_present=None` selects
+    # `unavailable`; the probed `kb_present` above stays in the response, since it is true.
+    unavailable = not results and result.get("method") == "keyword"
+    result["confidence"] = retrieval.assess_confidence(
+        results, method=result.get("method") or "none",
+        kb_present=None if unavailable else kb_present)
+    return result
+
+
+async def _kb_present(client_id: str) -> bool:
+    """Does this tenant have ANY chunk? One cheap indexed probe (the same EXISTS pre-check
+    `retrieve_ranked` and `routers/scoring.py` use).
+
+    Deliberately NOT `AND embedding IS NOT NULL`, even though both vector queries filter on
+    it: the trigram fallback does not: it matches `c.content % $1` with no embedding
+    predicate, so a chunk that failed to embed is still retrievable. Narrowing this probe
+    would report `kb_present: false` for content the very next query can return — and in
+    `retrieve_ranked`, where the probe short-circuits, it would make the keyword fallback
+    unreachable for precisely the tenants who depend on it.
+    """
+    async with pool().acquire() as conn:
+        return bool(await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM kb_chunks WHERE client_id = $1)", client_id))
 
 
 # --------------------------------------------------------------------------- #

@@ -255,6 +255,23 @@ async def import_csv(bg: BackgroundTasks, tid: str = Depends(scope), file: Uploa
 
 # ---------------------------------------------------------------------------
 # Search (#3) / Playground (#7)
+#
+# Both return `{method, results, kb_present, confidence}`. `confidence` comes straight from
+# `kb_console.playground`, which is the whole reason these two handlers share one
+# implementation. It is additive: `kb-admin.html` reads `method` and `results` and keeps
+# working untouched.
+#
+# Note what "the same" does and does not mean. This console deliberately shows MORE rows than
+# the tenant's `/kb/search` (`threshold` defaults to 0.0 — the raw ranking, unfiltered), so
+# the two lists differ by design. The *verdict* must not: it is measured over a bounded window
+# of the ranking, not over the returned list, so an operator reading a ticket sees the same
+# diagnosis as the tenant who filed it. See `retrieval.FLAT_WINDOW`.
+#
+# It is also the answer to the operator question these two routes exist for. A raw BGE-M3
+# cosine score is not calibrated in absolute terms — unrelated same-language text still scores
+# ~0.30–0.45 — so a tenant reporting "search returns everything" is looking at a flat band the
+# UI presented as matches. `confidence.reason` names that case (`flat_distribution`) instead of
+# leaving an operator to eyeball four numbers and guess.
 # ---------------------------------------------------------------------------
 class SearchBody(BaseModel):
     query: str

@@ -41,7 +41,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from . import chat_prompts, chat_safety, llm, settings_store
-from .retrieval import retrieve_ranked
+from .retrieval import retrieve_ranked, unavailable_ranked
 
 log = logging.getLogger("cq")
 
@@ -413,8 +413,11 @@ async def _ground(ctx: ChatContext, *, visibility: str | None,
     t = time.monotonic()
     queries = build_query(ctx.messages)
     if not queries:
-        return [], {"method": "none", "top_score": None, "kb_present": False, "hits": []}, \
-            False, REASON_NO_HITS
+        # Built by retrieval, not by hand: an envelope assembled here is one that does not
+        # carry `confidence`, and a consumer reading `r["confidence"]` would KeyError on
+        # exactly the degraded path. `kb_present=False` is passed explicitly to keep the
+        # value gate() has always seen — nothing was retrieved, so nothing may be grounded.
+        return [], unavailable_ranked(False), False, REASON_NO_HITS
 
     top_k = int(_num(_cfg(ctx.cfg, "top_k"), DEFAULTS["top_k"]))
     # Both query strings in ONE call so they are embedded in a single batch and fused with

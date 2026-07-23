@@ -40,6 +40,17 @@
        "internal" is not "broken" — the badge states a fact about who may be quoted this. */
     .pill.vis-public { background:color-mix(in oklab,var(--beam) 20%,transparent); color:var(--beam); }
     .pill.vis-internal { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+    /* Retrieval confidence banner (mirrors tenant.html). Amber = "this tenant's knowledge base
+       has a gap here"; `.hard` (red) = the embedding service is down, so the scores next to it
+       do not mean what they usually mean. Deliberately NOT the .msg ok/err palette used for
+       saves: nothing failed here, the answer is simply not trustworthy. */
+    .retr-flag { border:1px solid color-mix(in oklab,var(--pending) 42%,transparent);
+      border-left:3px solid var(--pending); background:color-mix(in oklab,var(--pending) 9%,transparent);
+      border-radius:var(--r-md); padding:11px 13px; margin:0 0 10px; font-size:13px; color:var(--mist); }
+    .retr-flag b { display:block; color:var(--paper); font-size:13.5px; margin-bottom:3px; }
+    .retr-flag .retr-nums { display:block; margin-top:6px; font-size:11.5px; color:var(--muted); }
+    .retr-flag.hard { border-color:color-mix(in oklab,var(--alert) 45%,transparent);
+      border-left-color:var(--alert); background:color-mix(in oklab,var(--alert) 8%,transparent); }
   </style>
 </head>
 <body>
@@ -561,18 +572,75 @@
       } catch(e){ m.className='msg err'; m.textContent=e.message; } finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
 
+    /* ---- RETRIEVAL CONFIDENCE (mirrors tenant.html — same product, same story) ----
+       WHY: a BGE-M3 cosine score is NOT calibrated in absolute terms — only the ranking is
+       meaningful. Unrelated same-language text still scores ~0.30–0.45, so a screen full of
+       0.36–0.40 rows is the encoder saying "none of these match" while looking exactly like a
+       set of matches. A real tenant searched for a word appearing nowhere in their KB and got
+       every document back inside a 0.037-wide band; the operator answering that ticket was
+       left eyeballing four numbers and guessing. `confidence`
+       (services/retrieval.py::assess_confidence) names the case; this renders it.
+
+       A BANNER, not a toast: it must persist while the passages it warns about are read. The
+       passages stay visible — an operator may legitimately want the best-effort ranking, and
+       hiding them would make a populated KB look empty. */
+    function retrMethod(m) {
+      return (m === 'vector' || m === 'keyword' || m === 'none') ? t('retr.m.' + m) : esc(m || '—');
+    }
+    function retrNum(v) { return v == null ? '—' : Number(v).toFixed(4); }
+    function retrMetaHTML(d, n) {
+      const c = (d && typeof d.confidence === 'object' && d.confidence) || null;
+      const top = (d && d.top_score != null) ? d.top_score : (c ? c.top_score : null);
+      const lvl = c && ['high', 'medium', 'low', 'none'].indexOf(c.level) >= 0 ? c.level : null;
+      const pill = lvl === 'high' ? 'ready' : lvl === 'medium' ? 'processing' : 'notinkb';
+      return `<div class="inline hint" style="gap:8px; flex-wrap:wrap; margin-bottom:8px">
+        <span>${t('kba.pg.method')}: <b>${retrMethod(d && d.method)}</b></span>
+        <span>· ${t('retr.top')} <b>${retrNum(top)}</b></span><span>· ${n}</span>
+        ${lvl ? `<span class="pill ${pill}">${t('retr.level.' + lvl)}</span>` : ''}</div>`;
+    }
+    function retrFlagHTML(d, n) {
+      const c = (d && typeof d.confidence === 'object' && d.confidence) || null;
+      if (!c || c.confident !== false) return '';
+      const known = ['empty_kb', 'unavailable', 'no_hits', 'keyword_fallback',
+                     'flat_distribution', 'low_score'];
+      const k = known.indexOf(c.reason) >= 0 ? 'retr.flag.' + c.reason : 'retr.flag.generic';
+      const nums = [];
+      if (c.top_score != null) nums.push(`${t('retr.top')} ${retrNum(c.top_score)}`);
+      if (c.spread != null) nums.push(`${t('retr.spread')} ${retrNum(c.spread)}`);
+      if (c.margin != null) nums.push(`${t('retr.margin')} ${retrNum(c.margin)}`);
+      if (n) nums.push(t('retr.flag.shown'));
+      /* Red for the two that are a fact about our machinery rather than about this tenant's
+         KB — `keyword_fallback` (the encoder is unreachable, so every tenant on this box is
+         quietly getting worse answers) and `unavailable` (the search did not run at all, so
+         nothing on screen is a statement about the KB). Both are the operator's to act on
+         TODAY. The rest say "this KB has a gap", which is amber, not red. */
+      const hard = c.reason === 'keyword_fallback' || c.reason === 'unavailable';
+      return `<div class="retr-flag${hard ? ' hard' : ''}">
+        <b>${t(k)}</b>${t(k + '.b')}
+        ${nums.length ? `<span class="retr-nums">${nums.join(' · ')}</span>` : ''}</div>`;
+    }
+
     // ---- PLAYGROUND ----
     $('pgRun').addEventListener('click', async () => {
       const q = $('pgQuery').value.trim(); const box = $('pgResults'); if(!q) return;
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const r = await fetch(`${K()}/playground`, { method:'POST', headers: JH(), body: JSON.stringify({ query:q, top_k:parseInt($('pgTopk').value)||8, threshold:parseFloat($('pgThresh').value)||0 }) });
-      const d = await r.json();
-      if (!d.results.length) { box.innerHTML = `<div class="empty">${t('kba.pg.nohits')}</div>`; return; }
-      box.innerHTML = `<div class="hint" style="margin-bottom:8px">${t('kba.pg.method')}: ${d.method} · ${d.results.length}</div>` +
-        d.results.map(h => `<div class="fc-claim" style="border-left-color:var(--beam)">
-          <div class="inline" style="justify-content:space-between"><span class="hint">${esc(h.title||h.doc_type||'KB')} · #${h.chunk_index}</span><b>${h.score!=null?h.score.toFixed(4):'—'}</b></div>
-          <div class="scorebar"><i style="width:${Math.round((h.score||0)*100)}%"></i></div>
-          <div style="margin-top:6px; white-space:pre-wrap">${esc(h.content)}</div></div>`).join('');
+      const r = await fetch(`${K()}/playground`, { method:'POST', headers: JH(), body: JSON.stringify({ query:q, top_k:parseInt($('pgTopk').value)||8, threshold:parseFloat($('pgThresh').value)||0 }) })
+        .catch(() => ({ ok:false, json: async () => null }));
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { box.innerHTML = `<div class="msg err">${esc((d && d.detail) || t('toast.error'))}</div>`; return; }
+      const hits = d && Array.isArray(d.results) ? d.results : [];
+      // Zero hits is exactly when the banner matters most — an empty KB otherwise reads as
+      // "search is broken" — so it renders before the no-hits state, not instead of it.
+      box.innerHTML = retrFlagHTML(d, hits.length) + retrMetaHTML(d, hits.length) +
+        (hits.length ? hits.map(h => `<div class="fc-claim" style="border-left-color:var(--beam)">
+          <div class="inline" style="justify-content:space-between"><span class="hint">${esc(h.title||h.doc_type||'KB')} · #${h.chunk_index ?? 0}</span><b>${h.score!=null?Number(h.score).toFixed(4):'—'}</b></div>
+          <div class="scorebar"><i style="width:${Math.max(0, Math.min(100, Math.round((h.score||0)*100)))}%"></i></div>
+          <div style="margin-top:6px; white-space:pre-wrap">${esc(h.content)}</div>
+          ${h.document_id ? `<div class="inline" style="margin-top:8px"><button class="ghost" data-godoc="${esc(h.document_id)}">${t('retr.opendoc')}</button></div>` : ''}
+          </div>`).join('') : `<div class="empty">${t('kba.pg.nohits')}</div>`);
+      // "Where did this passage come from" → the same chunk modal the Documents list opens.
+      box.querySelectorAll('[data-godoc]').forEach(b =>
+        b.addEventListener('click', () => openChunks(b.dataset.godoc)));
     });
     $('pgQuery').addEventListener('keydown', e => { if(e.key==='Enter') $('pgRun').click(); });
 
