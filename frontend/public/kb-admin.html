@@ -376,8 +376,11 @@
     $('exportCsv').addEventListener('click', () => download(`${K()}/export?format=csv`));
     $('reembedAll').addEventListener('click', async () => {
       if (!(await CQ.confirm(t('kba.reembedall')+'?', {ok:t('kba.reembedall'), danger:false}))) return;
-      const r = await fetch(`${K()}/reembed`, { method:'POST', headers: H() }); const d = await r.json();
-      CQ.toast(`${d.documents} docs · ${d.reembedded_chunks} chunks`, 'ok'); loadOverview();
+      const r = await fetch(`${K()}/reembed`, { method:'POST', headers: H() }); const d = await r.json().catch(()=>({}));
+      // The inline full-KB re-embed now reports a mid-run encoder failure as 502 carrying how
+      // far it got, instead of dying with an unhandled 500. Say which it was.
+      CQ.toast(r.ok ? `${d.documents} docs · ${d.reembedded_chunks} chunks` : (d.detail || t('toast.error')), r.ok ? 'ok' : 'err');
+      loadOverview();
     });
 
     // ---- DOCUMENTS ----
@@ -437,7 +440,10 @@
       }
       if (act==='del') { if(!(await CQ.confirm(t('kba.delete')+'?', {ok:t('kba.delete')}))) return;
         await fetch(`${K()}/documents/${id}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok'); loadDocuments(); return; }
-      if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json(); CQ.toast(`${d.reembedded_chunks} chunks`, 'ok'); return; }
+      if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json().catch(()=>({}));
+        // 502 when the encoder is unreachable — without the r.ok guard that toasts
+        // "undefined chunks" in green, which reads as success.
+        CQ.toast(r.ok ? `${d.reembedded_chunks} chunks` : (d.detail || t('toast.error')), r.ok ? 'ok' : 'err'); return; }
       if (act==='edit') return openEditor(id);
       if (act==='chunks') return openChunks(id);
     }
@@ -458,7 +464,13 @@
         if ($('ed_content').value !== (doc.content_text||'')) body.text = $('ed_content').value;
         const btn = $('ed_save'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
         const r = await fetch(`${K()}/documents/${id}`, { method:'PUT', headers: JH(), body: JSON.stringify(body) });
-        if (r.ok) { CQ.toast(t('toast.saved'),'ok'); bg.remove(); loadDocuments(); } else { btn.disabled=false; btn.textContent=t('kba.save'); $('ed_msg').className='msg err'; $('ed_msg').textContent='Save failed'; }
+        // A text edit re-chunks and re-embeds, so this can now come back 502 ("Re-embedding
+        // failed: ...") with the document left in status='error'. Show the server's reason
+        // verbatim: "Save failed" would send the operator looking at their own input when the
+        // actual fault is a down encoder, and the modal stays open with the text still in it.
+        if (r.ok) { CQ.toast(t('toast.saved'),'ok'); bg.remove(); loadDocuments(); }
+        else { const d = await r.json().catch(()=>({})); btn.disabled=false; btn.textContent=t('kba.save');
+               $('ed_msg').className='msg err'; $('ed_msg').textContent = d.detail || t('toast.error'); loadDocuments(); }
       });
     }
     async function openChunks(id) {

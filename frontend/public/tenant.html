@@ -27,6 +27,24 @@
     .selbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; }
     .cur-reason { display:flex; align-items:center; gap:8px; padding:7px 2px; cursor:pointer; }
     .warn-flag { color:var(--coral); font-weight:600; }
+    /* KB console — same visual language as the operator console (kb-admin.html), because it
+       is the same product: a tenant reading a screenshot of one should recognise the other. */
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
+    .stat { background:var(--input-bg); border:1px solid var(--hairline); border-radius:var(--r-md); padding:14px; }
+    .stat .n { font-family:var(--font-display); font-weight:800; font-size:24px; color:var(--paper); }
+    .stat .l { font-size:11.5px; color:var(--muted); margin-top:2px; }
+    .kv-line { display:flex; justify-content:space-between; gap:12px; padding:6px 0;
+      border-bottom:1px solid color-mix(in oklab,var(--hairline) 60%,transparent); font-size:13px; }
+    .kv-line b { color:var(--mist); font-weight:600; } .kv-line span { color:var(--paper); }
+    .scorebar { height:5px; border-radius:999px; background:var(--hairline); overflow:hidden; margin-top:5px; }
+    .scorebar i { display:block; height:100%; background:var(--beam); }
+    td.tight, th.tight { white-space:nowrap; }
+    /* Publishability. Deliberately NOT the ok/error palette: "public" is not "good" and
+       "internal" is not "broken" — the badge states a fact about who may be quoted this. */
+    .pill.vis-public { background:color-mix(in oklab,var(--beam) 20%,transparent); color:var(--beam); }
+    .pill.vis-internal { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+    .kb-prog { height:8px; border-radius:999px; background:var(--hairline); overflow:hidden; margin:10px 0 6px; }
+    .kb-prog i { display:block; height:100%; background:var(--beam); transition:width .35s ease; }
   </style>
 </head>
 <body>
@@ -52,39 +70,170 @@
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
       </div>
 
-      <!-- KB -->
+      <!-- KB — the tenant's own knowledge-base console. Everything the operator console
+           (kb-admin.html) can do, scoped by the server to this tenant: there is no tenant id
+           in any of these URLs, so there is nothing for a browser to tamper with. -->
       <section class="panel active" id="panel-kb">
-        <div class="card">
-          <h3 data-i18n="kb.import"></h3>
-          <div class="subtabs">
-            <div class="subtab active" data-imp="file" data-i18n="imp.file"></div>
-            <div class="subtab" data-imp="text" data-i18n="imp.paste"></div>
-            <div class="subtab" data-imp="csv" data-i18n="imp.csv"></div>
-          </div>
-          <div class="row">
-            <div><label data-i18n="f.category"></label><input id="i_type" placeholder="policy" /></div>
-            <div><label data-i18n="f.title"></label><input id="i_title" /></div>
-            <div><label data-i18n="f.tags"></label><input id="i_tags" placeholder="refunds, billing" /></div>
-          </div>
-          <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
-          <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-          <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
-          <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
-          <div class="msg" id="importMsg"></div>
+        <div class="subtabs" id="kbTabs">
+          <div class="subtab active" data-kb="overview" data-i18n="kba.tab.overview"></div>
+          <div class="subtab" data-kb="documents" data-i18n="kba.tab.documents"></div>
+          <div class="subtab" data-kb="import" data-i18n="kba.tab.import"></div>
+          <div class="subtab" data-kb="chunks" data-i18n="kba.chunks"></div>
+          <div class="subtab" data-kb="retrieval" data-i18n="pg.tab.retrieval"></div>
+          <div class="subtab" data-kb="duplicates" data-i18n="kba.tab.duplicates"></div>
+          <div class="subtab" data-kb="activity" data-i18n="kba.tab.activity"></div>
+          <div class="subtab" data-kb="maint" data-i18n="tkb.tab.maint"></div>
         </div>
-        <div class="card">
-          <div class="row" style="align-items:flex-end">
-            <div style="flex:2"><label data-i18n="kb.searchlabel"></label><input id="kbq" data-i18n-ph="kb.search_ph" /></div>
-            <div style="flex:0"><button class="ghost" id="kbSearchBtn" data-i18n="btn.search"></button></div>
+
+        <!-- OVERVIEW -->
+        <div class="kbsec" id="kbsec-overview">
+          <div class="card">
+            <div class="row" style="justify-content:space-between; align-items:center">
+              <h3 style="margin:0" data-i18n="tkb.overview.heading"></h3>
+              <button class="ghost" id="kReloadOverview" data-i18n="btn.refresh"></button>
+            </div>
+            <div class="stat-grid" id="kStats" style="margin-top:14px"></div>
           </div>
-          <div id="kbSearchResults"></div>
+          <div class="card">
+            <h3 data-i18n="kba.params"></h3>
+            <p class="hint" data-i18n="tkb.params.hint"></p>
+            <div id="kParams"></div>
+          </div>
         </div>
-        <div class="card">
-          <div class="row" style="justify-content:space-between; align-items:center">
-            <h3 style="margin:0" data-i18n="kb.documents"></h3>
-            <div><button class="ghost" id="reloadDocs" data-i18n="btn.refresh"></button></div>
+
+        <!-- DOCUMENTS -->
+        <div class="kbsec hidden" id="kbsec-documents">
+          <div class="card">
+            <div class="row">
+              <div><label data-i18n="kba.f.status"></label>
+                <select id="kfStatus">
+                  <option value="" data-i18n="kba.f.all"></option>
+                  <option value="ready">ready</option><option value="processing">processing</option>
+                  <option value="pending">pending</option><option value="error">error</option>
+                </select></div>
+              <div><label data-i18n="kba.f.type"></label><input id="kfType" /></div>
+              <div><label data-i18n="kba.f.tag"></label><input id="kfTag" /></div>
+              <div><label data-i18n="vis.col"></label>
+                <select id="kfVis">
+                  <option value="" data-i18n="vis.all"></option>
+                  <option value="public" data-i18n="vis.public"></option>
+                  <option value="internal" data-i18n="vis.internal"></option>
+                </select></div>
+              <div style="flex:2"><label data-i18n="kba.f.search"></label><input id="kfSearch" /></div>
+              <div style="flex:0; align-self:flex-end"><button class="ghost" id="kApplyFilter" data-i18n="btn.refresh"></button></div>
+            </div>
+            <div class="selbar hidden" id="kSelBar">
+              <span><b id="kSelCount">0</b> <span data-i18n="kba.selected"></span></span>
+              <button class="ghost" id="kBulkPublish" data-i18n="vis.bulk.publish"></button>
+              <button class="ghost" id="kBulkUnpublish" data-i18n="vis.bulk.unpublish"></button>
+              <button class="ghost" id="kBulkReembed" data-i18n="kba.bulk.reembed"></button>
+              <button class="ghost" id="kBulkRetag" data-i18n="kba.bulk.retag"></button>
+              <button class="danger" id="kBulkDelete" data-i18n="kba.bulk.delete"></button>
+            </div>
+            <div id="docList" style="margin-top:10px"></div>
+            <div id="kDocPager" class="inline" style="justify-content:center; margin-top:10px"></div>
           </div>
-          <div id="docList" style="margin-top:12px"></div>
+        </div>
+
+        <!-- IMPORT (unchanged importer, now living under its own subtab) -->
+        <div class="kbsec hidden" id="kbsec-import">
+          <div class="card">
+            <h3 data-i18n="kb.import"></h3>
+            <div class="subtabs" id="kbImpTabs">
+              <div class="subtab active" data-imp="file" data-i18n="imp.file"></div>
+              <div class="subtab" data-imp="text" data-i18n="imp.paste"></div>
+              <div class="subtab" data-imp="csv" data-i18n="imp.csv"></div>
+            </div>
+            <div class="row">
+              <div><label data-i18n="f.category"></label><input id="i_type" placeholder="policy" /></div>
+              <div><label data-i18n="f.title"></label><input id="i_title" /></div>
+              <div><label data-i18n="f.tags"></label><input id="i_tags" placeholder="refunds, billing" /></div>
+            </div>
+            <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
+            <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+            <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
+            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+            <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
+            <div class="msg" id="importMsg"></div>
+          </div>
+        </div>
+
+        <!-- CHUNKS -->
+        <div class="kbsec hidden" id="kbsec-chunks">
+          <div class="card">
+            <div class="row" style="align-items:flex-end">
+              <div style="flex:2"><label data-i18n="tkb.chunks.pick"></label><select id="kChunkDoc"><option value="">—</option></select></div>
+              <div style="flex:0"><button class="ghost" id="kReloadChunks" data-i18n="btn.refresh"></button></div>
+            </div>
+            <p class="hint" data-i18n="tkb.chunks.hint"></p>
+            <div id="kChunkList" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <!-- RETRIEVAL: the playground (what the bot actually retrieves) + plain KB search -->
+        <div class="kbsec hidden" id="kbsec-retrieval">
+          <div class="card">
+            <h3 data-i18n="tkb.pg.heading"></h3>
+            <p class="hint" data-i18n="tkb.pg.hint"></p>
+            <label data-i18n="kba.pg.query"></label><input id="kPgQuery" />
+            <div class="row" style="margin-top:10px">
+              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
+              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="kPgThresh" type="number" step="0.05" value="0" /></div>
+              <div style="flex:0; align-self:flex-end"><button class="primary" id="kPgRun" data-i18n="kba.pg.run"></button></div>
+            </div>
+            <div id="kPgResults" style="margin-top:12px"></div>
+          </div>
+          <div class="card">
+            <div class="row" style="align-items:flex-end">
+              <div style="flex:2"><label data-i18n="kb.searchlabel"></label><input id="kbq" data-i18n-ph="kb.search_ph" /></div>
+              <div style="flex:0"><button class="ghost" id="kbSearchBtn" data-i18n="btn.search"></button></div>
+            </div>
+            <div id="kbSearchResults"></div>
+          </div>
+        </div>
+
+        <!-- DUPLICATES -->
+        <div class="kbsec hidden" id="kbsec-duplicates">
+          <div class="card">
+            <div class="inline" style="justify-content:space-between">
+              <h3 style="margin:0" data-i18n="kba.tab.duplicates"></h3>
+              <button class="ghost" id="kScanDup" data-i18n="btn.refresh"></button>
+            </div>
+            <p class="hint" data-i18n="tkb.dup.hint"></p>
+            <div id="kDupBox" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <!-- ACTIVITY -->
+        <div class="kbsec hidden" id="kbsec-activity">
+          <div class="card">
+            <div class="row" style="align-items:flex-end">
+              <div style="flex:1"><label data-i18n="tkb.act.filter"></label><input id="kActFilter" data-i18n-ph="tkb.act.filter.ph" /></div>
+              <div style="flex:0"><button class="ghost" id="kReloadAct" data-i18n="btn.refresh"></button></div>
+            </div>
+            <div id="kActBox" style="margin-top:10px"></div>
+          </div>
+        </div>
+
+        <!-- MAINTENANCE: export + the queued full-KB re-embed -->
+        <div class="kbsec hidden" id="kbsec-maint">
+          <div class="card">
+            <h3 data-i18n="kba.export"></h3>
+            <p class="hint" data-i18n="tkb.exp.hint"></p>
+            <div class="actions">
+              <button class="ghost" id="kExportJson" data-i18n="kba.export"></button>
+              <button class="ghost" id="kExportCsv" data-i18n="kba.exportcsv"></button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="tkb.reembed.heading"></h3>
+            <p class="hint" data-i18n="tkb.reembed.desc"></p>
+            <div class="actions" style="justify-content:space-between; align-items:center">
+              <button class="ghost" id="kReembedAll" data-i18n="tkb.reembed.start"></button>
+              <button class="ghost" id="kReloadReembed" data-i18n="btn.refresh"></button>
+            </div>
+            <div id="kReembedBox" style="margin-top:6px"></div>
+          </div>
         </div>
       </section>
 
@@ -277,15 +426,27 @@
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
       tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active');
-      if (tb.dataset.tab==='kb') loadDocs(); if (tb.dataset.tab==='history') loadJobs();
+      if (tb.dataset.tab==='kb') kbLoad(); if (tb.dataset.tab==='history') loadJobs();
       if (tb.dataset.tab==='health') loadCuration();
       if (tb.dataset.tab==='bot') loadBot();
     }));
-    document.querySelectorAll('#panel-kb .subtab').forEach(s => s.addEventListener('click', () => {
-      document.querySelectorAll('#panel-kb .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+    // KB console subtabs. Scoped by container id — the import switcher below and the rubric
+    // playground's switcher are separate `.subtab` groups on the same page.
+    document.querySelectorAll('#kbTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#kbTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      document.querySelectorAll('#panel-kb .kbsec').forEach(sec =>
+        sec.classList.toggle('hidden', sec.id !== 'kbsec-'+s.dataset.kb));
+      kbLoad();
+    }));
+    document.querySelectorAll('#kbImpTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#kbImpTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
     }));
-    document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) { loadDocs(); loadJobs();
+    document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) {
+      // The custom <select> paints its own trigger from option text, so applyI18n alone
+      // leaves it showing the previous language until it is re-rendered.
+      ['kfStatus','kfVis','kChunkDoc'].forEach(id => CQ.syncSelect($(id)));
+      kbLoad(); loadJobs();
       if ($('panel-health').classList.contains('active')) loadCuration();
       if (botCfg) botStatePill(); } });   // the state pill is built in JS, not data-i18n
 
@@ -313,7 +474,9 @@
     }
     function enter(client) {
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
-      if (client) $('who').textContent = client.name; loadDocs();
+      if (client) $('who').textContent = client.name;
+      CQ.enhanceSelects($('panel-kb'));
+      kbLoad();
     }
     $('loginBtn').addEventListener('click', login);
     $('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
@@ -322,7 +485,9 @@
     // import
     $('importBtn').addEventListener('click', async () => {
       const m = $('importMsg'); m.className='msg'; m.textContent='';
-      const mode = document.querySelector('.subtab.active').dataset.imp;
+      let meta; try { meta = $('i_meta').value.trim() ? JSON.parse($('i_meta').value) : {}; }
+      catch { m.className='msg err'; m.textContent = t('tkb.badjson'); return; }
+      const mode = (document.querySelector('#kbImpTabs .subtab.active')||{dataset:{}}).dataset.imp || 'file';
       const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
       const title = $('i_title').value.trim(); const tags = $('i_tags').value.trim();
       const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.import')+'…';
@@ -331,13 +496,14 @@
         if (mode==='text') {
           if (!$('i_text').value.trim()) throw new Error('Enter some text.');
           r = await fetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
-            body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[] }) });
+            body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
         } else {
           const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error('Choose a file.');
           const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags);
+          fd.append('metadata', JSON.stringify(meta));
           r = await fetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
         }
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Import failed');
+        const d = await CQ.readResp(r);
         m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
         $('i_text').value=''; $('i_file').value=''; $('i_csv').value='';
         setTimeout(loadDocs, 1500); setTimeout(loadDocs, 4000);
@@ -345,31 +511,447 @@
       finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
 
-    // documents
-    $('reloadDocs').addEventListener('click', loadDocs);
-    async function loadDocs() {
-      const r = await fetch(`${API}/kb/documents`, { headers: authH() }); if (!r.ok) return;
-      const docs = await r.json(); const box = $('docList');
-      if (!docs.length) { box.innerHTML = `<div class="empty">${t('kb.none')}</div>`; return; }
-      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.title')}</th><th>${t('th.category')}</th><th>${t('th.status')}</th><th>${t('th.chunks')}</th><th></th></tr></thead><tbody>` +
-        docs.map(d => `<tr>
-          <td>${esc(d.title)}</td><td>${esc(d.doc_type)}</td>
-          <td><span class="pill ${esc(d.status)}">${esc(d.status)}</span>${d.error?` <span class="hint">${esc(d.error)}</span>`:''}</td>
-          <td>${d.chunk_count}</td>
-          <td class="inline"><button class="ghost" data-act="chunks" data-id="${d.id}">${t('btn.chunks')}</button>
-            <button class="danger" data-act="del" data-id="${d.id}">${t('btn.delete')}</button></td>
-        </tr><tr><td colspan="5"><div id="dsub-${d.id}"></div></td></tr>`).join('') + `</tbody></table></div>`;
-      box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id)));
+    /* ==================================================================================
+       KB CONSOLE
+       The tenant half of the operator console. Every call is a `/kb/*` route: the tenant is
+       taken from the bearer token server-side, never from anything this page can set, so a
+       tampered request can only ever reach this workspace's own knowledge base.
+       ================================================================================== */
+    function kbSection() { const s = document.querySelector('#kbTabs .subtab.active'); return s ? s.dataset.kb : 'overview'; }
+    function kbLoad() {
+      const s = kbSection();
+      if (s === 'overview') loadKbOverview();
+      else if (s === 'documents') loadDocs();
+      else if (s === 'chunks') loadChunkDocs();
+      else if (s === 'duplicates') loadDuplicates();
+      else if (s === 'activity') loadActivity();
+      else if (s === 'maint') pollReembed(false);
+      // `import` and `retrieval` are input-only — nothing to fetch until the user acts.
+      if (s !== 'maint') stopReembedPoll();
     }
-    async function docAction(act, id) {
-      if (act==='del') { if(!(await CQ.confirm(t('btn.delete')+'?', {ok:t('btn.delete')}))) return;
-        await fetch(`${API}/kb/documents/${id}`, { method:'DELETE', headers: authH() }); CQ.toast(t('toast.deleted'), 'ok'); loadDocs(); return; }
-      if (act==='chunks') {
-        const r = await fetch(`${API}/kb/documents/${id}/chunks`, { headers: authH() });
-        const chunks = r.ok ? await r.json() : [];
-        const arr = Array.isArray(chunks) ? chunks : [];
-        $('dsub-'+id).innerHTML = `<pre class="tx">${arr.map((c,i)=>`[${c.chunk_index??i}] ${esc(c.content)}`).join('\n\n') || '(no chunks)'}</pre>`;
+    // Read a JSON response defensively: an expired token or an error body must never reach
+    // .map / .length (a previously-fixed QA bug), so callers get a known shape or null.
+    async function kbJson(url, init) {
+      // A dead proxy rejects the fetch outright; swallowing it here means every section
+      // renders its own "could not load" state instead of a silently blank card.
+      try {
+        const r = await fetch(url, init || { headers: authH() });
+        if (!r.ok) return null;
+        return await r.json().catch(() => null);
+      } catch { return null; }
+    }
+    /* Mutations go through kbSend so a rejected fetch (proxy down, connection dropped) becomes
+       an ordinary not-ok response the caller already knows how to report, rather than an
+       unhandled rejection that leaves a spinner spinning and the user with no explanation. */
+    async function kbSend(url, init) {
+      try { return await fetch(url, init); }
+      catch { return { ok: false, status: 0, json: async () => ({ detail: t('err.unavailable') }) }; }
+    }
+    function kbPost(url, body, method) {
+      return kbSend(url, { method: method || 'POST', headers: authH({'Content-Type':'application/json'}),
+                           body: body === undefined ? undefined : JSON.stringify(body) });
+    }
+    function kbDelete(url) { return kbSend(url, { method: 'DELETE', headers: authH() }); }
+    async function kbFail(r) {
+      const d = await r.json().catch(() => ({}));
+      CQ.toast((d && d.detail) || t('toast.error'), 'err');
+    }
+
+    // ---- OVERVIEW ----
+    $('kReloadOverview').addEventListener('click', loadKbOverview);
+    async function loadKbOverview() {
+      const [st, pa] = await Promise.all([kbJson(`${API}/kb/stats`), kbJson(`${API}/kb/params`)]);
+      if (!st || typeof st !== 'object') { $('kStats').innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const tile = (n, l) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`;
+      $('kStats').innerHTML =
+        tile(st.documents ?? 0, t('kba.stat.documents')) +
+        tile(st.public_documents ?? 0, t('vis.stat.public')) +
+        tile(st.chunks ?? 0, t('kba.stat.chunks')) +
+        tile((st.embedding_coverage ?? 0) + '%', t('kba.stat.coverage')) +
+        tile(st.failed ?? 0, t('kba.stat.failed')) +
+        tile(st.in_progress ?? 0, t('kba.stat.inprogress')) +
+        tile(st.approx_tokens ?? 0, t('kba.stat.tokens')) +
+        tile(st.last_updated ? new Date(st.last_updated).toLocaleDateString() : '—', t('kba.stat.lastupd'));
+      if (!pa || !pa.embedding) { $('kParams').innerHTML = `<div class="hint">${t('tkb.loadfail')}</div>`; return; }
+      const e = pa.embedding, ch = pa.chunking || {}, re = pa.retrieval || {}, w = pa.warnings || {};
+      const kv = (b, s, warn) => `<div class="kv-line"><b>${esc(b)}</b><span class="${warn?'warn-flag':''}">${esc(s)}</span></div>`;
+      $('kParams').innerHTML =
+        kv(t('f.provider'), e.provider) + kv(t('f.model'), e.model) +
+        kv(t('f.dimension'), e.dim) +
+        kv(t('tkb.params.columndim'), e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
+        (e.dim_mismatch ? `<div class="warn-flag" style="margin:8px 0">${t('kba.warn.mismatch')}</div>` : '') +
+        kv(t('tkb.params.chunk'), `${ch.size} / ${ch.overlap}`) +
+        kv(t('tkb.params.threshold'), re.similarity_threshold) + kv(t('tkb.params.topk'), re.default_top_k) +
+        kv(t('tkb.params.metric'), re.distance_metric) + kv(t('tkb.params.index'), re.index_type) +
+        kv(t('tkb.params.noembed'), w.chunks_without_embedding, (w.chunks_without_embedding||0) > 0);
+    }
+
+    // ---- DOCUMENTS ----
+    let kSel = new Set(), kPage = { limit: 50, offset: 0, total: 0 };
+    $('kApplyFilter').addEventListener('click', () => { kPage.offset = 0; loadDocs(); });
+    ['kfType','kfTag','kfSearch'].forEach(id => $(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') { kPage.offset = 0; loadDocs(); } }));
+    ['kfStatus','kfVis'].forEach(id => $(id).addEventListener('change', () => { kPage.offset = 0; loadDocs(); }));
+
+    async function loadDocs() {
+      kSel.clear(); updateSelBar();
+      const p = new URLSearchParams({ limit: kPage.limit, offset: kPage.offset });
+      if ($('kfStatus').value) p.set('status', $('kfStatus').value);
+      if ($('kfType').value.trim()) p.set('doc_type', $('kfType').value.trim());
+      if ($('kfTag').value.trim()) p.set('tag', $('kfTag').value.trim());
+      if ($('kfVis').value) p.set('visibility', $('kfVis').value);
+      if ($('kfSearch').value.trim()) p.set('q', $('kfSearch').value.trim());
+      const d = await kbJson(`${API}/kb/documents?${p}`);
+      const box = $('docList');
+      // null == the request failed; [] == the tenant genuinely has no documents. Saying
+      // "no documents yet" when the server is down would be a lie about their own KB.
+      if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; $('kDocPager').innerHTML = ''; return; }
+      const docs = Array.isArray(d) ? d : [];
+      // `/kb/documents` returns a bare list, so the pager can only know there is a next page
+      // by getting a full one back. Better an honest ›/‹ than a fabricated total.
+      kPage.total = docs.length;
+      if (!docs.length) {
+        box.innerHTML = `<div class="empty">${t('tkb.docs.none')}</div>`;
+        renderPager(); return;
       }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th><input type="checkbox" id="kSelAll"/></th><th>${t('th.title')}</th><th>${t('th.category')}</th>
+        <th>${t('kba.doc.tags')}</th><th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th>
+        <th class="tight">${t('vis.col')}</th><th class="tight">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
+        docs.map(x => `<tr>
+          <td><input type="checkbox" class="krowsel" data-id="${esc(x.id)}"/></td>
+          <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
+          <td>${(Array.isArray(x.tags)?x.tags:[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('') || '—'}</td>
+          <td class="tight">${x.chunk_count ?? 0}</td>
+          <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
+          <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?t('vis.public'):t('vis.internal')}</span></td>
+          <td class="tight hint">${esc(x.source_type||'—')}</td>
+          <td class="inline">
+            <button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}</button>
+            <button class="ghost" data-act="edit" data-id="${esc(x.id)}">${t('kba.edit')}</button>
+            <button class="ghost" data-act="chunks" data-id="${esc(x.id)}">${t('kba.chunks')}</button>
+            <button class="ghost" data-act="reembed" data-id="${esc(x.id)}">${t('kba.reembed')}</button>
+            <button class="danger" data-act="del" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${t('kba.delete')}</button>
+          </td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('button[data-act]').forEach(b =>
+        b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
+      box.querySelectorAll('.krowsel').forEach(cb => cb.addEventListener('change', () => {
+        cb.checked ? kSel.add(cb.dataset.id) : kSel.delete(cb.dataset.id); updateSelBar(); }));
+      $('kSelAll').addEventListener('change', () => {
+        box.querySelectorAll('.krowsel').forEach(cb => { cb.checked = $('kSelAll').checked;
+          cb.checked ? kSel.add(cb.dataset.id) : kSel.delete(cb.dataset.id); });
+        updateSelBar(); });
+      renderPager();
+    }
+    function renderPager() {
+      const page = Math.floor(kPage.offset / kPage.limit) + 1;
+      const more = kPage.total >= kPage.limit;
+      $('kDocPager').innerHTML = (kPage.offset > 0 || more)
+        ? `<button class="ghost" ${kPage.offset<=0?'disabled':''} id="kPrevP">‹</button>
+           <span class="hint">${page}</span>
+           <button class="ghost" ${more?'':'disabled'} id="kNextP">›</button>`
+        : `<span class="hint">${kPage.total}</span>`;
+      if ($('kPrevP')) $('kPrevP').addEventListener('click', () => { kPage.offset = Math.max(0, kPage.offset - kPage.limit); loadDocs(); });
+      if ($('kNextP')) $('kNextP').addEventListener('click', () => { kPage.offset += kPage.limit; loadDocs(); });
+    }
+    function updateSelBar() { $('kSelBar').classList.toggle('hidden', kSel.size === 0); $('kSelCount').textContent = kSel.size; }
+
+    async function docAction(act, id, title) {
+      // Publishing decides what the public bot may repeat to a customer word for word, so
+      // even the single-row toggle confirms and says out loud what "public" means.
+      if (act === 'publish' || act === 'unpublish') {
+        const msg = t(`vis.confirm.${act}.one`).replace('{title}', title || '');
+        if (!(await CQ.confirm(msg, { ok: t('vis.'+act), danger: act === 'unpublish' }))) return;
+        const r = await kbPost(`${API}/kb/documents/${id}/visibility`,
+                               { visibility: act === 'publish' ? 'public' : 'internal' }, 'PATCH');
+        if (r.ok) { CQ.toast(t(`vis.done.${act}`), 'ok'); loadDocs(); } else kbFail(r);
+        return;
+      }
+      if (act === 'del') {
+        if (!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', title || ''), { ok: t('kba.delete') }))) return;
+        const r = await kbDelete(`${API}/kb/documents/${id}`);
+        if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadDocs(); } else kbFail(r);
+        return;
+      }
+      if (act === 'reembed') {
+        const b = [...$('docList').querySelectorAll(`button[data-act="reembed"][data-id="${id}"]`)][0];
+        if (b) { b.disabled = true; b.innerHTML = '<span class="spinner"></span>'; }
+        const r = await kbSend(`${API}/kb/documents/${id}/reembed`, { method: 'POST', headers: authH() });
+        if (r.ok) { const d = await r.json().catch(()=>({}));
+          CQ.toast(t('tkb.reembed.done').replace('{n}', d.reembedded_chunks ?? 0), 'ok'); }
+        else await kbFail(r);
+        loadDocs(); return;
+      }
+      if (act === 'edit') return openEditor(id);
+      if (act === 'chunks') return openChunksFor(id);
+    }
+
+    async function openEditor(id) {
+      const doc = await kbJson(`${API}/kb/documents/${id}`);
+      if (!doc || !doc.id) { CQ.toast(t('toast.error'), 'err'); return; }
+      const bg = showModal(`<h3>${t('kba.edit')}: ${esc(doc.title)}</h3>
+        <label>${t('kba.doc.title')}</label><input id="ed_title" value="${esc(doc.title)}"/>
+        <label>${t('kba.doc.type')}</label><input id="ed_type" value="${esc(doc.doc_type)}"/>
+        <label>${t('kba.doc.tags')}</label><input id="ed_tags" value="${esc((doc.tags||[]).join(', '))}"/>
+        <label>${t('kba.doc.meta')}</label><textarea id="ed_meta" style="min-height:60px">${esc(JSON.stringify(doc.metadata||{}))}</textarea>
+        <label>${t('kba.doc.content')}</label><textarea id="ed_content" style="min-height:160px">${esc(doc.content_text||'')}</textarea>
+        <div class="hint" style="margin-top:6px">${t('tkb.edit.warn')}</div>
+        <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="ed_save">${t('kba.save')}</button></div>
+        <div class="msg" id="ed_msg"></div>`);
+      bg.querySelector('[data-c]').addEventListener('click', () => bg.remove());
+      bg.querySelector('#ed_save').addEventListener('click', async () => {
+        const msg = bg.querySelector('#ed_msg');
+        let meta; try { meta = JSON.parse(bg.querySelector('#ed_meta').value || '{}'); }
+        catch { msg.className = 'msg err'; msg.textContent = t('tkb.badjson'); return; }
+        const body = { title: bg.querySelector('#ed_title').value, doc_type: bg.querySelector('#ed_type').value,
+          tags: bg.querySelector('#ed_tags').value.split(',').map(s=>s.trim()).filter(Boolean), metadata: meta };
+        // Only send `text` when it actually changed — sending it re-chunks and re-embeds.
+        if (bg.querySelector('#ed_content').value !== (doc.content_text || '')) body.text = bg.querySelector('#ed_content').value;
+        const btn = bg.querySelector('#ed_save'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const r = await kbPost(`${API}/kb/documents/${id}`, body, 'PUT');
+        if (r.ok) { CQ.toast(t('toast.saved'), 'ok'); bg.remove(); loadDocs(); }
+        else { const d = await r.json().catch(()=>({}));
+          btn.disabled = false; btn.textContent = t('kba.save');
+          msg.className = 'msg err'; msg.textContent = (d && d.detail) || t('toast.error'); }
+      });
+    }
+
+    // ---- BULK ----
+    $('kBulkDelete').addEventListener('click', () => bulk('delete'));
+    $('kBulkReembed').addEventListener('click', () => bulk('reembed'));
+    $('kBulkPublish').addEventListener('click', () => bulk('publish'));
+    $('kBulkUnpublish').addEventListener('click', () => bulk('unpublish'));
+    function promptTags() {
+      return new Promise(resolve => {
+        const bg = showModal(`<h3>${t('kba.bulk.retag')}</h3>
+          <label>${t('kba.doc.tags')}</label><input id="rt_input" placeholder="a, b" />
+          <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="rt_ok">${t('kba.save')}</button></div>`, '460px');
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(null));
+        bg.querySelector('#rt_ok').addEventListener('click', () => done(bg.querySelector('#rt_input').value));
+        bg.querySelector('#rt_input').addEventListener('keydown', e => { if (e.key === 'Enter') done(bg.querySelector('#rt_input').value); });
+        bg.querySelector('#rt_input').focus();
+      });
+    }
+    $('kBulkRetag').addEventListener('click', async () => {
+      const tags = await promptTags(); if (tags === null) return;
+      bulk('retag', tags.split(',').map(s=>s.trim()).filter(Boolean));
+    });
+    async function bulk(action, tags) {
+      if (!kSel.size) return;
+      if (action === 'delete' && !(await CQ.confirm(t('tkb.bulk.delete.confirm').replace('{n}', kSel.size), { ok: t('kba.delete') }))) return;
+      // Bulk publish is the most consequential control on this page: it is the moment internal
+      // text becomes something a customer can be shown verbatim. Say that, don't count rows.
+      if (action === 'publish' || action === 'unpublish') {
+        const msg = t(`vis.confirm.${action}`).replace('{n}', kSel.size);
+        if (!(await CQ.confirm(msg, { ok: t('vis.'+action), danger: action === 'publish' }))) return;
+      }
+      if (action === 'reembed' && !(await CQ.confirm(t('tkb.bulk.reembed.confirm').replace('{n}', kSel.size), { ok: t('kba.reembed'), danger: false }))) return;
+      const r = await kbPost(`${API}/kb/bulk`, { action, document_ids: [...kSel], tags });
+      if (r.ok) { const d = await r.json().catch(()=>({}));
+        CQ.toast(`${action}: ${d.affected ?? 0}`, 'ok'); loadDocs(); }
+      else await kbFail(r);
+    }
+
+    // ---- CHUNKS ----
+    // The finest-grained control there is: a chunk, not a document, is what retrieval matches.
+    $('kReloadChunks').addEventListener('click', () => loadChunks($('kChunkDoc').value));
+    $('kChunkDoc').addEventListener('change', () => loadChunks($('kChunkDoc').value));
+    /* Opening Chunks from a document row goes through the subtab click (which reloads the
+       picker) rather than loading it a second time in parallel — two in-flight loads could
+       finish out of order and leave the picker on the previously selected document. */
+    let kChunkWant = '';
+    function openChunksFor(id) {
+      kChunkWant = id;
+      document.querySelector('#kbTabs .subtab[data-kb="chunks"]').click();
+    }
+    async function loadChunkDocs(preselect) {
+      const sel = $('kChunkDoc'), want = preselect || kChunkWant || sel.value;
+      kChunkWant = '';
+      const d = await kbJson(`${API}/kb/documents?limit=500`);
+      const docs = Array.isArray(d) ? d : [];
+      sel.innerHTML = docs.length
+        ? docs.map(x => `<option value="${esc(x.id)}">${esc(x.title)} · ${x.chunk_count ?? 0}</option>`).join('')
+        : `<option value="">—</option>`;
+      if (want && docs.some(x => x.id === want)) sel.value = want;
+      CQ.syncSelect(sel);
+      if (sel.value) loadChunks(sel.value);
+      else $('kChunkList').innerHTML = `<div class="empty">${t('tkb.docs.none')}</div>`;
+    }
+    async function loadChunks(docId) {
+      const box = $('kChunkList');
+      if (!docId) { box.innerHTML = `<div class="empty">${t('tkb.chunks.pickone')}</div>`; return; }
+      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const d = await kbJson(`${API}/kb/documents/${docId}/chunks`);
+      if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const chunks = Array.isArray(d) ? d : [];
+      if (!chunks.length) { box.innerHTML = `<div class="empty">${t('tkb.chunks.none')}</div>`; return; }
+      box.innerHTML = chunks.map(c => `<div class="fc-claim" style="border-left-color:${c.has_embedding?'var(--ok)':'var(--alert)'}">
+        <div class="inline" style="justify-content:space-between; gap:8px; flex-wrap:wrap">
+          <span class="hint">#${c.chunk_index ?? 0} · ${c.token_count ?? 0} tok${c.has_embedding?'':` · <span class="warn-flag">${t('tkb.chunk.noembed')}</span>`}</span>
+          <span class="inline"><button class="ghost" data-cedit="${esc(c.id)}">${t('kba.chunk.edit')}</button>
+            <button class="danger" data-cdel="${esc(c.id)}">${t('kba.chunk.delete')}</button></span></div>
+        <div style="margin-top:6px; white-space:pre-wrap">${esc(c.content)}</div></div>`).join('');
+      box.querySelectorAll('[data-cedit]').forEach(b => b.addEventListener('click', () => {
+        const c = chunks.find(x => x.id === b.dataset.cedit); if (c) editChunk(docId, c); }));
+      box.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await CQ.confirm(t('tkb.chunk.del.confirm'), { ok: t('kba.delete') }))) return;
+        const r = await kbDelete(`${API}/kb/chunks/${b.dataset.cdel}`);
+        if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadChunks(docId); } else await kbFail(r);
+      }));
+    }
+    function editChunk(docId, chunk) {
+      const bg = showModal(`<h3>${t('kba.chunk.edit')}</h3>
+        <div class="hint">${t('tkb.chunk.edit.hint')}</div>
+        <textarea id="ce_content" style="min-height:180px">${esc(chunk.content || '')}</textarea>
+        <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button><button class="primary" id="ce_save">${t('kba.save')}</button></div>
+        <div class="msg" id="ce_msg"></div>`);
+      bg.querySelector('[data-c]').addEventListener('click', () => bg.remove());
+      bg.querySelector('#ce_save').addEventListener('click', async () => {
+        const btn = bg.querySelector('#ce_save'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const r = await kbPost(`${API}/kb/chunks/${chunk.id}`, { content: bg.querySelector('#ce_content').value }, 'PUT');
+        if (r.ok) { CQ.toast(t('toast.saved'), 'ok'); bg.remove(); loadChunks(docId); }
+        else { const d = await r.json().catch(()=>({}));
+          btn.disabled = false; btn.textContent = t('kba.save');
+          const m = bg.querySelector('#ce_msg'); m.className = 'msg err'; m.textContent = (d && d.detail) || t('toast.error'); }
+      });
+    }
+
+    // ---- RETRIEVAL PLAYGROUND ----
+    // Distinct from the rubric "Playground" TAB above: this one answers "what does retrieval
+    // actually return for this question, and did the vector index or the keyword fallback
+    // produce it" — it never calls a model.
+    $('kPgQuery').addEventListener('keydown', e => { if (e.key === 'Enter') $('kPgRun').click(); });
+    $('kPgRun').addEventListener('click', async () => {
+      const q = $('kPgQuery').value.trim(); const box = $('kPgResults'); if (!q) return;
+      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const r = await kbPost(`${API}/kb/playground`, { query: q,
+        top_k: parseInt($('kPgTopk').value, 10) || 8, threshold: parseFloat($('kPgThresh').value) || 0 });
+      if (!r.ok) { box.innerHTML = ''; await kbFail(r); return; }
+      const d = await r.json().catch(() => null);
+      const hits = d && Array.isArray(d.results) ? d.results : [];
+      if (!hits.length) { box.innerHTML = `<div class="empty">${t('kba.pg.nohits')}</div>`; return; }
+      box.innerHTML = `<div class="hint" style="margin-bottom:8px">${t('kba.pg.method')}: <b>${esc(d.method)}</b> · ${hits.length}</div>` +
+        hits.map(h => `<div class="fc-claim" style="border-left-color:var(--beam)">
+          <div class="inline" style="justify-content:space-between; gap:8px"><span class="hint">${esc(h.title||h.doc_type||'KB')} · #${h.chunk_index ?? 0}</span>
+            <b>${h.score != null ? Number(h.score).toFixed(4) : '—'}</b></div>
+          <div class="scorebar"><i style="width:${Math.max(0, Math.min(100, Math.round((h.score||0)*100)))}%"></i></div>
+          <div style="margin-top:6px; white-space:pre-wrap">${esc(h.content)}</div></div>`).join('');
+    });
+
+    // ---- DUPLICATES ----
+    $('kScanDup').addEventListener('click', loadDuplicates);
+    async function loadDuplicates() {
+      const box = $('kDupBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const d = await kbJson(`${API}/kb/duplicates`);
+      if (!d || typeof d !== 'object') { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const exact = Array.isArray(d.exact_duplicate_groups) ? d.exact_duplicate_groups : [];
+      const near = Array.isArray(d.near_duplicate_pairs) ? d.near_duplicate_pairs : [];
+      let html = '';
+      if (exact.length) html += `<h4>${t('kba.dup.exact')}</h4>` + exact.map(g => {
+        const ids = Array.isArray(g.document_ids) ? g.document_ids : [];
+        const titles = Array.isArray(g.titles) ? g.titles : [];
+        // The first copy is kept by convention; the rest get a delete button each, so nothing
+        // is removed without the tenant seeing which title it is removing.
+        return `<div class="fc-claim v-CONTRADICTED"><b>${g.count ?? ids.length}×</b> ${t('tkb.dup.identical')}
+          <div style="margin-top:6px">${ids.map((id, i) => `<div class="inline" style="justify-content:space-between; gap:8px; padding:3px 0">
+            <span>${esc(titles[i] || id)}${i === 0 ? ` <span class="chip">${t('tkb.dup.keep')}</span>` : ''}</span>
+            ${i === 0 ? '' : `<button class="danger" data-dupdel="${esc(id)}" data-title="${esc(titles[i]||'')}">${t('kba.delete')}</button>`}
+          </div>`).join('')}</div></div>`;
+      }).join('');
+      if (near.length) html += `<h4>${t('kba.dup.near')}</h4>` + near.map(p =>
+        `<div class="fc-claim"><span class="pill notinkb">${(Number(p.similarity||0)*100).toFixed(1)}% ${t('kba.dup.sim')}</span>
+          ${esc(p.a_title)} ↔ ${esc(p.b_title)}</div>`).join('');
+      if (d.near_scan_skipped) html += `<div class="hint" style="margin-top:8px">${t('tkb.dup.skipped')}</div>`;
+      box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
+      box.querySelectorAll('[data-dupdel]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', b.dataset.title || ''), { ok: t('kba.delete') }))) return;
+        const r = await kbDelete(`${API}/kb/documents/${b.dataset.dupdel}`);
+        if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadDuplicates(); } else await kbFail(r);
+      }));
+    }
+
+    // ---- ACTIVITY ----
+    $('kReloadAct').addEventListener('click', loadActivity);
+    $('kActFilter').addEventListener('keydown', e => { if (e.key === 'Enter') loadActivity(); });
+    async function loadActivity() {
+      const box = $('kActBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const p = new URLSearchParams({ limit: 100 });
+      if ($('kActFilter').value.trim()) p.set('action', $('kActFilter').value.trim());
+      const d = await kbJson(`${API}/kb/activity?${p}`);
+      if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const ev = d && Array.isArray(d.events) ? d.events : [];
+      if (!ev.length) { box.innerHTML = `<div class="empty">${t('kba.act.none')}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${t('tkb.act.filter')}</th><th>${t('tkb.act.method')}</th><th>${t('th.status')}</th><th>${t('tkb.act.detail')}</th>
+        <th class="tight">${t('th.chunks')}</th><th class="tight">ms</th><th>${t('tkb.act.actor')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td>${esc(e.method||'—')}</td>
+          <td><span class="pill ${e.status==='ready'||e.status==='ok'?'ready':e.status==='error'?'error':'processing'}">${esc(e.status||'—')}</span></td>
+          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count ?? '—'}</td><td class="tight">${e.duration_ms ?? '—'}</td>
+          <td class="hint">${esc(e.actor||'—')}</td><td class="hint">${e.created_at ? new Date(e.created_at).toLocaleString() : '—'}</td></tr>`).join('') +
+        `</tbody></table></div>`;
+    }
+
+    // ---- MAINTENANCE: export + queued full-KB re-embed ----
+    function download(url, name) {
+      fetch(url, { headers: authH() }).then(r => r.ok ? r.blob() : Promise.reject(new Error(t('toast.error'))))
+        .then(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000); })
+        .catch(e => CQ.toast(e.message || t('toast.error'), 'err'));
+    }
+    $('kExportJson').addEventListener('click', () => download(`${API}/kb/export?format=json`, 'kb-export.json'));
+    $('kExportCsv').addEventListener('click', () => download(`${API}/kb/export?format=csv`, 'kb-export.csv'));
+
+    /* A full-KB re-embed is the single most expensive thing this workspace can trigger: it
+       rebuilds every vector on the one CPU-bound embedder that also serves live retrieval for
+       everyone. So the button only ENQUEUES — the worker does the work, throttled — and this
+       panel polls the job row for progress. The button stays disabled while a job is active,
+       and the server's unique index makes a double-click a 409 rather than a second job. */
+    let kReembedTimer = null;
+    function stopReembedPoll() { if (kReembedTimer) { clearTimeout(kReembedTimer); kReembedTimer = null; } }
+    $('kReloadReembed').addEventListener('click', () => pollReembed(false));
+    $('kReembedAll').addEventListener('click', async () => {
+      if (!(await CQ.confirm(t('tkb.reembed.confirm'), { ok: t('tkb.reembed.start'), danger: false }))) return;
+      const btn = $('kReembedAll'); btn.disabled = true;
+      const r = await kbSend(`${API}/kb/reembed`, { method: 'POST', headers: authH() });
+      if (r.status === 409) CQ.toast(t('tkb.reembed.busy'), 'err');
+      else if (r.ok) CQ.toast(t('tkb.reembed.queued'), 'ok');
+      else await kbFail(r);
+      pollReembed(false);
+    });
+    async function pollReembed(scheduled) {
+      if (!scheduled) stopReembedPoll();
+      const box = $('kReembedBox');
+      const d = await kbJson(`${API}/kb/reembed/status`);
+      const btn = $('kReembedAll');
+      if (d === null) {
+        // Could not read the job row. The button stays enabled — the real double-start guard
+        // is the server's one-active-job index, which answers 409, not this panel.
+        box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`;
+        btn.disabled = false; stopReembedPoll(); return;
+      }
+      const job = typeof d === 'object' ? d.job : null;
+      if (!job) {
+        box.innerHTML = `<div class="hint">${t('tkb.reembed.none')}</div>`;
+        btn.disabled = false; stopReembedPoll(); return;
+      }
+      const active = job.state === 'queued' || job.state === 'running';
+      const total = job.total_documents || 0, done = job.done_documents || 0;
+      const pct = total ? Math.min(100, Math.round((done / total) * 100)) : (job.state === 'done' ? 100 : 0);
+      const pill = job.state === 'done' ? 'ready' : job.state === 'error' ? 'error' : active ? 'processing' : 'notinkb';
+      box.innerHTML = `<div class="inline" style="justify-content:space-between; gap:8px; flex-wrap:wrap">
+          <span class="pill ${pill}">${t('tkb.reembed.state.'+job.state)}</span>
+          <span class="hint">${t('tkb.reembed.progress').replace('{done}', done).replace('{total}', total)}${
+            job.failed_documents ? ` · <span class="warn-flag">${t('tkb.reembed.failed').replace('{n}', job.failed_documents)}</span>` : ''}</span>
+        </div>
+        <div class="kb-prog"><i style="width:${pct}%"></i></div>
+        <div class="hint">${t('th.when')}: ${job.created_at ? new Date(job.created_at).toLocaleString() : '—'}${
+          job.finished_at ? ` → ${new Date(job.finished_at).toLocaleString()}` : ''}</div>
+        ${job.error ? `<div class="msg err">${esc(job.error)}</div>` : ''}`;
+      btn.disabled = active;
+      stopReembedPoll();
+      // Only keep polling while the Maintenance subtab is the one on screen.
+      if (active && kbSection() === 'maint') kReembedTimer = setTimeout(() => pollReembed(true), 4000);
     }
 
     // KB search
@@ -378,8 +960,9 @@
       if (!q) return; box.innerHTML = `<div class="empty"><span class="spinner"></span>${t('btn.search')}…</div>`;
       const r = await fetch(`${API}/kb/search`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ query: q }) });
       const d = await r.json();
-      if (!r.ok) { box.innerHTML = `<div class="msg err">${esc(d.detail||'Search failed')}</div>`; return; }
-      box.innerHTML = d.count ? d.results.map(h => `<div class="card" style="margin:10px 0 0"><div class="hint">${esc(h.title||h.doc_type||'KB')} · score ${h.score!=null?h.score.toFixed(3):'—'}</div><div>${esc(h.content)}</div></div>`).join('')
+      if (!r.ok) { box.innerHTML = `<div class="msg err">${esc((d&&d.detail)||'Search failed')}</div>`; return; }
+      const hits = d && Array.isArray(d.results) ? d.results : [];
+      box.innerHTML = hits.length ? hits.map(h => `<div class="card" style="margin:10px 0 0"><div class="hint">${esc(h.title||h.doc_type||'KB')} · score ${h.score!=null?Number(h.score).toFixed(3):'—'}</div><div>${esc(h.content)}</div></div>`).join('')
         : `<div class="empty">${t('kb.nomatch')}</div>`;
     });
     $('kbq').addEventListener('keydown', e => { if (e.key==='Enter') $('kbSearchBtn').click(); });

@@ -17,6 +17,12 @@ P2 hangs KB curation off this same process, as two more duties:
   * `apply_accepted_proposals` — applies proposals a HUMAN accepted. Nothing auto-applies at any
     confidence; see the comment above CURATION_APPLY_INTERVAL_S for why.
 
+The tenant KB console adds a fourth duty, `kb_reembed_pass`: a tenant asking to re-embed its whole
+knowledge base gets a queue row (202), not a request that runs it. Same reason curation lives here
+— it is minutes-to-hours of the single CPU-bound TEI encoder that also serves live retrieval, so
+it must never sit in front of a waiting operator or hold a pool connection. `services/kb_reembed`
+owns the claim/throttle/resume logic; this process just calls it on a poll.
+
 Deliberately NOT done here:
   * **No migrations.** `run_startup_migrations()` stays exclusive to the api process. Two
     processes booting simultaneously against the same database would race on CREATE/ALTER
@@ -45,7 +51,7 @@ import time
 
 from . import db
 from .config import settings
-from .services import chat_store
+from .services import chat_store, kb_reembed
 from .services.curation import apply as curation_apply
 from .services.curation import runner as curation_runner
 
@@ -90,6 +96,18 @@ CURATION_APPLY_BATCH = 10
 # score is not an acceptable substitute for a reviewer. The product owner asked for
 # accept / decline / accept-with-edits, and all three are human actions.
 
+# ---- Tenant KB console: queued full-KB re-embed ------------------------------
+# How often we look for a queued job. Short because this is pure *latency*: the tenant has just
+# clicked the button and is looking at a progress panel, and an idle tick is one indexed SELECT
+# that matches nothing almost always.
+#
+# This is the one duty that is EXPECTED to overrun its interval, and `_run_duty` will say so once
+# per drained job. That warning is left in deliberately rather than tuned away: the interval here
+# is a *poll* interval, the work behind it is unbounded by design (a full KB, throttled), so the
+# line ends up reading as "this tenant's re-embed took N seconds" — which is the number you want
+# anyway. Do not read it as the pathology it means for the other three duties.
+KB_REEMBED_TICK_S = 15.0
+
 # Shutdown budget. Must stay BELOW the compose `stop_grace_period`, or the "graceful" path is
 # never actually taken.
 SHUTDOWN_TIMEOUT_S = 45.0
@@ -97,7 +115,8 @@ SHUTDOWN_TIMEOUT_S = 45.0
 # The tables every duty in this process reads. They are created by the API's startup
 # migrations, never here, so on a fresh volume they appear some seconds after the worker's
 # pool connects.
-REQUIRED_TABLES = ("copilot_suggestions", "curation_runs", "curation_proposals")
+REQUIRED_TABLES = ("copilot_suggestions", "curation_runs", "curation_proposals",
+                   "kb_reembed_jobs")
 # Bounded wait for those tables. Backs off 1 -> 2 -> 4 -> 8 s, capped, and gives up after this
 # long: if the api is genuinely broken the worker should start anyway and let each duty fail
 # loudly on its own interval, rather than sit silent forever pretending to be healthy.
@@ -280,6 +299,27 @@ async def _apply_accepted_proposals() -> None:
         await curation_apply.apply_accepted(str(row["id"]))
 
 
+async def _kb_reembed_pass() -> None:
+    """Drain the tenant full-KB re-embed queue, one job at a time.
+
+    Strictly sequential, and that is the point: two tenants re-embedding concurrently would each
+    get half of a single-CPU encoder that live retrieval also needs, so the second job waits here
+    rather than in the TEI request queue where it would slow everyone down. The loop keeps going
+    after a job finishes so a backlog drains without waiting a full tick per job.
+
+    Claim, throttle, resume and per-document failure handling all live in `services/kb_reembed` —
+    it is called from here, but it is deliberately worker-agnostic (the SIGTERM flag is passed in
+    rather than imported) so it stays testable and importable without this module.
+    """
+    while not _stop.is_set():
+        job = await kb_reembed.claim_job()
+        if job is None:
+            return
+        log.info("kb re-embed: claimed job=%s client=%s (%s/%s documents already done)",
+                 job["id"], job["client_id"], job["done_documents"], job["total_documents"])
+        await kb_reembed.run_job(job, should_stop=_stop.is_set)
+
+
 async def _run_duty(name: str, interval_s: float, fn) -> None:
     """Run one duty forever on a fixed interval until the stop flag is set.
 
@@ -320,11 +360,13 @@ async def main() -> None:
     log.info(
         "cq-worker started | duties=%s | reap_interval=%ss stale_after=%ss | "
         "curation_window=%02d:00-%02d:00 UTC tick=%ss apply_poll=%ss auto_apply=never | "
+        "kb_reembed_poll=%ss doc_pause=%ss reclaim_after=%ss | "
         "db_pool=%s-%s | migrations=api-only sweep_stuck_jobs=api-only",
-        "reap_stale_suggestions,curation_pass,apply_accepted_proposals",
+        "reap_stale_suggestions,curation_pass,apply_accepted_proposals,kb_reembed_pass",
         REAP_INTERVAL_S, REAP_STALE_AFTER_S,
         CURATION_WINDOW_START_S // 3600, (CURATION_WINDOW_START_S + CURATION_WINDOW_S) // 3600,
         CURATION_TICK_S, CURATION_APPLY_INTERVAL_S,
+        KB_REEMBED_TICK_S, kb_reembed.DOC_PAUSE_S, kb_reembed.CLAIM_STALE_AFTER_S,
         settings.db_pool_min, settings.db_pool_max,
     )
 
@@ -344,6 +386,8 @@ async def main() -> None:
         asyncio.create_task(_run_duty("apply_accepted_proposals", CURATION_APPLY_INTERVAL_S,
                                       _apply_accepted_proposals),
                             name="apply_accepted_proposals"),
+        asyncio.create_task(_run_duty("kb_reembed_pass", KB_REEMBED_TICK_S, _kb_reembed_pass),
+                            name="kb_reembed_pass"),
     ]
     try:
         await _stop.wait()

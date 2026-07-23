@@ -78,6 +78,8 @@ async def run_startup_migrations() -> list[str]:
         # curation.sql AFTER chat.sql: it is the same feature's second half and its comments
         # reference the chat tables the miner reads.
         await _apply(conn, "curation.sql")
+        # kb_ops.sql: the tenant KB console's queued full-KB re-embed jobs.
+        await _apply(conn, "kb_ops.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

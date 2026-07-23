@@ -40,11 +40,19 @@ async def test_retrieval_is_tenant_isolated(monkeypatch):
         return [VEC_B for _ in texts]
     monkeypatch.setattr(embeddings, "embed_texts", fake_embed)
 
+    # An asyncpg pool belongs to the loop that created it, so this test builds its own rather
+    # than borrowing the app's (which lives in TestClient's portal thread). `db._pool` is a
+    # module GLOBAL shared with that app: leaving it None on the way out makes every later
+    # DB-touching HTTP test in the session 500 with "Database pool is not initialised". So the
+    # previous pool is restored in the finally — the same discipline as `test_autopilot._with_db`.
+    prev = db._pool
     await db.connect()
-    async with db.pool().acquire() as conn:
-        a_id = await _mk_tenant(conn, A_MARK, VEC_A)
-        b_id = await _mk_tenant(conn, B_MARK, VEC_B)
+    a_id = b_id = None
     try:
+        async with db.pool().acquire() as conn:
+            a_id = await _mk_tenant(conn, A_MARK, VEC_A)
+            b_id = await _mk_tenant(conn, B_MARK, VEC_B)
+
         # Query as tenant A. Even though VEC_B is the perfect match, A must only see A.
         a_hits = await retrieval.retrieve(a_id, "what is the refund window?", top_k=10, threshold=0.0)
         a_contents = " ".join(h["content"] for h in a_hits)
@@ -57,6 +65,9 @@ async def test_retrieval_is_tenant_isolated(monkeypatch):
         assert A_MARK not in b_contents, "LEAK: tenant B retrieval returned tenant A's KB"
         assert any(h["content"] == B_MARK for h in b_hits)
     finally:
-        async with db.pool().acquire() as conn:
-            await conn.execute("DELETE FROM clients WHERE id = ANY($1::uuid[])", [a_id, b_id])
+        ids = [i for i in (a_id, b_id) if i is not None]
+        if ids:
+            async with db.pool().acquire() as conn:
+                await conn.execute("DELETE FROM clients WHERE id = ANY($1::uuid[])", ids)
         await db.disconnect()
+        db._pool = prev

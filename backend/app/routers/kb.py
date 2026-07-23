@@ -2,16 +2,48 @@
 
 Auth: tenant principal (X-API-Key or a tenant-user bearer token). Ingestion runs in a
 background task; documents report status pending -> processing -> ready|error.
+
+This module is the tenant's FULL KB console: everything the superadmin console
+(`/admin/kb/{tenant_id}/...`) can do, a tenant can now do to its own KB — stats, params,
+document edit (re-chunk + re-embed), chunk view/edit/delete, the retrieval playground,
+duplicates, activity log, export, bulk actions, per-document and full-KB re-embed, and
+publishing. The operations themselves live in `services/kb_console.py` and are shared verbatim
+with `routers/kb_admin.py`; nothing below re-implements a tenant-scoped query. The tenant is
+taken ONLY from `principal.client_id` — there is deliberately no tenant id anywhere in these
+paths, so there is nothing for a caller to tamper with.
+
+!! THIS ROUTER IS MOUNTED TWICE (see main.py): at `/kb` for the browser UI and at `/v1/kb` for
+the B2B partner API. Every route added here is therefore ALSO a partner-API route, reachable
+with a tenant's own `X-API-Key`. That is legitimate — it is the tenant's key acting on the
+tenant's own KB — but these are the ones that are destructive, expensive, or disclosive, and
+nobody should discover them by accident:
+
+  * `POST   /v1/kb/bulk` with action=delete  — mass document deletion, no confirmation step.
+  * `DELETE /v1/kb/documents/{id}` · `DELETE /v1/kb/chunks/{id}` — irreversible.
+  * `PUT    /v1/kb/documents/{id}` carrying `text` — re-chunks and re-embeds the document.
+  * `POST   /v1/kb/documents/{id}/reembed` · `POST /v1/kb/bulk` with action=reembed — inline
+    embedder work, bounded per document but unbounded in how often it can be called.
+  * `POST   /v1/kb/reembed` — full-KB re-embed. QUEUED to cq-worker, never run in the request
+    (see db/kb_ops.sql); one active job per tenant, so a retry loop cannot pile them up.
+  * `GET    /v1/kb/export` — pulls the ENTIRE knowledge base out in one call. Audited.
+  * `PATCH  /v1/kb/documents/{id}/visibility` · `POST /v1/kb/documents/visibility` · `POST
+    /v1/kb/bulk` with action=publish — makes content quotable by the PUBLIC autopilot bot.
+
+They are not blocked, because a tenant's key is the tenant's authority over its own data. They
+are audited: every mutation writes a `kb_events` row whose actor is `tenant:<user_id>` for a
+login and `tenant:apikey` for a server-to-server key, so the activity log can tell a person
+clicking a button apart from a script.
 """
 import asyncio
 import json
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
-                     UploadFile)
+                     Query, UploadFile)
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import kb_events, kb_ingest, retrieval
+from ..services import kb_console, kb_ingest, retrieval
 from ..services.auth import Principal, resolve_principal
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -23,14 +55,17 @@ MAX_BYTES = 25 * 1024 * 1024
 # not a prompt, not a model judgement — is what keeps an internal pricing floor or an
 # escalation script out of a WhatsApp reply. Two values, deliberately: anything richer
 # invites "sort of public" and the whole guarantee stops being auditable.
-VISIBILITIES = ("internal", "public")
+# The vocabulary itself lives in services/kb_console.py so the tenant and operator surfaces
+# cannot disagree about what 'public' means.
+VISIBILITIES = kb_console.VISIBILITIES
 
 
 def check_visibility(value: str) -> str:
-    v = (value or "").strip().lower()
-    if v not in VISIBILITIES:
-        raise HTTPException(status_code=400, detail="visibility must be 'internal' or 'public'")
-    return v
+    """HTTP-flavoured wrapper over the shared validator (kept: other routers import this)."""
+    try:
+        return kb_console.check_visibility(value)
+    except kb_console.KBConsoleError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 async def count_public_documents(client_id: str) -> int:
@@ -41,16 +76,36 @@ async def count_public_documents(client_id: str) -> int:
     gated on it being > 0. A tenant with an unpublished KB would refuse every single
     customer question, which reads as a broken product rather than a safe default.
     """
-    async with pool().acquire() as conn:
-        return int(await conn.fetchval(
-            "SELECT count(*) FROM kb_documents WHERE client_id = $1 AND visibility = 'public'",
-            client_id) or 0)
+    return await kb_console.count_public(client_id)
 
 
 def require_tenant(principal: Principal = Depends(resolve_principal)) -> str:
     if not principal.is_tenant:
         raise HTTPException(status_code=403, detail="Knowledge base requires a tenant (API key or login).")
     return principal.client_id
+
+
+def tenant_actor(principal: Principal = Depends(resolve_principal)) -> str:
+    """Who to record in `kb_events` for a tenant self-service action.
+
+    Not an auth gate — `require_tenant` is, and FastAPI resolves `resolve_principal` once per
+    request for both. This exists so the shared activity timeline can distinguish a person
+    (`tenant:<user_id>`) from a server-to-server key (`tenant:apikey`) from the operator
+    (`superadmin`); an audit log where every row says "tenant" answers no useful question.
+    """
+    return f"tenant:{principal.user_id or principal.role or 'user'}"
+
+
+async def _call(coro):
+    """Await a kb_console operation, translating its service-layer error to HTTP.
+
+    The service never raises HTTPException (it is also called from cq-worker), so the
+    translation has to happen exactly once, here.
+    """
+    try:
+        return await coro
+    except kb_console.KBConsoleError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 def _parse_json(field: str | None, default):
@@ -77,6 +132,9 @@ async def _create_doc(client_id: str, doc_type: str, title: str, source_type: st
         ))
 
 
+# --------------------------------------------------------------------------- #
+# Import
+# --------------------------------------------------------------------------- #
 @router.post("/documents/upload")
 async def upload_document(
     bg: BackgroundTasks,
@@ -151,60 +209,86 @@ async def csv_document(
     return {"id": doc_id, "status": "pending", "title": title or file.filename}
 
 
+# --------------------------------------------------------------------------- #
+# Documents
+# --------------------------------------------------------------------------- #
 @router.get("/documents")
-async def list_documents(doc_type: str | None = None, client_id: str = Depends(require_tenant)):
-    q = ("SELECT id, doc_type, title, status, visibility, tags, chunk_count, char_count, error, "
-         "created_at, updated_at FROM kb_documents WHERE client_id = $1")
-    args = [client_id]
-    if doc_type:
-        q += " AND doc_type = $2"
-        args.append(doc_type)
-    q += " ORDER BY created_at DESC LIMIT 500"
-    async with pool().acquire() as conn:
-        rows = await conn.fetch(q, *args)
-    return [{**dict(r), "id": str(r["id"]),
-             "created_at": r["created_at"].isoformat(),
-             "updated_at": r["updated_at"].isoformat()} for r in rows]
+async def list_documents(doc_type: str | None = None, status: str | None = None,
+                         tag: str | None = None, visibility: str | None = None,
+                         q: str | None = None, limit: int = 500, offset: int = 0,
+                         client_id: str = Depends(require_tenant)):
+    """The tenant's document list.
+
+    Returns a bare LIST, not the console's `{total, documents}` envelope: this route predates
+    the console and `tenant.html` plus every partner integration reads it positionally. The
+    filters and paging are additive — with no query params the result is what it always was,
+    only with the console's extra columns (source_type, source_uri, actor, ingest_ms) alongside.
+    """
+    result = await _call(kb_console.list_documents(
+        client_id, q=q, doc_type=doc_type, status=status, visibility=visibility,
+        tag=tag, limit=limit, offset=offset))
+    return result["documents"]
 
 
 @router.get("/documents/{doc_id}")
 async def get_document(doc_id: str, client_id: str = Depends(require_tenant)):
-    async with pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM kb_documents WHERE id = $1 AND client_id = $2", doc_id, client_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found")
-    d = dict(row)
-    d["id"] = str(row["id"]); d["client_id"] = str(row["client_id"])
-    for k in ("created_at", "updated_at"):
-        if d.get(k):
-            d[k] = d[k].isoformat()
-    if isinstance(d.get("metadata"), str):
-        d["metadata"] = json.loads(d["metadata"])
-    return d
+    return await _call(kb_console.get_document(client_id, doc_id))
+
+
+class DocEdit(BaseModel):
+    title: str | None = None
+    doc_type: str | None = None
+    tags: list[str] | None = None
+    metadata: dict | None = None
+    text: str | None = None   # if provided -> re-chunk + re-embed
+
+
+@router.put("/documents/{doc_id}")
+async def edit_document(doc_id: str, body: DocEdit,
+                        client_id: str = Depends(require_tenant),
+                        actor: str = Depends(tenant_actor)):
+    """Edit metadata, and/or replace the text (which re-chunks + re-embeds the document).
+
+    A failed re-embed is a 502, not a cheerful `{"updated": true}` — see kb_console.update_document.
+    """
+    return await _call(kb_console.update_document(
+        client_id, doc_id, title=body.title, doc_type=body.doc_type, tags=body.tags,
+        text=body.text, metadata=body.metadata, actor=actor))
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str, client_id: str = Depends(require_tenant),
+                          actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.delete_document(client_id, doc_id, actor=actor))
 
 
 @router.get("/documents/{doc_id}/chunks")
 async def get_chunks(doc_id: str, client_id: str = Depends(require_tenant)):
-    async with pool().acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT chunk_index, content, metadata FROM kb_chunks
-            WHERE document_id = $1 AND client_id = $2 ORDER BY chunk_index
-            """, doc_id, client_id)
-    return [{"chunk_index": r["chunk_index"], "content": r["content"],
-             "metadata": json.loads(r["metadata"]) if isinstance(r["metadata"], str) else r["metadata"]}
-            for r in rows]
+    """Every chunk of one document, in order. Bare list (pre-existing shape), now carrying the
+    chunk `id`, `has_embedding` and `token_count` the chunk editor below needs."""
+    result = await _call(kb_console.list_chunks(client_id, doc_id, limit=None))
+    return result["chunks"]
 
 
-@router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str, client_id: str = Depends(require_tenant)):
-    async with pool().acquire() as conn:
-        res = await conn.execute(
-            "DELETE FROM kb_documents WHERE id = $1 AND client_id = $2", doc_id, client_id)
-    if res.endswith("0"):
-        raise HTTPException(status_code=404, detail="Document not found")
-    return {"deleted": True}
+# --------------------------------------------------------------------------- #
+# Chunk-level edit / delete
+# --------------------------------------------------------------------------- #
+class ChunkEdit(BaseModel):
+    content: str
+
+
+@router.put("/chunks/{chunk_id}")
+async def edit_chunk(chunk_id: str, body: ChunkEdit,
+                     client_id: str = Depends(require_tenant),
+                     actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.update_chunk(client_id, chunk_id, content=body.content,
+                                               actor=actor))
+
+
+@router.delete("/chunks/{chunk_id}")
+async def delete_chunk(chunk_id: str, client_id: str = Depends(require_tenant),
+                       actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.delete_chunk(client_id, chunk_id, actor=actor))
 
 
 # --------------------------------------------------------------------------- #
@@ -228,36 +312,32 @@ async def public_count(client_id: str = Depends(require_tenant)):
 
 @router.put("/documents/{doc_id}/visibility")
 async def set_visibility(doc_id: str, body: VisibilityBody,
-                         client_id: str = Depends(require_tenant)):
-    vis = check_visibility(body.visibility)
-    async with pool().acquire() as conn:
-        title = await conn.fetchval(
-            "UPDATE kb_documents SET visibility = $3, updated_at = now() "
-            "WHERE id = $1 AND client_id = $2 RETURNING title", doc_id, client_id, vis)
-    if title is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    await kb_events.log(client_id, "publish" if vis == "public" else "unpublish",
-                        document_id=doc_id, actor="tenant", status="ok", detail=title)
-    return {"id": doc_id, "visibility": vis}
+                         client_id: str = Depends(require_tenant),
+                         actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.set_visibility(client_id, doc_id, body.visibility, actor=actor))
+
+
+@router.patch("/documents/{doc_id}/visibility")
+async def patch_visibility(doc_id: str, body: VisibilityBody,
+                           client_id: str = Depends(require_tenant),
+                           actor: str = Depends(tenant_actor)):
+    """PATCH alias of the route above. Both verbs exist because the console mirrors the
+    operator surface (PUT) while a partial update of one field is a PATCH by any REST reading;
+    they are the same operation and neither is deprecated."""
+    return await _call(kb_console.set_visibility(client_id, doc_id, body.visibility, actor=actor))
 
 
 @router.post("/documents/visibility")
 async def bulk_set_visibility(body: BulkVisibilityBody,
-                              client_id: str = Depends(require_tenant)):
-    vis = check_visibility(body.visibility)
-    ids = [i for i in (body.document_ids or []) if i]
-    if not ids:
-        raise HTTPException(status_code=400, detail="No documents selected")
-    async with pool().acquire() as conn:
-        affected = int((await conn.execute(
-            "UPDATE kb_documents SET visibility = $3, updated_at = now() "
-            "WHERE client_id = $1 AND id = ANY($2::uuid[])", client_id, ids, vis)).split()[-1])
-    await kb_events.log(client_id, "publish" if vis == "public" else "unpublish",
-                        actor="tenant", status="ok", chunk_count=affected,
-                        detail=f"{vis} on {len(ids)} documents")
-    return {"visibility": vis, "affected": affected}
+                              client_id: str = Depends(require_tenant),
+                              actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.bulk_visibility(client_id, body.document_ids,
+                                                  body.visibility, actor=actor))
 
 
+# --------------------------------------------------------------------------- #
+# Search / playground
+# --------------------------------------------------------------------------- #
 class SearchQuery(BaseModel):
     query: str
     top_k: int = 6
@@ -267,3 +347,114 @@ class SearchQuery(BaseModel):
 async def search(body: SearchQuery, client_id: str = Depends(require_tenant)):
     hits = await retrieval.retrieve(client_id, body.query, top_k=body.top_k)
     return {"count": len(hits), "results": hits}
+
+
+class PlaygroundBody(BaseModel):
+    query: str
+    top_k: int = 8
+    threshold: float = 0.0
+
+
+@router.post("/playground")
+async def playground(body: PlaygroundBody, client_id: str = Depends(require_tenant)):
+    """Exactly what retrieval would return, with per-chunk scores, ids and the method used.
+
+    Distinct from `/search` above, which answers "give me context" and hides the mechanics:
+    the playground is for a tenant debugging *why* an answer was wrong, so it exposes whether
+    the vector index or the trigram fallback produced each hit.
+    """
+    return await _call(kb_console.playground(client_id, body.query, top_k=body.top_k,
+                                             threshold=body.threshold))
+
+
+# --------------------------------------------------------------------------- #
+# Health / parameters
+# --------------------------------------------------------------------------- #
+@router.get("/stats")
+async def stats(client_id: str = Depends(require_tenant)):
+    return await _call(kb_console.stats(client_id))
+
+
+@router.get("/params")
+async def params(client_id: str = Depends(require_tenant)):
+    """Chunking, embedding and retrieval settings actually in force, plus `dim_mismatch` —
+    the alarm that says new embeddings are failing and search has quietly stopped working."""
+    return await _call(kb_console.params(client_id))
+
+
+# --------------------------------------------------------------------------- #
+# Re-embedding
+#
+# Per-document is INLINE (bounded: one document's chunks). The full-KB re-embed is QUEUED to
+# cq-worker and never runs in the request — it saturates the single shared CPU-bound TEI
+# container that also serves live retrieval for every other tenant. See db/kb_ops.sql.
+# --------------------------------------------------------------------------- #
+@router.post("/documents/{doc_id}/reembed")
+async def reembed_document(doc_id: str, client_id: str = Depends(require_tenant),
+                           actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.reembed_document(client_id, doc_id, actor=actor))
+
+
+@router.post("/reembed", status_code=202)
+async def reembed_all(client_id: str = Depends(require_tenant),
+                      actor: str = Depends(tenant_actor)):
+    """Queue a full-KB re-embed. 202 with the job row; 409 if one is already queued or running."""
+    return await _call(kb_console.enqueue_reembed(client_id, requested_by=actor))
+
+
+@router.get("/reembed/status")
+async def reembed_status(client_id: str = Depends(require_tenant)):
+    """This tenant's active re-embed job, or the most recent one. `{"job": null}` if never run."""
+    return await _call(kb_console.reembed_status(client_id))
+
+
+# --------------------------------------------------------------------------- #
+# Bulk actions
+# --------------------------------------------------------------------------- #
+class BulkBody(BaseModel):
+    action: str                 # delete | reembed | retag | publish | unpublish
+    document_ids: list[str]
+    tags: list[str] | None = None
+
+
+@router.post("/bulk")
+async def bulk(body: BulkBody, client_id: str = Depends(require_tenant),
+               actor: str = Depends(tenant_actor)):
+    return await _call(kb_console.bulk(client_id, body.action, body.document_ids,
+                                       value=body.tags, actor=actor))
+
+
+# --------------------------------------------------------------------------- #
+# Duplicates / export / activity
+# --------------------------------------------------------------------------- #
+@router.get("/duplicates")
+async def duplicates(near_threshold: float = 0.95,
+                     client_id: str = Depends(require_tenant)):
+    """Exact (checksum) duplicate groups plus near-duplicate chunk pairs.
+
+    The near scan is a self-join over kb_chunks — O(n^2) — so it is skipped above a chunk
+    ceiling and says so via `near_scan_skipped` rather than timing out.
+    """
+    return await _call(kb_console.duplicates(client_id, near_threshold=near_threshold))
+
+
+@router.get("/export")
+async def export(format: str = Query("json"), client_id: str = Depends(require_tenant),
+                 actor: str = Depends(tenant_actor)):
+    """Whole-KB export as JSON or CSV, as an attachment. Audited (see the module docstring)."""
+    payload = await _call(kb_console.export(client_id, fmt=format, actor=actor))
+    if format == "csv":
+        return Response(payload, media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="kb-{client_id[:8]}.csv"'})
+    return Response(json.dumps(payload, ensure_ascii=False), media_type="application/json",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="kb-{client_id[:8]}.json"'})
+
+
+@router.get("/activity")
+async def activity(action: str | None = None, limit: int = 100, offset: int = 0,
+                   client_id: str = Depends(require_tenant)):
+    """The tenant's own KB audit trail — imports, edits, deletes, re-embeds, publishes,
+    exports — including the rows written by the operator, which is the point."""
+    return await _call(kb_console.activity(client_id, action=action, limit=limit, offset=offset))
