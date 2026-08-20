@@ -113,7 +113,8 @@
         <div class="card">
           <h3 data-i18n="adm.instructions"></h3>
           <textarea id="analysis_instructions"></textarea>
-          <div class="actions"><button class="primary" id="saveInt" data-i18n="btn.savesettings"></button><button class="ghost" id="testInt" data-i18n="btn.testconn"></button></div>
+          <div class="actions"><button class="primary" id="saveInt" data-i18n="btn.savesettings"></button><button class="ghost" id="testInt" data-i18n="btn.testconn"></button><button class="ghost" id="testDeep" data-i18n="btn.testdeep"></button></div>
+          <div class="hint" data-i18n="adm.testnote"></div>
           <div class="msg" id="intMsg"></div><div id="intTest"></div>
         </div>
       </section>
@@ -217,14 +218,35 @@
         m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
       else { const d = await r.json().catch(()=>({})); m.className='msg err'; m.textContent = d.detail || 'Save failed'; }
     });
-    $('testInt').addEventListener('click', async () => {
-      const box = $('intTest'), b = $('testInt'); box.innerHTML=''; b.disabled=true; b.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
-      try { const r = await fetch(`${API}/admin/test`, { method:'POST', headers: hdr() }); const d = await r.json();
-        const line = (n,x)=>`<div class="test"><b>${n}</b> ${x.ok?'✅':'❌'} ${esc(x.detail||'')}</div>`;
-        box.innerHTML = line('ElevenLabs', d.elevenlabs||{}) + line('Claude', d.claude||{});
-      } catch(e){ box.innerHTML = `<div class="msg err">${e.message}</div>`; }
-      finally { b.disabled=false; b.textContent=t('btn.testconn'); }
-    });
+    // One row per CAPABILITY, not per vendor. A single green "ElevenLabs" row used to hide a
+    // key that could list voices but not transcribe — the capabilities carry separate
+    // permissions, so each is probed and reported on its own line.
+    const CAP_LABEL = { database:'cap.database', ffmpeg:'cap.ffmpeg', elevenlabs_voices:'cap.voices',
+      elevenlabs_stt:'cap.stt', elevenlabs_tts:'cap.tts', elevenlabs_tts_ka:'cap.ttska',
+      embeddings:'cap.embeddings', claude_analysis:'cap.claude', claude_factcheck:'cap.factcheck',
+      claude_scoring:'cap.scoring' };
+    const CAP_ICON = { ok:'✅', warn:'⚠️', fail:'❌' };
+    async function runTest(deep, btn) {
+      const box = $('intTest'), prev = btn.textContent;
+      box.innerHTML=''; $('testInt').disabled=true; $('testDeep').disabled=true;
+      btn.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
+      try {
+        const r = await fetch(`${API}/admin/test${deep?'?deep=true':''}`, { method:'POST', headers: hdr() });
+        const d = await r.json();
+        const order = Array.isArray(d.order) ? d.order : Object.keys(CAP_LABEL).filter(k => d[k]);
+        box.innerHTML = order.map(k => {
+          const x = d[k] || {}, lvl = x.level || (x.ok ? 'ok' : 'fail');
+          // A missing permission is the one failure the operator can fix in 30 seconds —
+          // name the scope instead of leaving it buried in the message.
+          const hint = x.code === 'missing_permission' && x.scope
+            ? `<div class="hint">${esc(t('cap.fixscope').replace('{scope}', x.scope))}</div>` : '';
+          return `<div class="test"><b>${esc(t(CAP_LABEL[k]||k))}</b> ${CAP_ICON[lvl]||'❌'} ${esc(x.detail||'')}${hint}</div>`;
+        }).join('');
+      } catch(e){ box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+      finally { $('testInt').disabled=false; $('testDeep').disabled=false; btn.textContent=prev; }
+    }
+    $('testInt').addEventListener('click', e => runTest(false, e.currentTarget));
+    $('testDeep').addEventListener('click', e => runTest(true, e.currentTarget));
     let voiceMap = {}, voicesFetched = false;
     // Admin-side map MUST come from /admin/voices (unfiltered): the public /voices is now
     // curated, so a hidden voice would miss the map and fall through to a paid POST /tts.

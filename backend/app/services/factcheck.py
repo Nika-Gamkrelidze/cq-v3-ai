@@ -136,6 +136,17 @@ async def _verify(client_id: str, api_key: str, model: str, items: list[dict]) -
     return list(raw.get("verifications") or [])
 
 
+async def probe_tools(api_key: str, model: str) -> int:
+    """Connectivity probe for the two fact-check tool schemas (submit_claims and
+    submit_verifications). Not part of the pipeline — only /admin/test?deep=1 calls it.
+    Runs no retrieval, so it needs no tenant and touches no KB."""
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    claims = await _extract_claims(
+        client, "Agent: Our support line is open 24/7. Customer: Good to know.", model)
+    await _verify(client, model, [{"claim": "Support is open 24/7.", "evidence": []}])
+    return len(claims)
+
+
 async def run_factcheck(transcript: str, client_id: str, api_key: str, model: str) -> dict | None:
     """Returns the KB-correctness result, or None if there's nothing to check."""
     if not (transcript or "").strip() or not client_id or not api_key:
