@@ -56,26 +56,33 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cora
   font-size:.82em; word-break:break-all; }
 :focus-visible { outline:2px solid var(--beam); outline-offset:2px; border-radius:6px; }
 
-/* ---- Header ---- */
+/* ---- Header ----
+   Items must never squeeze or wrap mid-text: the bar keeps one row while there is room
+   (min-height, nowrap pills, flex:none controls, ellipsized .who) and on narrow screens
+   the nav drops below the brand as whole pills instead of crushing into the 62px bar. */
 .app-header {
   position:sticky; top:0; z-index:40; display:flex; align-items:center; justify-content:space-between;
-  gap:16px; padding:12px clamp(16px,4vw,28px); height:62px;
+  flex-wrap:wrap; gap:8px 16px; padding:12px clamp(16px,4vw,28px); min-height:62px;
   background:color-mix(in oklab, var(--ink) 82%, transparent);
   backdrop-filter:blur(16px); border-bottom:1px solid color-mix(in oklab,var(--hairline) 65%,transparent);
 }
-.brand { display:inline-flex; align-items:center; gap:10px; color:var(--paper); }
+.brand { display:inline-flex; align-items:center; gap:10px; color:var(--paper); flex:none; }
 .brand:hover { color:var(--paper); }
 .brand svg { flex:none; }
-.brand-name { font-family:var(--font-display); font-weight:800; font-size:18px; letter-spacing:-.02em; }
+.brand-name { font-family:var(--font-display); font-weight:800; font-size:18px; letter-spacing:-.02em; white-space:nowrap; }
 .brand-tag { font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
   color:var(--beam); border:1px solid color-mix(in oklab,var(--beam) 55%,transparent);
-  padding:2px 8px; border-radius:999px; }
-.app-nav { display:flex; align-items:center; gap:6px; }
-.app-nav a { font-size:13.5px; color:var(--mist); padding:7px 11px; border-radius:9px; }
+  padding:2px 8px; border-radius:999px; white-space:nowrap; }
+.app-nav { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;
+  margin-left:auto; min-width:0; }
+.app-nav a { font-size:13.5px; color:var(--mist); padding:7px 11px; border-radius:9px;
+  white-space:nowrap; flex:none; }
 .app-nav a:hover { color:var(--paper); background:color-mix(in oklab,var(--surface-2) 60%,transparent); }
-.app-nav .who { color:var(--muted); font-size:13px; padding:0 4px; }
+.app-nav .who { color:var(--muted); font-size:13px; padding:0 4px;
+  max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lang-switch { flex:none; }
 .icon-btn { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px;
-  border-radius:10px; border:1px solid var(--hairline); background:transparent; color:var(--mist);
+  flex:none; border-radius:10px; border:1px solid var(--hairline); background:transparent; color:var(--mist);
   cursor:pointer; transition:all .2s var(--ease); }
 .icon-btn:hover { color:var(--beam); border-color:color-mix(in oklab,var(--beam) 60%,transparent); }
 
@@ -277,6 +284,7 @@ audio { width:100%; margin-top:12px; border-radius:999px; }
 /* ---- Responsive ---- */
 @media (max-width:640px) {
   .app-nav a { padding:6px 8px; font-size:13px; }
+  .app-nav .who { display:none; }
   .brand-tag { display:none; }
   .row > div { min-width:100%; }
   main { padding-bottom:80px; }
