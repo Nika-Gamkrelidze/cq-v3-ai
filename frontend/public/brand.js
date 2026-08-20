@@ -31,7 +31,7 @@ const CQ = (() => {
       'cap.fixscope':'Fix: in ElevenLabs open Settings → API Keys → Edit on this key, enable the “{scope}” permission, save, then re-test.',
       'adm.testnote':'Each capability is probed for real — the connection test spends a fraction of a second of speech-to-text and a few text-to-speech characters, because ElevenLabs offers no way to read a key’s permissions. “Deep” additionally exercises the fact-check and scoring tools.','btn.search':'Search','btn.import':'Import','btn.analyze':'Analyze','btn.synth':'Synthesize speech','btn.create':'Create tenant','btn.adduser':'Add user','btn.rotate':'Rotate','btn.remove':'Remove','btn.apikey':'API key','btn.users':'Users','btn.chunks':'Chunks',
       'hero.eyebrow':'CommuniQ Voice AI','hero.title':'Speak & understand every call.','hero.sub':'Turn text into natural speech — including Georgian — or upload a recording and get an instant AI analysis.',
-      'tab.tts':'Text to Speech','tab.analyze':'Analyze Audio','tab.kb':'Knowledge Base','tab.history':'History',
+      'tab.tts':'Text to Speech','tab.analyze':'Analyze Audio','tab.kb':'Knowledge Base','tab.history':'History','tab.scoring':'Scoring',
       'tts.heading':'Generate speech from text','tts.text_ph':'Type something to say… (English, Russian or Georgian)',
       'an.heading':'Upload a recording to analyze','an.heading_kb':'Analyze a call — uses your knowledge base',
       'drop.title':'Drop an audio file here, or click to browse','drop.sub':'Any audio or video file — transcribed with ElevenLabs Scribe, analyzed by Claude','drop.sub_kb':'Transcribed, then analyzed against your knowledge base',
@@ -206,6 +206,7 @@ const CQ = (() => {
       'tkb.reembed.progress':'{done} of {total} documents','tkb.reembed.failed':'{n} failed',
       'tkb.reembed.state.queued':'Queued','tkb.reembed.state.running':'Running','tkb.reembed.state.done':'Finished',
       'tkb.reembed.state.error':'Failed','tkb.reembed.state.cancelled':'Cancelled',
+      'sc.readonly':'View only — only workspace owners can edit the scoring rubric.',
     },
     ka: {
       'nav.public':'საჯარო აპი','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'ცოდნის ბაზა',
@@ -218,7 +219,7 @@ const CQ = (() => {
       'cap.fixscope':'გამოსწორება: ElevenLabs-ში გახსენით Settings → API Keys → Edit ამ გასაღებზე, ჩართეთ ნებართვა „{scope}“, შეინახეთ და ხელახლა შეამოწმეთ.',
       'adm.testnote':'თითოეული შესაძლებლობა რეალურად მოწმდება — ტესტი ხარჯავს წამის მცირე ნაწილს მეტყველების ამოცნობაზე და რამდენიმე სიმბოლოს ხმის სინთეზზე, რადგან ElevenLabs არ იძლევა გასაღების ნებართვების წაკითხვის საშუალებას. „ღრმა“ დამატებით ამოწმებს ფაქტების შემოწმებისა და შეფასების ხელსაწყოებს.','btn.search':'ძებნა','btn.import':'იმპორტი','btn.analyze':'ანალიზი','btn.synth':'ხმის გენერაცია','btn.create':'ტენანტის შექმნა','btn.adduser':'მომხმარებლის დამატება','btn.rotate':'განახლება','btn.remove':'წაშლა','btn.apikey':'API გასაღები','btn.users':'მომხმარებლები','btn.chunks':'ფრაგმენტები',
       'hero.eyebrow':'CommuniQ ხმის AI','hero.title':'ისაუბრე და გაიგე ყველა ზარი.','hero.sub':'გადააქციე ტექსტი ბუნებრივ მეტყველებად — ქართულის ჩათვლით — ან ატვირთე ჩანაწერი და მიიღე მყისიერი AI ანალიზი.',
-      'tab.tts':'ტექსტი მეტყველებად','tab.analyze':'აუდიოს ანალიზი','tab.kb':'ცოდნის ბაზა','tab.history':'ისტორია',
+      'tab.tts':'ტექსტი მეტყველებად','tab.analyze':'აუდიოს ანალიზი','tab.kb':'ცოდნის ბაზა','tab.history':'ისტორია','tab.scoring':'შეფასება',
       'tts.heading':'ტექსტიდან მეტყველების გენერაცია','tts.text_ph':'აკრიფე სათქმელი… (ინგლისური, რუსული ან ქართული)',
       'an.heading':'ატვირთე ჩანაწერი ანალიზისთვის','an.heading_kb':'გააანალიზე ზარი — იყენებს შენს ცოდნის ბაზას',
       'drop.title':'ჩააგდე აუდიო ფაილი აქ ან დააჭირე ასარჩევად','drop.sub':'ნებისმიერი აუდიო ან ვიდეო ფაილი — გადაიწერება ElevenLabs Scribe-ით, ანალიზი Claude-ით','drop.sub_kb':'ჯერ გადაიწერება, შემდეგ ანალიზდება შენს ცოდნის ბაზასთან',
@@ -384,6 +385,7 @@ const CQ = (() => {
       'tkb.reembed.progress':'{done} / {total} დოკუმენტი','tkb.reembed.failed':'{n} ჩავარდა',
       'tkb.reembed.state.queued':'რიგში','tkb.reembed.state.running':'მიმდინარეობს','tkb.reembed.state.done':'დასრულდა',
       'tkb.reembed.state.error':'ჩავარდა','tkb.reembed.state.cancelled':'გაუქმდა',
+      'sc.readonly':'მხოლოდ სანახავად — შეფასების რუბრიკის რედაქტირება მხოლოდ სამუშაო სივრცის მფლობელს შეუძლია.',
     },
     ru: {
       'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'База знаний',
@@ -396,7 +398,7 @@ const CQ = (() => {
       'cap.fixscope':'Как исправить: в ElevenLabs откройте Settings → API Keys → Edit для этого ключа, включите разрешение «{scope}», сохраните и повторите проверку.',
       'adm.testnote':'Каждая возможность проверяется по-настоящему — тест расходует доли секунды распознавания речи и несколько символов синтеза, поскольку ElevenLabs не позволяет прочитать разрешения ключа. «Глубокая» проверка дополнительно задействует инструменты проверки фактов и оценки.','btn.search':'Поиск','btn.import':'Импорт','btn.analyze':'Анализ','btn.synth':'Синтез речи','btn.create':'Создать арендатора','btn.adduser':'Добавить пользователя','btn.rotate':'Обновить','btn.remove':'Удалить','btn.apikey':'API-ключ','btn.users':'Пользователи','btn.chunks':'Фрагменты',
       'hero.eyebrow':'CommuniQ Голосовой AI','hero.title':'Говорите и понимайте каждый звонок.','hero.sub':'Превратите текст в естественную речь — включая грузинский — или загрузите запись и получите мгновенный AI-анализ.',
-      'tab.tts':'Текст в речь','tab.analyze':'Анализ аудио','tab.kb':'База знаний','tab.history':'История',
+      'tab.tts':'Текст в речь','tab.analyze':'Анализ аудио','tab.kb':'База знаний','tab.history':'История','tab.scoring':'Оценка',
       'tts.heading':'Генерация речи из текста','tts.text_ph':'Введите текст… (английский, русский или грузинский)',
       'an.heading':'Загрузите запись для анализа','an.heading_kb':'Анализ звонка — использует вашу базу знаний',
       'drop.title':'Перетащите аудиофайл сюда или нажмите для выбора','drop.sub':'Любой аудио- или видеофайл — расшифровка ElevenLabs Scribe, анализ Claude','drop.sub_kb':'Сначала расшифровка, затем анализ по вашей базе знаний',
@@ -562,6 +564,7 @@ const CQ = (() => {
       'tkb.reembed.progress':'{done} из {total} документов','tkb.reembed.failed':'с ошибкой: {n}',
       'tkb.reembed.state.queued':'В очереди','tkb.reembed.state.running':'Выполняется','tkb.reembed.state.done':'Завершён',
       'tkb.reembed.state.error':'Ошибка','tkb.reembed.state.cancelled':'Отменён',
+      'sc.readonly':'Только просмотр — редактировать рубрику оценки может только владелец рабочего пространства.',
     },
   };
   let LANG = (() => { try { return localStorage.getItem('cq_lang') || (navigator.language||'en').slice(0,2); } catch { return 'en'; } })();

@@ -76,6 +76,7 @@
         <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
         <div class="tab" data-tab="playground"><span>🧪</span> <span data-i18n="tab.playground"></span></div>
+        <div class="tab" data-tab="scoring"><span>🎯</span> <span data-i18n="tab.scoring"></span></div>
         <div class="tab" data-tab="health"><span>🩺</span> <span data-i18n="cur.tab"></span></div>
         <div class="tab" data-tab="bot"><span>🤖</span> <span data-i18n="tab.bot"></span></div>
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
@@ -407,6 +408,30 @@
         </div>
       </section>
 
+      <!-- SCORING (self-serve rubric config; same editor as the KB-admin console) -->
+      <section class="panel" id="panel-scoring">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline">
+            <h3 style="margin:0" data-i18n="sc.heading"></h3>
+            <span class="hint" id="scVersion"></span>
+          </div>
+          <p class="hint" data-i18n="sc.desc"></p>
+          <p class="hint hidden" id="scReadonly" data-i18n="sc.readonly" style="color:var(--pending)"></p>
+          <div id="scDims"></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <div class="inline" style="gap:8px">
+              <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
+              <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+            </div>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
+          </div>
+          <label data-i18n="sc.rubric"></label>
+          <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
+          <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
+          <div class="msg" id="scMsg"></div>
+        </div>
+      </section>
+
       <!-- HISTORY -->
       <section class="panel" id="panel-history">
         <div class="card">
@@ -428,6 +453,7 @@
       { i18n: 'nav.public', href: 'index.html' },
     ]});
     let TOKEN = sessionStorage.getItem('cq_tenant_token') || '';
+    let ROLE = '';   // tenant user role (owner|member) — owners can edit the scoring rubric
     const $ = id => document.getElementById(id);
     const authH = (extra={}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -440,6 +466,7 @@
       if (tb.dataset.tab==='kb') kbLoad(); if (tb.dataset.tab==='history') loadJobs();
       if (tb.dataset.tab==='health') loadCuration();
       if (tb.dataset.tab==='bot') loadBot();
+      if (tb.dataset.tab==='scoring') loadScoring();
     }));
     // KB console subtabs. Scoped by container id — the import switcher below and the rubric
     // playground's switcher are separate `.subtab` groups on the same page.
@@ -459,6 +486,7 @@
       ['kfStatus','kfVis','kChunkDoc'].forEach(id => CQ.syncSelect($(id)));
       kbLoad(); loadJobs();
       if ($('panel-health').classList.contains('active')) loadCuration();
+      if (scLoaded) { scReadDom(); scRenderDims(); scShowVersion(); } // relabel, keep unsaved edits
       if (botCfg) botStatePill(); } });   // the state pill is built in JS, not data-i18n
 
     // dropzone
@@ -480,10 +508,11 @@
           body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }) });
         const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Sign in failed');
         if (d.scope === 'admin') { sessionStorage.setItem('cq_admin_token', d.token); location.href = 'admin.html'; return; }
-        TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
+        TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client, d.role); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
       } catch(e){ $('gateMsg').textContent = e.message; }
     }
-    function enter(client) {
+    function enter(client, role) {
+      ROLE = role || '';
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
       if (client) $('who').textContent = client.name;
       CQ.enhanceSelects($('panel-kb'));
@@ -1489,6 +1518,88 @@
       } finally { b.disabled = false; b.textContent = t('bot.save'); }
     });
 
+    // ---- Scoring rubric (self-serve config; view-only for members, editable by owners) ----
+    let scDims = [], scLoaded = false, scVer = null;
+    const scEditable = () => ROLE === 'owner';
+    function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
+    function scRow(d, i) {
+      const dis = scEditable() ? '' : ' disabled';
+      return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
+        <div class="row">
+          <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"${dis}/></div>
+          <div style="flex:0; min-width:110px"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"${dis}/></div>
+        </div>
+        <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"${dis}/>
+        <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}"${dis}>${esc(d.guidance||'')}</textarea>
+        ${scEditable() ? `<div class="actions"><button class="danger sc-del" data-i="${i}">${t('sc.remove')}</button></div>` : ''}
+      </div>`;
+    }
+    function scReadDom() {
+      scDims = [...$('scDims').querySelectorAll('[data-i]')].filter(el=>el.classList.contains('fc-claim')).map(el => ({
+        key: (scDims[+el.dataset.i]||{}).key,
+        name: el.querySelector('.sc-name').value.trim(),
+        weight: parseFloat(el.querySelector('.sc-weight').value)||0,
+        description: el.querySelector('.sc-desc').value.trim(),
+        guidance: el.querySelector('.sc-guide').value.trim(),
+      }));
+    }
+    function scRenderDims() {
+      const box = $('scDims');
+      box.innerHTML = scDims.length ? scDims.map(scRow).join('') : `<div class="empty">${t('sc.nodims')}</div>`;
+      box.querySelectorAll('.sc-del').forEach(b => b.addEventListener('click', () => { scReadDom(); scDims.splice(+b.dataset.i,1); scRenderDims(); }));
+      box.querySelectorAll('.sc-weight').forEach(inp => inp.addEventListener('input', scSum));
+      scSum();
+    }
+    function scSum() {
+      let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value)||0);
+      s = Math.round(s*10)/10;
+      const ok = Math.abs(s - 100) <= 0.5;
+      $('scSum').textContent = s; $('scSum').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      $('scSumFlag').textContent = ok ? '✓' : '✗'; $('scSumFlag').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      return ok;
+    }
+    $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+    // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
+    $('scNormalize').addEventListener('click', () => {
+      scReadDom(); const n = scDims.length; if (!n) return;
+      const total = scDims.reduce((a,d)=>a+(d.weight||0),0);
+      if (total <= 0) scDims.forEach(d => d.weight = Math.round(100/n));
+      else scDims.forEach(d => d.weight = Math.round((d.weight/total)*100));
+      scDims[n-1].weight += 100 - scDims.reduce((a,d)=>a+d.weight,0);
+      scRenderDims();
+    });
+    async function loadScoring() {
+      $('scMsg').textContent=''; $('scMsg').className='msg';
+      const ro = !scEditable();
+      $('scReadonly').classList.toggle('hidden', !ro);
+      ['scAdd','scNormalize','scSave'].forEach(id => $(id).classList.toggle('hidden', ro));
+      $('scRubric').disabled = ro;
+      try {
+        const cfg = await CQ.readResp(await fetch(`${API}/scoring/config`, { headers: authH() }));
+        scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
+        $('scRubric').value = cfg.rubric || '';
+        scVer = cfg.version || null; scLoaded = true; scShowVersion();
+        scRenderDims();
+      } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
+    }
+    $('scSave').addEventListener('click', async () => {
+      scReadDom();
+      if (!scDims.length) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needone'); return; }
+      if (scDims.some(d => !d.name)) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needname'); return; }
+      const total = Math.round(scDims.reduce((a,d)=>a+(d.weight||0),0)*10)/10;
+      if (Math.abs(total - 100) > 0.5) { $('scMsg').className='msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
+      const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      try {
+        const d = await CQ.readResp(await fetch(`${API}/scoring/config`, { method:'PUT',
+          headers: authH({'Content-Type':'application/json'}),
+          body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) }));
+        CQ.toast(t('sc.saved'),'ok');
+        scDims = (d.dimensions||[]).map(x=>({key:x.key,name:x.name,weight:x.weight,description:x.description,guidance:x.guidance}));
+        $('scRubric').value = d.rubric||''; scVer = d.version||null; scShowVersion(); scRenderDims();
+      } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
+      finally { btn.disabled=false; btn.textContent=t('sc.save'); }
+    });
+
     // history
     $('reloadJobs').addEventListener('click', loadJobs);
     async function loadJobs() {
@@ -1506,7 +1617,7 @@
 
     if (TOKEN) {
       fetch(`${API}/auth/me`, { headers: authH() }).then(r => r.ok ? r.json() : Promise.reject())
-        .then(me => { if (me.kind==='tenant') enter(me.client); else throw 0; })
+        .then(me => { if (me.kind==='tenant') enter(me.client, me.role); else throw 0; })
         .catch(() => { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; });
     }
   </script>

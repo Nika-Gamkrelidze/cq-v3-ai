@@ -41,6 +41,14 @@ def require_tenant(principal: Principal = Depends(resolve_principal)) -> Princip
     return principal
 
 
+def require_tenant_owner(principal: Principal = Depends(require_tenant)) -> Principal:
+    """Full tenant authority (owner login or the tenant API key) — same policy as
+    PUT /scoring/config in routers/scoring.py; keep the two in sync."""
+    if principal.role not in ("owner", "apikey"):
+        raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
+    return principal
+
+
 def _job_public(row) -> dict:
     d = dict(row)
     d["id"] = str(row["id"])
@@ -299,7 +307,7 @@ async def get_rubric(p: Principal = Depends(require_tenant)):
 
 
 @router.put("/scoring/config")
-async def put_rubric(body: RubricBody, p: Principal = Depends(require_tenant)):
+async def put_rubric(body: RubricBody, p: Principal = Depends(require_tenant_owner)):
     """Replace the tenant's scoring rubric (weights must total 100%)."""
     try:
         return await scoring_store.save_config(

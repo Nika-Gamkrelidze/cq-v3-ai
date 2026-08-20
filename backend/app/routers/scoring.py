@@ -119,6 +119,15 @@ def _tenant(principal: Principal = Depends(resolve_principal)) -> str:
     return principal.client_id
 
 
+def _tenant_owner(principal: Principal = Depends(resolve_principal)) -> str:
+    """Editing the rubric needs full tenant authority: an owner login or the tenant API key."""
+    if not principal.is_tenant:
+        raise HTTPException(status_code=401, detail="Tenant login or API key required")
+    if principal.role not in ("owner", "apikey"):
+        raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
+    return principal.client_id
+
+
 @router.get("/scoring/config")
 async def tenant_get(client_id: str = Depends(_tenant)):
     return await scoring_store.get_active_config(client_id) or {"version": None, "dimensions": [],
@@ -126,7 +135,7 @@ async def tenant_get(client_id: str = Depends(_tenant)):
 
 
 @router.put("/scoring/config")
-async def tenant_put(body: ConfigBody, client_id: str = Depends(_tenant)):
+async def tenant_put(body: ConfigBody, client_id: str = Depends(_tenant_owner)):
     try:
         return await scoring_store.save_config(client_id, _dump(body.dimensions), body.rubric or "", "tenant")
     except ValueError as exc:
