@@ -5,11 +5,11 @@ configured limits; tenants get their knowledge base injected as RAG context.
 """
 import json
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from ..db import pool
-from ..services import analysis, limits
-from ..services.auth import Principal, resolve_principal
+from ..services import analysis, elevenlabs, limits, media, sentiment, settings_store
+from ..services.auth import Principal, client_ip, resolve_principal
 
 router = APIRouter(tags=["analyze"])
 
@@ -23,7 +23,7 @@ async def get_limits(principal: Principal = Depends(resolve_principal)):
 
 
 @router.post("/analyze")
-async def analyze_audio(file: UploadFile = File(...),
+async def analyze_audio(request: Request, file: UploadFile = File(...),
                         principal: Principal = Depends(resolve_principal)):
     """Synchronous single-audio analysis. Runs the full pipeline inline and returns the
     result. Partners with many files should use the async /v1/analyses[/batch] endpoints."""
@@ -38,12 +38,61 @@ async def analyze_audio(file: UploadFile = File(...),
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
-        status="transcribing")
+        status="transcribing", client_ip=client_ip(request), audio=audio)
     result = await analysis.run_pipeline(
         job_id, audio, file.filename, file.content_type, principal.client_id, principal.is_tenant)
     if result.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.get("error") or "Analysis failed")
     return result
+
+
+@router.post("/transcribe")
+async def transcribe_audio(request: Request, file: UploadFile = File(...),
+                           principal: Principal = Depends(resolve_principal)):
+    """Speech-to-text with sentiment, WITHOUT the Claude analysis pass.
+
+    This is what the public site offers: a transcript and how the speaker sounded. It exists
+    as its own route rather than a flag on /analyze because it is a different product with a
+    different cost — no LLM call at all — and because the public page must not be able to
+    trigger the expensive path by flipping a parameter.
+
+    Metered on the same `analyses` bucket so an operator keeps one daily dial for "audio a
+    stranger may send us", and retained under the same rule as every other anonymous upload.
+    """
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    if len(audio) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Audio file exceeds 100 MB limit")
+
+    await limits.reserve(principal, "analyses", len(audio))
+    cfg = await settings_store.get_effective()
+
+    job_id = await analysis.create_job(
+        filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
+        client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
+        status="transcribing", client_ip=client_ip(request), audio=audio)
+
+    try:
+        stt = await elevenlabs.transcribe(
+            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+    except Exception as exc:  # noqa: BLE001
+        await analysis.mark_error(job_id, f"Transcription failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
+
+    transcript = stt.get("text") or ""
+    language = stt.get("language_code")
+
+    # Prosody only: there is no Claude pass here, so there is no text sentiment to pair it
+    # with. `combine()` reports that honestly as prosody_only rather than inventing a
+    # text half.
+    sent = sentiment.combine(None, await sentiment.prosody(
+        audio, file.filename, file.content_type))
+
+    await analysis.mark_transcribed(job_id, transcript=transcript, language=language,
+                                    sentiment=sent)
+    return {"id": job_id, "status": "done", "filename": file.filename, "language": language,
+            "transcript": transcript, "sentiment": sent}
 
 
 def _scope(principal: Principal, first: int = 1):

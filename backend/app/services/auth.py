@@ -202,11 +202,21 @@ async def resolve_principal(
     # quota bucket per request) while the LAST element is the one our own proxy added. Hence:
     # X-Real-IP, then the last XFF element, then the socket peer.
     # App-side fix only: no nginx change and no container recreate needed to close this.
+    return Principal(kind="anonymous", via="none", anon_key=client_ip(request))
+
+
+def client_ip(request: Request) -> str:
+    """The caller's real IP, by the same rule the anonymous quota key uses.
+
+    Shared rather than re-derived per call site: this is a trust decision (X-Real-IP, then the
+    LAST X-Forwarded-For element, then the socket peer — never the first XFF element, which the
+    client controls), and a second hand-written copy is how one of them ends up reading the
+    spoofable end of the header.
+    """
     xff = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
-    ip = (request.headers.get("x-real-ip", "").strip()
-          or (xff[-1] if xff else "")
-          or (request.client.host if request.client else "unknown"))
-    return Principal(kind="anonymous", via="none", anon_key=ip)
+    return (request.headers.get("x-real-ip", "").strip()
+            or (xff[-1] if xff else "")
+            or (request.client.host if request.client else "unknown"))
 
 
 def assert_expected_tenant(principal: Principal, expected: str | None) -> None:

@@ -80,6 +80,9 @@ async def run_startup_migrations() -> list[str]:
         await _apply(conn, "curation.sql")
         # kb_ops.sql: the tenant KB console's queued full-KB re-embed jobs.
         await _apply(conn, "kb_ops.sql")
+        # media.sql: anonymous-submission retention (IP/audio/text) + acoustic sentiment.
+        # Last because it only ALTERs audio_jobs, which analyzer.sql created above.
+        await _apply(conn, "media.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

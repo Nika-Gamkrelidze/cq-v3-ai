@@ -20,6 +20,7 @@ DEFAULTS = {
     "stt_model": settings.stt_model,
     "tts_model": settings.tts_model,
     "tts_voice_id": settings.tts_voice_id,
+    "sentiment_url": settings.sentiment_url,
     "analysis_instructions": (
         "You are a call-quality and conversation analyst. Analyse the transcript of "
         "an audio recording (calls may be in Georgian, Russian, or English). Identify "
@@ -166,6 +167,10 @@ ANON_DEFAULTS = {
     "max_audio_mb": 10,
     "max_tts_per_day": 10,
     "features": {"analyze": True, "tts": True, "kb": False},
+    # Days to keep an unregistered visitor's IP, audio and text before the worker purges it.
+    # 0 disables the deadline (keep indefinitely) — a deliberate choice an operator has to
+    # make, never the default, because this is personal data with no consent attached.
+    "retention_days": 30,
 }
 
 

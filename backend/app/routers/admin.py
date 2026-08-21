@@ -8,7 +8,7 @@ import asyncio
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
@@ -271,6 +271,10 @@ class AnonPatch(BaseModel):
     max_audio_mb: int | None = None
     max_tts_per_day: int | None = None
     features: dict | None = None
+    # Days to keep an unregistered visitor's IP, audio and text. 0 means keep indefinitely,
+    # which is a deliberate operator choice — set_anonymous_config drops None, not 0, so
+    # "0" really is storable rather than silently ignored.
+    retention_days: int | None = Field(default=None, ge=0, le=3650)
 
 
 @router.get("/anonymous-limits", dependencies=[Depends(require_admin)])

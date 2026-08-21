@@ -1,12 +1,16 @@
 """Text-to-speech endpoints for the user UI (ElevenLabs)."""
+import logging
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..services import elevenlabs, limits, settings_store
-from ..services.auth import Principal, resolve_principal
+from ..db import pool
+from ..services import elevenlabs, limits, media, settings_store
+from ..services.auth import Principal, client_ip, resolve_principal
+
+log = logging.getLogger("cq")
 
 router = APIRouter(tags=["tts"])
 
@@ -84,8 +88,41 @@ async def voices():
     return picked or live
 
 
+async def _record_tts(*, principal: Principal, ip: str, text: str, language_code: str | None,
+                      voice_id: str, model_id: str, audio: bytes) -> None:
+    """Keep what an unregistered visitor asked us to say, and what we said back.
+
+    /tts used to stream the clip straight out and keep nothing at all — no text, no IP, no
+    trace — which left abuse of a public, paid, unauthenticated endpoint uninvestigable. One
+    row per synthesis fixes that. Retained for anonymous callers only and on the same deadline
+    as their uploads; a tenant's synthesis is their own data, not on this timer.
+
+    Never raises: recording is a retention duty, not part of answering the request.
+    """
+    try:
+        stored, purge_after = {}, None
+        if principal.kind == "anonymous":
+            anon = await settings_store.get_anonymous_config()
+            stored = media.save(audio, content_type="audio/mpeg", filename="speech.mp3")
+            purge_after = media.deadline(anon.get("retention_days"))
+        async with pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO tts_requests
+                    (client_id, principal_type, anon_key, client_ip, text, text_chars,
+                     language_code, voice_id, tts_model, audio_path, audio_bytes, purge_after)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                """,
+                principal.client_id, principal.kind, principal.anon_key, ip, text, len(text),
+                language_code, voice_id, model_id, stored.get("path"), stored.get("bytes"),
+                purge_after)
+    except Exception:  # noqa: BLE001 — never fail a synthesis because we could not log it
+        log.exception("tts retention record failed")
+
+
 @router.post("/tts")
-async def synthesize(req: TTSRequest, principal: Principal = Depends(resolve_principal)):
+async def synthesize(request: Request, req: TTSRequest,
+                     principal: Principal = Depends(resolve_principal)):
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
@@ -134,4 +171,8 @@ async def synthesize(req: TTSRequest, principal: Principal = Depends(resolve_pri
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc))
+
+    await _record_tts(principal=principal, ip=client_ip(request), text=text,
+                      language_code=language_code, voice_id=voice_id, model_id=model_id,
+                      audio=audio)
     return Response(content=audio, media_type="audio/mpeg")

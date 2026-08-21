@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     tts_model: str = "eleven_multilingual_v2"
     tts_voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel" (default voice)
 
+    # --- Acoustic sentiment (self-hosted prosody sidecar) ---
+    # Empty disables the prosody half entirely: sentiment then reports the text signal alone
+    # rather than failing, so the stack still runs with no extra container.
+    sentiment_url: str = "http://sentiment:8080"
+
+    # Where retained anonymous submissions (audio + synthesised clips) are written. A volume,
+    # never the image: these outlive a rebuild and must not be baked into one.
+    media_root: str = "/data/media"
+
     s3_endpoint_url: str = ""
     s3_bucket: str = ""
     s3_access_key_id: str = ""

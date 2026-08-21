@@ -35,6 +35,29 @@ services:
       start_period: 300s
     restart: unless-stopped
 
+  # Self-hosted acoustic emotion (prosody) — the "how it was said" half of sentiment.
+  # Same shape as `embeddings`: one small CPU model, no external key, and the audio never
+  # leaves the deployment (the tenants are banks and clinics). Optional: if this service is
+  # absent the API reports the text-only sentiment instead of failing.
+  sentiment:
+    build: ./sentiment
+    container_name: cq-sentiment
+    environment:
+      # A licensing decision as much as a technical one — see sentiment/app.py. Must stay a
+      # permissively licensed checkpoint: this is a commercial product.
+      SENTIMENT_MODEL: "superb/wav2vec2-base-superb-er"
+    volumes:
+      - hf_cache:/data/hf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      # The model is fetched lazily on the first request, so the container is healthy long
+      # before it is warm — no 300s start_period needed here, unlike TEI.
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
   api:
     build: ./backend
     container_name: cq-api
@@ -42,11 +65,17 @@ services:
     environment:
       DATABASE_URL: postgresql://cq:cq@db:5432/cq
       EMBEDDING_BASE_URL: http://embeddings:80
+      SENTIMENT_URL: http://sentiment:8080
+      MEDIA_ROOT: /data/media
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # Retained anonymous submissions. A named volume, never the image: these outlive every
+      # rebuild, and `deploy.sh` rebuilds on every push.
+      - media:/data/media
     restart: unless-stopped
 
   # Periodic/long-running chat work (stale-suggestion reaper; KB curation later). Same image
@@ -68,9 +97,14 @@ services:
       # Its own small pool: the worker's duties are periodic and low-concurrency, and the
       # database's connection budget belongs to the request path.
       DB_POOL_MAX: "5"
+      MEDIA_ROOT: /data/media
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # The retention purge deletes the bytes as well as the rows, so the worker needs the
+      # same volume the API writes to.
+      - media:/data/media
     # Cooperative shutdown: the worker finishes the current sweep on SIGTERM (it bails out at
     # 45s), so give it room rather than letting compose SIGKILL it mid-statement.
     stop_grace_period: 60s
@@ -102,3 +136,4 @@ services:
 volumes:
   pgdata:
   hf_cache:
+  media:
