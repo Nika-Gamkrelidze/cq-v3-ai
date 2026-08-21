@@ -3,11 +3,12 @@ const CQ = (() => {
   const API = (location.port === '' || location.port === '80')
     ? '/api' : `${location.protocol}//${location.hostname}:8000`;
 
-  const LOGO = `<svg width="28" height="24" viewBox="0 0 40 34" fill="none" aria-hidden="true">
-    <path d="M21 4.5 A12.5 12.5 0 1 0 21 29.5" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" fill="none"/>
-    <circle cx="29.5" cy="15" r="9.5" fill="#fa3b3c"/>
-    <path d="M34 21 L40 28.5" stroke="#fa3b3c" stroke-width="5.5" stroke-linecap="round"/>
-  </svg>`;
+  /* The official CommuniQ mark (communiq.io), cropped from the brand asset — not a
+     redrawn approximation. Two variants because the wordmark's navy is unreadable on the
+     dark theme: the C is white there, the brand red is identical in both. CSS picks one
+     per theme, so both are in the markup and only one is ever painted. */
+  const LOGO = `<img class="brand-mark on-light" src="cq-mark.png" alt="" width="34" height="22" />`
+             + `<img class="brand-mark on-dark" src="cq-mark-on-dark.png" alt="" width="34" height="22" />`;
 
   /* ---------------- Theme ---------------- */
   function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'dark'; }
@@ -207,6 +208,14 @@ const CQ = (() => {
       'tkb.reembed.state.queued':'Queued','tkb.reembed.state.running':'Running','tkb.reembed.state.done':'Finished',
       'tkb.reembed.state.error':'Failed','tkb.reembed.state.cancelled':'Cancelled',
       'sc.readonly':'View only — only workspace owners can edit the scoring rubric.',
+      'adm.retention':'Keep anonymous data (days)','adm.retention.hint':'How long an unregistered visitor’s IP, audio and text are kept before the worker deletes them. 0 keeps them indefinitely.',
+      'tab.stt':'Speech to Text','btn.transcribe':'Transcribe',
+      'stt.heading':'Turn a recording into text','stt.sub':'Upload or record audio and get an accurate transcript — plus how the speaker sounded. Works in English, Russian and Georgian.','stt.nofile':'Choose an audio file first.',
+      'drop.sub_stt':'Any audio or video file — transcribed with ElevenLabs Scribe',
+      'sn.title':'Sentiment','sn.text':'What was said','sn.voice':'How it sounded','sn.arousal':'Energy','sn.valence':'Positivity','sn.unavailable':'Not available for this recording.','sn.conflict':'The words and the tone of voice disagree — worth listening to.',
+      'lang.en':'English','lang.ru':'Russian','lang.ka':'Georgian',
+      'lang.note.ka':'Georgian uses the eleven_v3 model with a Georgian-capable voice for correct pronunciation. Leave the voice on default for best results.',
+      'tts.needtext':'Enter some text.','tts.pickvoice':'Pick a specific voice to preview.','tts.previewtitle':'Preview voice (free sample)',
     },
     ka: {
       'nav.public':'საჯარო აპი','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'ცოდნის ბაზა',
@@ -386,6 +395,14 @@ const CQ = (() => {
       'tkb.reembed.state.queued':'რიგში','tkb.reembed.state.running':'მიმდინარეობს','tkb.reembed.state.done':'დასრულდა',
       'tkb.reembed.state.error':'ჩავარდა','tkb.reembed.state.cancelled':'გაუქმდა',
       'sc.readonly':'მხოლოდ სანახავად — შეფასების რუბრიკის რედაქტირება მხოლოდ სამუშაო სივრცის მფლობელს შეუძლია.',
+      'adm.retention':'ანონიმური მონაცემების შენახვა (დღე)','adm.retention.hint':'რამდენ ხანს ინახება არარეგისტრირებული მომხმარებლის IP, აუდიო და ტექსტი, სანამ წაიშლება. 0 — უვადოდ.',
+      'tab.stt':'მეტყველება ტექსტად','btn.transcribe':'ტრანსკრიფცია',
+      'stt.heading':'გადააქციე ჩანაწერი ტექსტად','stt.sub':'ატვირთე ან ჩაწერე აუდიო და მიიღე ზუსტი ტრანსკრიფცია — და ისიც, თუ როგორ ჟღერდა მოსაუბრე. მუშაობს ინგლისურად, რუსულად და ქართულად.','stt.nofile':'ჯერ აირჩიე აუდიო ფაილი.',
+      'drop.sub_stt':'ნებისმიერი აუდიო ან ვიდეო ფაილი — გადაიწერება ElevenLabs Scribe-ით',
+      'sn.title':'განწყობა','sn.text':'რა ითქვა','sn.voice':'როგორ ჟღერდა','sn.arousal':'ენერგია','sn.valence':'პოზიტიურობა','sn.unavailable':'ამ ჩანაწერისთვის მიუწვდომელია.','sn.conflict':'სიტყვები და ხმის ტონი არ ემთხვევა — ღირს მოსმენა.',
+      'lang.en':'ინგლისური','lang.ru':'რუსული','lang.ka':'ქართული',
+      'lang.note.ka':'ქართულისთვის გამოიყენება eleven_v3 მოდელი ქართულის მცოდნე ხმასთან ერთად — სწორი გამოთქმისთვის. საუკეთესო შედეგისთვის დატოვე ხმა ნაგულისხმევად.',
+      'tts.needtext':'შეიყვანე ტექსტი.','tts.pickvoice':'გადასამოწმებლად აირჩიე კონკრეტული ხმა.','tts.previewtitle':'ხმის მოსმენა (უფასო ნიმუში)',
     },
     ru: {
       'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'База знаний',
@@ -565,6 +582,14 @@ const CQ = (() => {
       'tkb.reembed.state.queued':'В очереди','tkb.reembed.state.running':'Выполняется','tkb.reembed.state.done':'Завершён',
       'tkb.reembed.state.error':'Ошибка','tkb.reembed.state.cancelled':'Отменён',
       'sc.readonly':'Только просмотр — редактировать рубрику оценки может только владелец рабочего пространства.',
+      'adm.retention':'Хранить анонимные данные (дней)','adm.retention.hint':'Сколько хранятся IP, аудио и текст незарегистрированного посетителя до удаления. 0 — бессрочно.',
+      'tab.stt':'Речь в текст','btn.transcribe':'Расшифровать',
+      'stt.heading':'Превратите запись в текст','stt.sub':'Загрузите или запишите аудио и получите точную расшифровку — и то, как звучал говорящий. Работает на английском, русском и грузинском.','stt.nofile':'Сначала выберите аудиофайл.',
+      'drop.sub_stt':'Любой аудио- или видеофайл — расшифровка через ElevenLabs Scribe',
+      'sn.title':'Тональность','sn.text':'Что было сказано','sn.voice':'Как это прозвучало','sn.arousal':'Энергия','sn.valence':'Позитивность','sn.unavailable':'Недоступно для этой записи.','sn.conflict':'Слова и тон голоса расходятся — стоит послушать.',
+      'lang.en':'Английский','lang.ru':'Русский','lang.ka':'Грузинский',
+      'lang.note.ka':'Для грузинского используется модель eleven_v3 с голосом, поддерживающим грузинский, — для правильного произношения. Для лучшего результата оставьте голос по умолчанию.',
+      'tts.needtext':'Введите текст.','tts.pickvoice':'Выберите конкретный голос для прослушивания.','tts.previewtitle':'Прослушать голос (бесплатный образец)',
     },
   };
   let LANG = (() => { try { return localStorage.getItem('cq_lang') || (navigator.language||'en').slice(0,2); } catch { return 'en'; } })();
@@ -755,6 +780,41 @@ const CQ = (() => {
     const s = String(v).trim(); return s ? [s] : [];
   }
 
+  /* Sentiment card: the words and the voice, side by side.
+     They are NOT averaged into one number. When they disagree — positive words in a negative
+     voice — that disagreement is the finding a reviewer wants, and a mean would hide it, so
+     a conflict is called out explicitly instead. */
+  function sentimentHTML(sn) {
+    if (!sn || (!sn.text && !sn.prosody)) return '';
+    const cls = p => p === 'positive' ? 'ok' : p === 'negative' ? 'bad' : '';
+    const esc2 = v => (v ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const pct = v => v == null ? null : Math.round(v * 100);
+    const meter = (labelKey, v) => {
+      const n = pct(v); if (n == null) return '';
+      return `<div style="margin-top:8px"><div class="sc-meta">${t(labelKey)} · ${n}%</div>
+        <div class="sc-bar"><span style="width:${n}%"></span></div></div>`;
+    };
+    const half = (titleKey, part) => {
+      if (!part) return `<div style="flex:1"><b style="color:var(--mist)">${t(titleKey)}</b>
+        <div class="muted" style="margin-top:6px">${t('sn.unavailable')}</div></div>`;
+      return `<div style="flex:1"><b style="color:var(--mist)">${t(titleKey)}</b>
+        <div style="margin-top:6px"><span class="pill ${cls(part.polarity)}">${esc2(part.label)}</span></div>
+        ${meter('sn.arousal', part.arousal)}${meter('sn.valence', part.valence)}</div>`;
+    };
+    const agree = sn.agreement === 'conflict'
+      ? `<div class="msg err" style="margin-top:12px">${t('sn.conflict')}</div>` : '';
+    return `<div class="card">
+      <div class="inline" style="justify-content:space-between; align-items:baseline">
+        <h3 style="margin:0">${t('sn.title')}</h3>
+        <span class="pill ${cls(sn.overall)}">${esc2(sn.overall || '—')}</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        ${half('sn.text', sn.text)}
+        ${half('sn.voice', sn.prosody)}
+      </div>${agree}
+    </div>`;
+  }
+
   function scorecardHTML(sc) {
     if (!sc || !Array.isArray(sc.dimensions) || !sc.dimensions.length) return '';
     const total = sc.weighted_total;
@@ -872,5 +932,5 @@ const CQ = (() => {
 
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder,
-           scorecardHTML, factcheckHTML, readResp };
+           scorecardHTML, factcheckHTML, sentimentHTML, readResp };
 })();

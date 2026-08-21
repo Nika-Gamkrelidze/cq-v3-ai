@@ -69,6 +69,11 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cora
 .brand { display:inline-flex; align-items:center; gap:10px; color:var(--paper); flex:none; }
 .brand:hover { color:var(--paper); }
 .brand svg { flex:none; }
+/* Official mark: one asset per theme (navy C on light, white C on dark; red is constant).
+   The app always stamps data-theme on <html>, so exactly one of these is ever shown. */
+.brand-mark { flex:none; display:block; height:22px; width:auto; }
+[data-theme="dark"] .brand-mark.on-light,
+[data-theme="light"] .brand-mark.on-dark { display:none; }
 .brand-name { font-family:var(--font-display); font-weight:800; font-size:18px; letter-spacing:-.02em; white-space:nowrap; }
 .brand-tag { font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
   color:var(--beam); border:1px solid color-mix(in oklab,var(--beam) 55%,transparent);
