@@ -158,6 +158,36 @@ async def _probe_embeddings() -> dict:
     return {"level": "ok", "detail": detail}
 
 
+async def _probe_sentiment(cfg: dict) -> dict:
+    """Is the prosody sidecar reachable, and has it actually loaded its model?
+
+    Worth its own row because this capability fails SILENTLY by design: sentiment degrades to
+    the text half and every call still returns 200, so a sidecar that never got built (or is
+    still downloading its model on a fresh deploy) is invisible from the outside. Reported as
+    a warning rather than a failure — text-only sentiment is a working product, just a smaller
+    one.
+    """
+    import httpx
+    url = (cfg.get("sentiment_url") or "").strip()
+    if not url:
+        return {"level": "warn", "code": "sentiment_disabled",
+                "detail": "no sentiment_url configured — sentiment is text-only"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0)) as client:
+            r = await client.get(url.rstrip("/") + "/health")
+            r.raise_for_status()
+            d = r.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"level": "warn", "code": "sentiment_unreachable",
+                "detail": f"prosody sidecar unreachable ({exc}) — sentiment is text-only"}
+    model = d.get("model") or "?"
+    if not d.get("loaded"):
+        # Lazy-loaded on first request, so "not loaded" is the normal state after a deploy.
+        return {"level": "ok",
+                "detail": f"reachable; model {model} loads on first use"}
+    return {"level": "ok", "detail": f"model {model} loaded"}
+
+
 async def _probe_claude(cfg: dict) -> dict:
     analysis = await claude.analyze(
         "Speaker 1: Hello, this is a connectivity test. Speaker 2: Acknowledged.",
@@ -219,6 +249,7 @@ async def test_integrations(deep: bool = False):
         # NB: "claude_analysis", not "claude" — the vendor roll-up below writes out["claude"],
         # which would otherwise clobber this probe's own detail.
         "claude_analysis": _probe_claude(cfg),
+        "sentiment": _probe_sentiment(cfg),
     }
     if deep:
         probes["claude_factcheck"] = _probe_claude_factcheck(cfg)
