@@ -26,7 +26,7 @@ import logging
 
 import httpx
 
-from . import settings_store
+from . import llm, settings_store
 
 log = logging.getLogger("cq")
 
@@ -41,6 +41,10 @@ _POLARITY = {
     "angry": "negative", "disgusted": "negative", "fearful": "negative", "sad": "negative",
     "frustrated": "negative", "happy": "positive", "excited": "positive", "surprised": "neutral",
     "neutral": "neutral", "calm": "positive", "other": "neutral", "unknown": "neutral",
+    # "mixed" is the LLM sentiment judge's own label (positive and negative both present) —
+    # coloured neutral rather than picked apart, since collapsing it either way is exactly
+    # the kind of averaging this module otherwise tries hard to avoid.
+    "mixed": "neutral",
 }
 
 
@@ -112,6 +116,95 @@ def _text_part(analysis: dict | None) -> dict | None:
                 "negative" if ("negat" in label or "mixed-neg" in label) else
                 "neutral" if "neutr" in label else _POLARITY.get(label, "neutral"))
     return {"label": label, "polarity": polarity, "source": "llm"}
+
+
+# --------------------------------------------------------------------------- #
+# Standalone sentiment: a dedicated, cheap Claude call — NOT the full analysis pass.
+#
+# The bundled /analyze pipeline already produces a "sentiment" field as a side effect of the
+# full structured analysis (see claude.ANALYSIS_TOOL), and `_text_part` above just lifts it —
+# that path is unconfigured and unchanged by this module. The standalone Sentiment tab
+# (public site, tenant/KB playground) has no analysis to piggyback on: it exists specifically
+# so a caller can get JUST a sentiment read, without paying for or waiting on the rest. Its
+# own forced-tool-use call is also the only place per-tenant/public "guidance" text can apply
+# — there is no other Claude call in that path to steer.
+# --------------------------------------------------------------------------- #
+SENTIMENT_TOOL = {
+    "name": "submit_sentiment",
+    "description": "Return the sentiment of the speaker in this transcript.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "enum": ["positive", "neutral", "negative", "mixed"],
+                "description": "Overall sentiment of the speaker.",
+            },
+            "rationale": {
+                "type": "string",
+                "description": "One short sentence on what in the text signals this.",
+            },
+        },
+        "required": ["label", "rationale"],
+        "additionalProperties": False,
+    },
+}
+
+_SENTIMENT_SYSTEM = (
+    "You judge the sentiment of a speaker from a transcript of their speech. Base the "
+    "judgment strictly on the words — tone of voice is assessed separately from the audio "
+    "and is not your job. Respond in the SAME language as the transcript for the rationale."
+)
+
+
+async def judge_text(transcript: str, *, api_key: str, model: str, guidance: str = "",
+                     client_id: str | None = None) -> dict | None:
+    """The text half of standalone sentiment: one small forced-tool-use call.
+
+    Returns None on an empty transcript or any LLM failure — this must never be the reason a
+    caller gets nothing back; `combine()` already handles a missing text half by falling back
+    to prosody_only.
+    """
+    text = (transcript or "").strip()
+    if not text or not api_key:
+        return None
+    system = _SENTIMENT_SYSTEM
+    if guidance.strip():
+        system += f"\n\nAdditional guidance from the operator:\n{guidance.strip()}"
+    user = f"Transcript:\n\n<transcript>\n{text}\n</transcript>"
+    try:
+        raw = await llm.call_tool(
+            feature="sentiment", client_id=client_id, api_key=api_key, model=model,
+            system=system, user=user, tool=SENTIMENT_TOOL, opts=llm.ANSWER)
+    except llm.LLMError as exc:
+        log.warning("text sentiment judge failed: %s", exc)
+        return None
+    label = str(raw.get("label") or "neutral").lower()
+    if label not in ("positive", "neutral", "negative", "mixed"):
+        label = "neutral"
+    # NOT _POLARITY.get(label, ...): that dict maps PROSODY labels (angry, happy, calm...) to
+    # a polarity — its keys are acoustic emotions, not polarity words. This tool's own labels
+    # ARE already the polarity (mixed being the one exception), so map them directly; running
+    # "negative" through _POLARITY silently fell through to its "neutral" default every time.
+    polarity = "neutral" if label in ("neutral", "mixed") else label
+    return {"label": label, "polarity": polarity, "source": "llm",
+            "rationale": raw.get("rationale")}
+
+
+async def standalone(transcript: str, audio: bytes | None, *, api_key: str, model: str,
+                     guidance: str = "", client_id: str | None = None,
+                     filename: str | None = None, content_type: str | None = None) -> dict:
+    """Full standalone-sentiment record: text judge + prosody, run concurrently."""
+    text_task = judge_text(transcript, api_key=api_key, model=model, guidance=guidance,
+                           client_id=client_id)
+    pros_task = prosody(audio, filename, content_type) if audio else _none()
+    text, pros = await asyncio.gather(text_task, pros_task)
+    return combine(text, pros)
+
+
+async def _none():
+    return None
 
 
 def combine(text: dict | None, pros: dict | None) -> dict:

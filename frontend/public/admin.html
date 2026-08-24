@@ -86,6 +86,15 @@
           <div class="actions"><button class="primary" id="saveAnon" data-i18n="btn.savelimits"></button></div>
           <div class="msg" id="anonMsg"></div>
         </div>
+        <div class="card">
+          <h3 data-i18n="adm.sentiment.heading"></h3>
+          <p class="hint" data-i18n="adm.sentiment.desc"></p>
+          <label class="inline" style="gap:8px"><input type="checkbox" id="sn_enabled" /> <span data-i18n="sn.enabled"></span></label>
+          <label data-i18n="sn.guidance"></label>
+          <textarea id="sn_guidance" data-i18n-ph="sn.guidance.ph" style="min-height:80px"></textarea>
+          <div class="actions"><button class="primary" id="saveSentiment" data-i18n="sn.save"></button></div>
+          <div class="msg" id="sentimentMsg"></div>
+        </div>
       </section>
 
       <!-- INTEGRATIONS -->
@@ -189,7 +198,7 @@
       // The kill-switch pills/buttons are built in JS, so data-i18n cannot retranslate them.
       if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); } });
 
-    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants(), loadVoices()]); }
+    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadSentimentSettings(), loadTenants(), loadVoices()]); }
 
     // Login happens on the unified sign-in page; this console is token-gated only.
     async function boot() {
@@ -363,6 +372,19 @@
         retention_days: parseInt($('a_retention').value)||0,
         features: { analyze: $('f_analyze').checked, tts: $('f_tts').checked, kb: false } };
       const r = await fetch(`${API}/admin/anonymous-limits`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : 'Save failed'; if (r.ok) CQ.toast(t('toast.saved'),'ok');
+    });
+
+    // Public-app sentiment config — governs the public site's standalone Sentiment tab only;
+    // per-tenant configs are edited by each tenant (owner) or superadmin via KB-admin.
+    async function loadSentimentSettings() {
+      const r = await fetch(`${API}/admin/public-sentiment-config`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      $('sn_enabled').checked = !!d.enabled; $('sn_guidance').value = d.guidance || '';
+    }
+    $('saveSentiment').addEventListener('click', async () => {
+      const m = $('sentimentMsg'); m.className='msg'; m.textContent='';
+      const patch = { enabled: $('sn_enabled').checked, guidance: $('sn_guidance').value };
+      const r = await fetch(`${API}/admin/public-sentiment-config`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
       m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : 'Save failed'; if (r.ok) CQ.toast(t('toast.saved'),'ok');
     });
 

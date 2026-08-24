@@ -25,6 +25,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
       <div class="tab" data-tab="stt"><span>🎧</span> <span data-i18n="tab.stt"></span></div>
+      <div class="tab" data-tab="sentiment"><span>🎭</span> <span data-i18n="tab.sentiment"></span></div>
     </div>
 
     <!-- TTS -->
@@ -75,6 +76,29 @@
         <div class="err" id="sttErr"></div>
       </div>
       <div id="sttResult"></div>
+    </section>
+
+    <!-- SENTIMENT — its own tab, deliberately separate from STT: upload/record audio and get
+         only a sentiment read-out (what was said + how it sounded), no transcript clutter. -->
+    <section class="panel" id="panel-sentiment">
+      <div class="card">
+        <h3 data-i18n="sn.heading"></h3>
+        <p class="lead" style="font-size:14px" data-i18n="sn.sub"></p>
+        <label data-i18n="f.audiofile"></label>
+        <div class="drop" id="snDrop">
+          <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+          <div class="drop-title" id="snDropTitle" data-i18n="drop.title"></div>
+          <div class="drop-sub" data-i18n="drop.sub_stt"></div>
+        </div>
+        <div class="rec-row">
+          <span class="hint" data-i18n="rec.or"></span>
+          <button class="ghost" type="button" id="snRecBtn" data-i18n="rec.record"></button>
+          <span class="rec-status hint" id="snRecStatus"></span>
+        </div>
+        <div class="actions"><button class="primary" id="snBtn" data-i18n="sn.run"></button></div>
+        <div class="err" id="snErr"></div>
+      </div>
+      <div id="snResult"></div>
     </section>
   </main>
 
@@ -161,9 +185,34 @@
             </div>
           </div>
           <pre class="transcript">${esc(d.transcript) || t('res.empty')}</pre>
-        </div>
-        ${CQ.sentimentHTML(d.sentiment)}`;
+        </div>`;
     }
+
+    // ---- Sentiment (its own tab — see panel-sentiment above for why) ----
+    const snInput = document.getElementById('snFile'), snDrop = document.getElementById('snDrop');
+    snInput.addEventListener('change', () => { const f = snInput.files[0];
+      document.getElementById('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+    ['dragover','dragenter'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.remove('drag'); }));
+    snDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { snInput.files = e.dataTransfer.files; snInput.dispatchEvent(new Event('change')); } });
+    CQ.attachRecorder({ button: document.getElementById('snRecBtn'), status: document.getElementById('snRecStatus'), fileInput: snInput });
+
+    const snBtn = document.getElementById('snBtn');
+    snBtn.addEventListener('click', async () => {
+      const f = snInput.files[0];
+      const err = document.getElementById('snErr'), out = document.getElementById('snResult');
+      err.textContent = ''; out.innerHTML = '';
+      if (!f) { err.textContent = t('stt.nofile'); return; }
+      snBtn.disabled = true; snBtn.innerHTML = '<span class="spinner"></span>' + t('sn.run') + '…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
+        const d = await CQ.readResp(r);
+        out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
+        CQ.toast(t('res.done'), 'ok');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { snBtn.disabled = false; snBtn.textContent = t('sn.run'); loadLimits(); }
+    });
 
     // ---- TTS (single reusable player) ----
     let ttsLoaded = false, ttsPlayer = null, curSrc = null, langNoteRefresh = null;

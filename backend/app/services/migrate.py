@@ -83,6 +83,10 @@ async def run_startup_migrations() -> list[str]:
         # media.sql: anonymous-submission retention (IP/audio/text) + acoustic sentiment.
         # Last because it only ALTERs audio_jobs, which analyzer.sql created above.
         await _apply(conn, "media.sql")
+        # sentiment_config.sql: per-tenant on/off + guidance for standalone sentiment.
+        # After media.sql for no structural reason — just keeps the "recent additions"
+        # together at the tail of the list.
+        await _apply(conn, "sentiment_config.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

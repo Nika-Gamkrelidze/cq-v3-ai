@@ -3,16 +3,17 @@
 Surfaces, all tenant-isolated:
   • Superadmin, tenant-parameterized:  GET/PUT /admin/scoring/{tenant_id}/config
                                        POST   /admin/scoring/{tenant_id}/score-text
+                                       POST   /admin/analyze/{tenant_id} (audio; see below)
   • Tenant self-serve (owner):          GET/PUT /scoring/config   (scoped to the caller)
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import factcheck, scoring, scoring_store, settings_store
-from ..services.auth import Principal, resolve_principal
+from ..services import analysis, factcheck, scoring, scoring_store, settings_store
+from ..services.auth import Principal, client_ip, resolve_principal
 
 router = APIRouter(tags=["scoring"])
 
@@ -108,6 +109,37 @@ async def _score_text(tid: str, text: str, do_factcheck: bool) -> dict:
 async def admin_score_text(body: ScoreTextBody, tid: str = Depends(_scope)):
     """Answer-scoring playground (superadmin, per tenant)."""
     return await _score_text(tid, body.text, body.factcheck)
+
+
+MAX_ANALYZE_BYTES = 100 * 1024 * 1024  # matches routers/analyze.py's own limit
+
+
+@router.post("/admin/analyze/{tenant_id}")
+async def admin_analyze_audio(request: Request, file: UploadFile = File(...),
+                              tid: str = Depends(_scope)):
+    """KB-admin Playground's audio mode: the full pipeline (transcribe -> analysis -> KB
+    fact-check -> rubric scoring), run against a tenant the superadmin chose, exactly as if
+    that tenant had uploaded the file themselves via POST /analyze.
+
+    A separate route rather than reusing /analyze: that endpoint scopes to the CALLER's own
+    principal, and a superadmin has no client_id — there is nothing for it to run against.
+    This one takes the tenant explicitly, gated the same way every other /admin/*/{tenant_id}
+    route in this file is."""
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    if len(audio) > MAX_ANALYZE_BYTES:
+        raise HTTPException(status_code=413, detail="Audio file exceeds 100 MB limit")
+
+    job_id = await analysis.create_job(
+        filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
+        client_id=tid, principal_kind="tenant", anon_key=None,
+        status="transcribing", client_ip=client_ip(request), audio=audio)
+    result = await analysis.run_pipeline(
+        job_id, audio, file.filename, file.content_type, tid, True)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=502, detail=result.get("error") or "Analysis failed")
+    return result
 
 
 # --------------------------------------------------------------------------- #

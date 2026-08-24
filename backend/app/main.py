@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .routers import (admin, analyze, auth, calls, chat, curation, kb, kb_admin,
-                     partner, scoring, tenants, tts)
+                     partner, scoring, sentiment, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
 
@@ -62,6 +62,7 @@ app.include_router(auth.router)
 app.include_router(kb.router)
 app.include_router(kb_admin.router)
 app.include_router(scoring.router)
+app.include_router(sentiment.router)
 app.include_router(tenants.router)
 
 # ---- B2B partner API (versioned) -------------------------------------------

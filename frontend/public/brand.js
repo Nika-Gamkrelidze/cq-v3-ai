@@ -51,8 +51,8 @@ const CQ = (() => {
       'quota.using':"You're using CommuniQ anonymously —",'quota.analyses':'analyses','quota.clips':'speech clips','quota.left':'left today.','quota.more':'for a knowledge base and higher limits.','quota.disabled':'Anonymous access is disabled.',
       'fc.title':'Knowledge base fact-check','fc.accuracy':'accuracy','fc.supported':'supported','fc.contradicted':'contradicted','fc.notinkb':'not in KB','fc.misinfo':'Possible misinformation','fc.nochecked':'No verifiable claims were found.',
       'adm.voices':'Voices','adm.voicevis':'Customer-visible voices','f.restrictvoices':'Show only the ticked voices to customers','f.defaultvoice':'Default voice','v.hint':'Unticked voices are hidden from the customer voice list and rejected by the TTS API. Leave the box unticked to show every voice. System defaults (incl. the Georgian voice) are always on.','v.search':'Search voices…','v.selected':'selected','v.system':'System default','v.nopreview':'No preview','v.unavailable':'Not in this ElevenLabs account','v.pickone':'Select at least one voice, or untick the restriction.','v.loadfail':'Could not load voices from ElevenLabs. Check the API key in Integrations.','msg.voicegone':'That voice is no longer available. The list has been refreshed.',
-      'fc.allclaims':'All claims','pg.tab.retrieval':'Retrieval','pg.tab.score':'Answer scoring','pg.ans.label':'Operator answer (any language)','pg.ans.ph':'Paste or type what the operator said or replied — it will be scored against this tenant’s rubric…','pg.ans.run':'Score answer','pg.ans.hint':'Scored with the tenant’s active rubric; claims are checked against their knowledge base.','pg.ans.norubric':'No active rubric — define one in the Scoring tab first.','pg.ans.empty':'Enter an answer to score.','pg.ans.usingv':'rubric version',
-      'tab.playground':'Playground','pg.heading':'Score a call or answer','pg.hint':'Score a written answer, or upload a call recording (audio or video) — it is transcribed and scored against your rubric and knowledge base.','pg.mode.text':'Text','pg.mode.audio':'Audio / Video','pg.audiolabel':'Call recording (audio or video)','pg.run':'Score','pg.audioempty':'Choose an audio or video file.',
+      'fc.allclaims':'All claims','pg.tab.retrieval':'Retrieval','pg.tab.score':'Answer scoring','pg.tab.sentiment':'Sentiment','pg.ans.label':'Operator answer (any language)','pg.ans.ph':'Paste or type what the operator said or replied — it will be scored against this tenant’s rubric…','pg.ans.run':'Score answer','pg.ans.hint':'Scored with the tenant’s active rubric; claims are checked against their knowledge base.','pg.ans.norubric':'No active rubric — define one in the Scoring tab first.','pg.ans.empty':'Enter an answer to score.','pg.ans.usingv':'rubric version',
+      'tab.playground':'Playground','pg.heading':'Score a call or answer','pg.hint':'Score a written answer, or upload a call recording (audio or video) — it is transcribed and scored against your rubric and knowledge base.','pg.mode.text':'Text','pg.mode.audio':'Audio / Video','pg.mode.sentiment':'Sentiment','pg.audiolabel':'Call recording (audio or video)','pg.run':'Score','pg.audioempty':'Choose an audio or video file.',
       'kba.title':'Knowledge Base Management','kba.tenant':'Tenant','kba.selecttenant':'Select a tenant to manage its knowledge base.',
       'kba.tab.overview':'Overview','kba.tab.documents':'Documents','kba.tab.import':'Import','kba.tab.playground':'Playground','kba.tab.duplicates':'Duplicates','kba.tab.activity':'Activity',
       'kba.stat.documents':'Documents','kba.stat.chunks':'Chunks','kba.stat.coverage':'Embedding coverage','kba.stat.failed':'Failed imports','kba.stat.tokens':'Approx. tokens','kba.stat.lastupd':'Last updated','kba.stat.inprogress':'In progress',
@@ -209,10 +209,12 @@ const CQ = (() => {
       'tkb.reembed.state.error':'Failed','tkb.reembed.state.cancelled':'Cancelled',
       'sc.readonly':'View only — only workspace owners can edit the scoring rubric.',
       'adm.retention':'Keep anonymous data (days)','adm.retention.hint':'How long an unregistered visitor’s IP, audio and text are kept before the worker deletes them. 0 keeps them indefinitely.',
+      'adm.sentiment.heading':'Public sentiment analysis','adm.sentiment.desc':'Configures the public site’s standalone Sentiment tab.',
       'tab.stt':'Speech to Text','btn.transcribe':'Transcribe',
       'stt.heading':'Turn a recording into text','stt.sub':'Upload or record audio and get an accurate transcript — plus how the speaker sounded. Works in English, Russian and Georgian.','stt.nofile':'Choose an audio file first.',
       'drop.sub_stt':'Any audio or video file — transcribed with ElevenLabs Scribe',
       'sn.title':'Sentiment','sn.text':'What was said','sn.voice':'How it sounded','sn.arousal':'Energy','sn.valence':'Positivity','sn.unavailable':'Not available for this recording.','sn.conflict':'The words and the tone of voice disagree — worth listening to.',
+      'tab.sentiment':'Sentiment','sn.heading':'How did the speaker sound?','sn.sub':'Upload or record audio and get a sentiment read — what was said, and how it sounded. No transcript shown.','sn.run':'Analyze sentiment','sn.none':'No sentiment could be determined for this recording.','sn.config':'Sentiment settings','sn.config.desc':'Turn sentiment analysis on or off, and optionally steer how the words are judged.','sn.enabled':'Enable sentiment analysis','sn.guidance':'Guidance for the text judge (optional)','sn.guidance.ph':'e.g. Treat any complaint as at least mildly negative, even if phrased politely…','sn.save':'Save','sn.saved':'Saved','sn.readonly':'View only — only workspace owners can edit sentiment settings.','sn.audiolabel':'Audio to analyze','sn.mode':'Sentiment','sn.disabled':'Sentiment analysis is turned off for this workspace.',
       'lang.en':'English','lang.ru':'Russian','lang.ka':'Georgian',
       'lang.note.ka':'Georgian uses the eleven_v3 model with a Georgian-capable voice for correct pronunciation. Leave the voice on default for best results.',
       'tts.needtext':'Enter some text.','tts.pickvoice':'Pick a specific voice to preview.','tts.previewtitle':'Preview voice (free sample)',
@@ -247,8 +249,8 @@ const CQ = (() => {
       'quota.using':'თქვენ იყენებთ CommuniQ-ს ანონიმურად —','quota.analyses':'ანალიზი','quota.clips':'აუდიო კლიპი','quota.left':'დარჩა დღეს.','quota.more':'ცოდნის ბაზისა და მაღალი ლიმიტებისთვის.','quota.disabled':'ანონიმური წვდომა გათიშულია.',
       'fc.title':'ცოდნის ბაზასთან შემოწმება','fc.accuracy':'სიზუსტე','fc.supported':'დადასტურებული','fc.contradicted':'გაბათილებული','fc.notinkb':'ბაზაში არ არის','fc.misinfo':'შესაძლო მცდარი ინფორმაცია','fc.nochecked':'შესამოწმებელი მტკიცება ვერ მოიძებნა.',
       'adm.voices':'ხმები','adm.voicevis':'მომხმარებლისთვის ხილული ხმები','f.restrictvoices':'მომხმარებელს მხოლოდ მონიშნული ხმები აჩვენე','f.defaultvoice':'ნაგულისხმევი ხმა','v.hint':'მოუნიშნავი ხმები დაიმალება მომხმარებლის სიიდან და TTS მათ არ მიიღებს. თუ ველი მოუნიშნავია — ყველა ხმა ჩანს. სისტემური ნაგულისხმევები (მათ შორის ქართული ხმა) ყოველთვის ჩართულია.','v.search':'ხმების ძებნა…','v.selected':'მონიშნული','v.system':'სისტემური','v.nopreview':'გადასმენა არ არის','v.unavailable':'არ არის ამ ElevenLabs ანგარიშში','v.pickone':'მონიშნე მინიმუმ ერთი ხმა ან მოხსენი შეზღუდვა.','v.loadfail':'ხმების ჩატვირთვა ვერ მოხერხდა. შეამოწმე API გასაღები ინტეგრაციებში.','msg.voicegone':'ეს ხმა აღარ არის ხელმისაწვდომი. სია განახლდა.',
-      'fc.allclaims':'ყველა მტკიცება','pg.tab.retrieval':'მოძიება','pg.tab.score':'პასუხის შეფასება','pg.ans.label':'ოპერატორის პასუხი (ნებისმიერ ენაზე)','pg.ans.ph':'ჩასვი ან აკრიფე ოპერატორის პასუხი — შეფასდება ამ კლიენტის რუბრიკით…','pg.ans.run':'პასუხის შეფასება','pg.ans.hint':'ფასდება კლიენტის აქტიური რუბრიკით; მტკიცებები მოწმდება მის ცოდნის ბაზასთან.','pg.ans.norubric':'აქტიური რუბრიკა არ არის — ჯერ განსაზღვრე შეფასების ტაბში.','pg.ans.empty':'შეიყვანე პასუხი შესაფასებლად.','pg.ans.usingv':'რუბრიკის ვერსია',
-      'tab.playground':'ტესტ-სივრცე','pg.heading':'შეაფასე ზარი ან პასუხი','pg.hint':'შეაფასე დაწერილი პასუხი, ან ატვირთე ზარის ჩანაწერი (აუდიო ან ვიდეო) — გადაიწერება და შეფასდება შენი რუბრიკითა და ცოდნის ბაზით.','pg.mode.text':'ტექსტი','pg.mode.audio':'აუდიო / ვიდეო','pg.audiolabel':'ზარის ჩანაწერი (აუდიო ან ვიდეო)','pg.run':'შეფასება','pg.audioempty':'აირჩიე აუდიო ან ვიდეო ფაილი.',
+      'fc.allclaims':'ყველა მტკიცება','pg.tab.retrieval':'მოძიება','pg.tab.score':'პასუხის შეფასება','pg.tab.sentiment':'განწყობა','pg.ans.label':'ოპერატორის პასუხი (ნებისმიერ ენაზე)','pg.ans.ph':'ჩასვი ან აკრიფე ოპერატორის პასუხი — შეფასდება ამ კლიენტის რუბრიკით…','pg.ans.run':'პასუხის შეფასება','pg.ans.hint':'ფასდება კლიენტის აქტიური რუბრიკით; მტკიცებები მოწმდება მის ცოდნის ბაზასთან.','pg.ans.norubric':'აქტიური რუბრიკა არ არის — ჯერ განსაზღვრე შეფასების ტაბში.','pg.ans.empty':'შეიყვანე პასუხი შესაფასებლად.','pg.ans.usingv':'რუბრიკის ვერსია',
+      'tab.playground':'ტესტ-სივრცე','pg.heading':'შეაფასე ზარი ან პასუხი','pg.hint':'შეაფასე დაწერილი პასუხი, ან ატვირთე ზარის ჩანაწერი (აუდიო ან ვიდეო) — გადაიწერება და შეფასდება შენი რუბრიკითა და ცოდნის ბაზით.','pg.mode.text':'ტექსტი','pg.mode.audio':'აუდიო / ვიდეო','pg.mode.sentiment':'განწყობა','pg.audiolabel':'ზარის ჩანაწერი (აუდიო ან ვიდეო)','pg.run':'შეფასება','pg.audioempty':'აირჩიე აუდიო ან ვიდეო ფაილი.',
       'kba.title':'ცოდნის ბაზის მართვა','kba.tenant':'ტენანტი','kba.selecttenant':'აირჩიეთ ტენანტი მისი ცოდნის ბაზის სამართავად.',
       'kba.tab.overview':'მიმოხილვა','kba.tab.documents':'დოკუმენტები','kba.tab.import':'იმპორტი','kba.tab.playground':'სათამაშო','kba.tab.duplicates':'დუბლიკატები','kba.tab.activity':'აქტივობა',
       'kba.stat.documents':'დოკუმენტები','kba.stat.chunks':'ფრაგმენტები','kba.stat.coverage':'ემბედინგის დაფარვა','kba.stat.failed':'ჩავარდნილი იმპორტი','kba.stat.tokens':'დაახლ. ტოკენები','kba.stat.lastupd':'ბოლო განახლება','kba.stat.inprogress':'მიმდინარე',
@@ -396,10 +398,12 @@ const CQ = (() => {
       'tkb.reembed.state.error':'ჩავარდა','tkb.reembed.state.cancelled':'გაუქმდა',
       'sc.readonly':'მხოლოდ სანახავად — შეფასების რუბრიკის რედაქტირება მხოლოდ სამუშაო სივრცის მფლობელს შეუძლია.',
       'adm.retention':'ანონიმური მონაცემების შენახვა (დღე)','adm.retention.hint':'რამდენ ხანს ინახება არარეგისტრირებული მომხმარებლის IP, აუდიო და ტექსტი, სანამ წაიშლება. 0 — უვადოდ.',
+      'adm.sentiment.heading':'საჯარო განწყობის ანალიზი','adm.sentiment.desc':'აკონფიგურირებს საჯარო საიტის დამოუკიდებელ განწყობის ტაბს.',
       'tab.stt':'მეტყველება ტექსტად','btn.transcribe':'ტრანსკრიფცია',
       'stt.heading':'გადააქციე ჩანაწერი ტექსტად','stt.sub':'ატვირთე ან ჩაწერე აუდიო და მიიღე ზუსტი ტრანსკრიფცია — და ისიც, თუ როგორ ჟღერდა მოსაუბრე. მუშაობს ინგლისურად, რუსულად და ქართულად.','stt.nofile':'ჯერ აირჩიე აუდიო ფაილი.',
       'drop.sub_stt':'ნებისმიერი აუდიო ან ვიდეო ფაილი — გადაიწერება ElevenLabs Scribe-ით',
       'sn.title':'განწყობა','sn.text':'რა ითქვა','sn.voice':'როგორ ჟღერდა','sn.arousal':'ენერგია','sn.valence':'პოზიტიურობა','sn.unavailable':'ამ ჩანაწერისთვის მიუწვდომელია.','sn.conflict':'სიტყვები და ხმის ტონი არ ემთხვევა — ღირს მოსმენა.',
+      'tab.sentiment':'განწყობა','sn.heading':'როგორ ჟღერდა მოსაუბრე?','sn.sub':'ატვირთე ან ჩაწერე აუდიო და მიიღე განწყობის შეფასება — რა ითქვა და როგორ ჟღერდა. ტრანსკრიფცია არ ჩანს.','sn.run':'განწყობის ანალიზი','sn.none':'ამ ჩანაწერისთვის განწყობის დადგენა ვერ მოხერხდა.','sn.config':'განწყობის პარამეტრები','sn.config.desc':'ჩართე ან გამორთე განწყობის ანალიზი და, სურვილისამებრ, მიმართე, როგორ ფასდება სიტყვები.','sn.enabled':'განწყობის ანალიზის ჩართვა','sn.guidance':'მითითება ტექსტის შემფასებლისთვის (არასავალდებულო)','sn.guidance.ph':'მაგ. ნებისმიერი პრეტენზია ჩაითვალოს მინიმუმ ოდნავ ნეგატიურად, თუნდაც თავაზიანად იყოს ნათქვამი…','sn.save':'შენახვა','sn.saved':'შენახულია','sn.readonly':'მხოლოდ სანახავად — განწყობის პარამეტრების რედაქტირება მხოლოდ სამუშაო სივრცის მფლობელს შეუძლია.','sn.audiolabel':'გასაანალიზებელი აუდიო','sn.mode':'განწყობა','sn.disabled':'განწყობის ანალიზი გამორთულია ამ სამუშაო სივრცისთვის.',
       'lang.en':'ინგლისური','lang.ru':'რუსული','lang.ka':'ქართული',
       'lang.note.ka':'ქართულისთვის გამოიყენება eleven_v3 მოდელი ქართულის მცოდნე ხმასთან ერთად — სწორი გამოთქმისთვის. საუკეთესო შედეგისთვის დატოვე ხმა ნაგულისხმევად.',
       'tts.needtext':'შეიყვანე ტექსტი.','tts.pickvoice':'გადასამოწმებლად აირჩიე კონკრეტული ხმა.','tts.previewtitle':'ხმის მოსმენა (უფასო ნიმუში)',
@@ -434,8 +438,8 @@ const CQ = (() => {
       'quota.using':'Вы используете CommuniQ анонимно —','quota.analyses':'анализов','quota.clips':'аудиоклипов','quota.left':'осталось сегодня.','quota.more':'для базы знаний и более высоких лимитов.','quota.disabled':'Анонимный доступ отключён.',
       'fc.title':'Проверка по базе знаний','fc.accuracy':'точность','fc.supported':'подтверждено','fc.contradicted':'опровергнуто','fc.notinkb':'нет в базе','fc.misinfo':'Возможная дезинформация','fc.nochecked':'Проверяемых утверждений не найдено.',
       'adm.voices':'Голоса','adm.voicevis':'Голоса, видимые клиентам','f.restrictvoices':'Показывать клиентам только отмеченные голоса','f.defaultvoice':'Голос по умолчанию','v.hint':'Неотмеченные голоса скрыты из списка для клиентов и отклоняются TTS. Оставьте флажок снятым, чтобы показывать все голоса. Системные (включая грузинский) всегда включены.','v.search':'Поиск голосов…','v.selected':'выбрано','v.system':'Системный','v.nopreview':'Нет образца','v.unavailable':'Нет в этом аккаунте ElevenLabs','v.pickone':'Выберите хотя бы один голос или снимите ограничение.','v.loadfail':'Не удалось загрузить голоса из ElevenLabs. Проверьте API-ключ в «Интеграциях».','msg.voicegone':'Этот голос больше недоступен. Список обновлён.',
-      'fc.allclaims':'Все утверждения','pg.tab.retrieval':'Поиск','pg.tab.score':'Оценка ответа','pg.ans.label':'Ответ оператора (на любом языке)','pg.ans.ph':'Вставьте или напишите ответ оператора — он будет оценён по рубрике этого клиента…','pg.ans.run':'Оценить ответ','pg.ans.hint':'Оценивается по активной рубрике клиента; утверждения проверяются по его базе знаний.','pg.ans.norubric':'Нет активной рубрики — сначала задайте её во вкладке «Оценка».','pg.ans.empty':'Введите ответ для оценки.','pg.ans.usingv':'версия рубрики',
-      'tab.playground':'Песочница','pg.heading':'Оцените звонок или ответ','pg.hint':'Оцените письменный ответ или загрузите запись звонка (аудио или видео) — она будет расшифрована и оценена по вашей рубрике и базе знаний.','pg.mode.text':'Текст','pg.mode.audio':'Аудио / Видео','pg.audiolabel':'Запись звонка (аудио или видео)','pg.run':'Оценить','pg.audioempty':'Выберите аудио- или видеофайл.',
+      'fc.allclaims':'Все утверждения','pg.tab.retrieval':'Поиск','pg.tab.score':'Оценка ответа','pg.tab.sentiment':'Тональность','pg.ans.label':'Ответ оператора (на любом языке)','pg.ans.ph':'Вставьте или напишите ответ оператора — он будет оценён по рубрике этого клиента…','pg.ans.run':'Оценить ответ','pg.ans.hint':'Оценивается по активной рубрике клиента; утверждения проверяются по его базе знаний.','pg.ans.norubric':'Нет активной рубрики — сначала задайте её во вкладке «Оценка».','pg.ans.empty':'Введите ответ для оценки.','pg.ans.usingv':'версия рубрики',
+      'tab.playground':'Песочница','pg.heading':'Оцените звонок или ответ','pg.hint':'Оцените письменный ответ или загрузите запись звонка (аудио или видео) — она будет расшифрована и оценена по вашей рубрике и базе знаний.','pg.mode.text':'Текст','pg.mode.audio':'Аудио / Видео','pg.mode.sentiment':'Тональность','pg.audiolabel':'Запись звонка (аудио или видео)','pg.run':'Оценить','pg.audioempty':'Выберите аудио- или видеофайл.',
       'kba.title':'Управление базой знаний','kba.tenant':'Арендатор','kba.selecttenant':'Выберите арендатора для управления его базой знаний.',
       'kba.tab.overview':'Обзор','kba.tab.documents':'Документы','kba.tab.import':'Импорт','kba.tab.playground':'Песочница','kba.tab.duplicates':'Дубликаты','kba.tab.activity':'Активность',
       'kba.stat.documents':'Документы','kba.stat.chunks':'Фрагменты','kba.stat.coverage':'Покрытие эмбеддингами','kba.stat.failed':'Ошибки импорта','kba.stat.tokens':'Прибл. токены','kba.stat.lastupd':'Обновлено','kba.stat.inprogress':'В процессе',
@@ -583,10 +587,12 @@ const CQ = (() => {
       'tkb.reembed.state.error':'Ошибка','tkb.reembed.state.cancelled':'Отменён',
       'sc.readonly':'Только просмотр — редактировать рубрику оценки может только владелец рабочего пространства.',
       'adm.retention':'Хранить анонимные данные (дней)','adm.retention.hint':'Сколько хранятся IP, аудио и текст незарегистрированного посетителя до удаления. 0 — бессрочно.',
+      'adm.sentiment.heading':'Публичный анализ тональности','adm.sentiment.desc':'Настраивает отдельную вкладку «Тональность» на публичном сайте.',
       'tab.stt':'Речь в текст','btn.transcribe':'Расшифровать',
       'stt.heading':'Превратите запись в текст','stt.sub':'Загрузите или запишите аудио и получите точную расшифровку — и то, как звучал говорящий. Работает на английском, русском и грузинском.','stt.nofile':'Сначала выберите аудиофайл.',
       'drop.sub_stt':'Любой аудио- или видеофайл — расшифровка через ElevenLabs Scribe',
       'sn.title':'Тональность','sn.text':'Что было сказано','sn.voice':'Как это прозвучало','sn.arousal':'Энергия','sn.valence':'Позитивность','sn.unavailable':'Недоступно для этой записи.','sn.conflict':'Слова и тон голоса расходятся — стоит послушать.',
+      'tab.sentiment':'Тональность','sn.heading':'Как звучал говорящий?','sn.sub':'Загрузите или запишите аудио и получите оценку тональности — что было сказано и как это прозвучало. Расшифровка не показывается.','sn.run':'Анализировать тональность','sn.none':'Для этой записи не удалось определить тональность.','sn.config':'Настройки тональности','sn.config.desc':'Включите или отключите анализ тональности и, при желании, задайте, как оценивать слова.','sn.enabled':'Включить анализ тональности','sn.guidance':'Указания для текстового анализатора (необязательно)','sn.guidance.ph':'напр. Любую жалобу считать как минимум слегка негативной, даже если она вежливо сформулирована…','sn.save':'Сохранить','sn.saved':'Сохранено','sn.readonly':'Только просмотр — настройки тональности может редактировать только владелец рабочего пространства.','sn.audiolabel':'Аудио для анализа','sn.mode':'Тональность','sn.disabled':'Анализ тональности отключён для этого рабочего пространства.',
       'lang.en':'Английский','lang.ru':'Русский','lang.ka':'Грузинский',
       'lang.note.ka':'Для грузинского используется модель eleven_v3 с голосом, поддерживающим грузинский, — для правильного произношения. Для лучшего результата оставьте голос по умолчанию.',
       'tts.needtext':'Введите текст.','tts.pickvoice':'Выберите конкретный голос для прослушивания.','tts.previewtitle':'Прослушать голос (бесплатный образец)',
@@ -815,6 +821,32 @@ const CQ = (() => {
     </div>`;
   }
 
+  /* Full /analyze result card (language/sentiment/quality/topics/summary/key points/actions)
+     + the transcript. Shared by tenant.html's own Analyze/Playground results and the KB-admin
+     console's new Playground audio-score mode — both call the same pipeline and want the
+     same rendering; this used to be duplicated per page. */
+  function analysisHTML(d) {
+    const a = d.analysis || {};
+    const list = v => { const arr = _arr(v); return arr.length
+      ? '<ul class="tight">' + arr.map(i => `<li>${_esc(i)}</li>`).join('') + '</ul>'
+      : '<span class="muted">—</span>'; };
+    const topics = _arr(a.topics).map(x => `<span class="chip">${_esc(x)}</span>`).join('')
+      || '<span class="muted">—</span>';
+    const kb = (d.kb_used || []).length
+      ? d.kb_used.map(k => `<span class="chip">${_esc(k.title || k.doc_type || 'KB')}${k.score != null ? ` · ${k.score}` : ''}</span>`).join('')
+      : `<span class="muted">${t('res.nokb')}</span>`;
+    return `<div class="card">
+      <h3>${t('res.analysis')}</h3>
+      <div class="kv"><b>${t('res.language')}</b> ${_esc(a.language || d.language || '—')}</div>
+      <div class="kv"><b>${t('res.sentiment')}</b> ${_esc(a.sentiment || '—')} &nbsp; <b>${t('res.quality')}</b> ${a.quality_score ?? '—'}/100</div>
+      <div class="kv"><b>${t('res.topics')}</b> ${topics}</div>
+      <div style="margin-top:8px"><b style="color:var(--mist)">${t('res.kbused')}</b><div style="margin-top:4px">${kb}</div></div>
+      <div style="margin-top:10px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${_esc(a.summary)}</p></div>
+      <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div><div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
+    </div>
+    <div class="card"><h3>${t('res.transcript')}</h3><pre class="tx">${_esc(d.transcript) || t('res.empty')}</pre></div>`;
+  }
+
   function scorecardHTML(sc) {
     if (!sc || !Array.isArray(sc.dimensions) || !sc.dimensions.length) return '';
     const total = sc.weighted_total;
@@ -932,5 +964,5 @@ const CQ = (() => {
 
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder,
-           scorecardHTML, factcheckHTML, sentimentHTML, readResp };
+           analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp };
 })();

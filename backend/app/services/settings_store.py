@@ -192,6 +192,33 @@ async def set_anonymous_config(patch: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Public-app sentiment configuration (app_settings 'public_sentiment').
+#
+# The public site's standalone Sentiment tab has no tenant to own its config, so — like the
+# anonymous limits above — it is a single global row, superadmin-only. The per-tenant
+# equivalent (services/sentiment_config.py) is a real table keyed by client_id; there is
+# nothing to key this one by.
+# ---------------------------------------------------------------------------
+PUBLIC_SENTIMENT_KEY = "public_sentiment"
+PUBLIC_SENTIMENT_DEFAULTS = {"enabled": True, "guidance": ""}
+
+
+async def get_public_sentiment_config() -> dict:
+    ov = await _load_key(PUBLIC_SENTIMENT_KEY)
+    cfg = dict(PUBLIC_SENTIMENT_DEFAULTS)
+    cfg.update(ov or {})
+    cfg["enabled"] = bool(cfg.get("enabled", True))
+    cfg["guidance"] = str(cfg.get("guidance") or "")
+    return cfg
+
+
+async def set_public_sentiment_config(patch: dict) -> None:
+    ov = await _load_key(PUBLIC_SENTIMENT_KEY)
+    ov.update({k: v for k, v in patch.items() if v is not None})
+    await _save_key(PUBLIC_SENTIMENT_KEY, ov)
+
+
+# ---------------------------------------------------------------------------
 # Customer-visible TTS voices (app_settings 'voices').
 # Kept in its OWN key, not the 'integrations' blob: get_public() coerces missing
 # DEFAULTS to '' and the admin panel's settings save rewrites every integration

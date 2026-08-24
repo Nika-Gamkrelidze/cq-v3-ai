@@ -138,9 +138,10 @@
       <!-- PLAYGROUND -->
       <section class="panel" id="panel-playground">
         <div class="card">
-          <div class="subtabs">
+          <div class="subtabs" id="pgOuterTabs">
             <div class="subtab active" data-pg="retrieval" data-i18n="pg.tab.retrieval"></div>
             <div class="subtab" data-pg="score" data-i18n="pg.tab.score"></div>
+            <div class="subtab" data-pg="sentiment" data-i18n="pg.tab.sentiment"></div>
           </div>
 
           <div id="pg-retrieval">
@@ -154,14 +155,53 @@
           </div>
 
           <div id="pg-score" class="hidden">
-            <label data-i18n="pg.ans.label"></label>
-            <textarea id="ansText" style="min-height:120px" data-i18n-ph="pg.ans.ph"></textarea>
-            <div class="hint" style="margin-top:6px" data-i18n="pg.ans.hint"></div>
+            <div class="subtabs" id="ansModeTabs">
+              <div class="subtab active" data-ansmode="text" data-i18n="pg.mode.text"></div>
+              <div class="subtab" data-ansmode="audio" data-i18n="pg.mode.audio"></div>
+            </div>
+            <div id="ans-text">
+              <label data-i18n="pg.ans.label"></label>
+              <textarea id="ansText" style="min-height:120px" data-i18n-ph="pg.ans.ph"></textarea>
+              <div class="hint" style="margin-top:6px" data-i18n="pg.ans.hint"></div>
+            </div>
+            <div id="ans-audio" class="hidden">
+              <label data-i18n="pg.audiolabel"></label>
+              <div class="drop" id="ansDrop">
+                <input type="file" id="ansFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+                <div class="drop-title" id="ansDropTitle" data-i18n="drop.title"></div>
+                <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+              </div>
+            </div>
             <div class="actions"><button class="primary" id="ansRun" data-i18n="pg.ans.run"></button></div>
             <div class="msg" id="ansMsg"></div>
           </div>
+
+          <!-- SENTIMENT — standalone: this tenant's own config (superadmin can always edit
+               it here, unlike the tenant's own owner-only view) plus a plain analyze tool. -->
+          <div id="pg-sentiment" class="hidden">
+            <div class="sub" style="margin-bottom:14px">
+              <div class="inline" style="justify-content:space-between; align-items:baseline">
+                <b style="color:var(--mist)" data-i18n="sn.config"></b>
+                <span class="hint" id="snCfgMsg"></span>
+              </div>
+              <p class="hint" data-i18n="sn.config.desc"></p>
+              <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
+              <label data-i18n="sn.guidance"></label>
+              <textarea id="snGuidance" data-i18n-ph="sn.guidance.ph" style="min-height:70px"></textarea>
+              <div class="actions"><button class="ghost" id="snCfgSave" data-i18n="sn.save"></button></div>
+            </div>
+            <label data-i18n="sn.audiolabel"></label>
+            <div class="drop" id="snDrop">
+              <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+              <div class="drop-title" id="snDropTitle" data-i18n="drop.title"></div>
+              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+            </div>
+            <div class="actions"><button class="primary" id="snRun" data-i18n="sn.run"></button></div>
+            <div class="msg err" id="snErr"></div>
+          </div>
         </div>
         <div id="ansResults"></div>
+        <div id="snResults"></div>
       </section>
 
       <!-- DUPLICATES -->
@@ -308,11 +348,34 @@
       document.querySelectorAll('#panel-import .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
     }));
-    // Playground subtabs: retrieval | answer scoring
-    document.querySelectorAll('#panel-playground .subtab').forEach(s => s.addEventListener('click', () => {
-      document.querySelectorAll('#panel-playground .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
-      ['retrieval','score'].forEach(k => $('pg-'+k).classList.toggle('hidden', k!==s.dataset.pg));
+    // Playground subtabs: retrieval | answer scoring | sentiment. Scoped to #pgOuterTabs, NOT
+    // #panel-playground — the answer-scoring subtab has its OWN nested text/audio toggle
+    // (#ansModeTabs) using the same .subtab class, and a page-wide selector would fire this
+    // handler for that inner toggle too.
+    document.querySelectorAll('#pgOuterTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#pgOuterTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['retrieval','score','sentiment'].forEach(k => $('pg-'+k).classList.toggle('hidden', k!==s.dataset.pg));
+      if (s.dataset.pg==='sentiment') loadSentimentConfig();
     }));
+    // Answer-scoring's own text/audio toggle.
+    document.querySelectorAll('#ansModeTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#ansModeTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['text','audio'].forEach(k => $('ans-'+k).classList.toggle('hidden', k!==s.dataset.ansmode));
+    }));
+    { const drop = $('ansDrop'), inp = $('ansFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('ansDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
+    { const drop = $('snDrop'), inp = $('snFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
     function activeTab() { return (document.querySelector('.tab.active')||{}).dataset ? document.querySelector('.tab.active').dataset.tab : 'overview'; }
     function loadTab(tab) {
       if (tab==='overview') loadOverview();
@@ -644,25 +707,75 @@
     });
     $('pgQuery').addEventListener('keydown', e => { if(e.key==='Enter') $('pgRun').click(); });
 
-    // ---- PLAYGROUND: answer scoring (score written operator text against this tenant's rubric) ----
+    // ---- PLAYGROUND: answer scoring — a typed answer OR an uploaded call, against this
+    // tenant's rubric. The audio branch runs the SAME full pipeline as if the tenant had
+    // uploaded it themselves (POST /admin/analyze/{tenant_id}, see routers/scoring.py). ----
     $('ansRun').addEventListener('click', async () => {
-      const text = $('ansText').value.trim();
+      const mode = (document.querySelector('#ansModeTabs .subtab.active')||{}).dataset.ansmode || 'text';
       const msg = $('ansMsg'), box = $('ansResults');
       msg.className = 'msg'; msg.textContent = ''; box.innerHTML = '';
-      if (!text) { msg.className = 'msg err'; msg.textContent = t('pg.ans.empty'); return; }
-      const btn = $('ansRun'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('pg.ans.run') + '…';
-      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const btn = $('ansRun'); const label = t('pg.ans.run');
       try {
-        const r = await fetch(`${API}/admin/scoring/${TID}/score-text`, {
-          method: 'POST', headers: JH(), body: JSON.stringify({ text, factcheck: true }) });
-        const d = await r.json();
-        if (!r.ok) throw new Error(r.status === 400 && /rubric/i.test(d.detail || '') ? t('pg.ans.norubric') : (d.detail || 'Scoring failed'));
-        box.innerHTML = (d.config_version ? `<div class="hint" style="margin:10px 2px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
-          + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        if (mode === 'text') {
+          const text = $('ansText').value.trim();
+          if (!text) { msg.className = 'msg err'; msg.textContent = t('pg.ans.empty'); return; }
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+          box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+          const r = await fetch(`${API}/admin/scoring/${TID}/score-text`, {
+            method: 'POST', headers: JH(), body: JSON.stringify({ text, factcheck: true }) });
+          const d = await r.json();
+          if (!r.ok) throw new Error(r.status === 400 && /rubric/i.test(d.detail || '') ? t('pg.ans.norubric') : (d.detail || 'Scoring failed'));
+          box.innerHTML = (d.config_version ? `<div class="hint" style="margin:10px 2px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
+            + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        } else {
+          const f = $('ansFile').files[0];
+          if (!f) { msg.className = 'msg err'; msg.textContent = t('pg.audioempty'); return; }
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+          box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/admin/analyze/${TID}`, { method: 'POST', headers: H(), body: fd });
+          const d = await CQ.readResp(r);
+          box.innerHTML = CQ.analysisHTML(d) + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        }
         CQ.toast(t('res.done'), 'ok');
       } catch (e) {
         box.innerHTML = ''; msg.className = 'msg err'; msg.textContent = e.message; CQ.toast(e.message, 'err');
-      } finally { btn.disabled = false; btn.textContent = t('pg.ans.run'); }
+      } finally { btn.disabled = false; btn.textContent = label; }
+    });
+
+    // ---- PLAYGROUND: standalone sentiment for this tenant (config + a plain analyze tool) ----
+    async function loadSentimentConfig() {
+      $('snCfgMsg').textContent = '';
+      try {
+        const d = await CQ.readResp(await fetch(`${API}/admin/sentiment/${TID}/config`, { headers: H() }));
+        $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
+      } catch (e) { $('snCfgMsg').textContent = e.message; }
+    }
+    $('snCfgSave').addEventListener('click', async () => {
+      const m = $('snCfgMsg'); m.textContent = '';
+      const btn = $('snCfgSave'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        await CQ.readResp(await fetch(`${API}/admin/sentiment/${TID}/config`, { method: 'PUT',
+          headers: JH(), body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
+        m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'), 'ok');
+      } catch (e) { m.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = t('sn.save'); }
+    });
+    $('snRun').addEventListener('click', async () => {
+      const f = $('snFile').files[0];
+      const err = $('snErr'), box = $('snResults');
+      err.textContent = ''; box.innerHTML = '';
+      if (!f) { err.textContent = t('pg.audioempty'); return; }
+      const btn = $('snRun'); const label = t('sn.run');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/admin/sentiment/${TID}`, { method: 'POST', headers: H(), body: fd });
+        const d = await CQ.readResp(r);
+        box.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
+        CQ.toast(t('res.done'), 'ok');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = label; }
     });
 
     // ---- DUPLICATES ----

@@ -278,6 +278,7 @@
           <div class="subtabs" id="pgTabs">
             <div class="subtab active" data-pg="text" data-i18n="pg.mode.text"></div>
             <div class="subtab" data-pg="audio" data-i18n="pg.mode.audio"></div>
+            <div class="subtab" data-pg="sentiment" data-i18n="pg.mode.sentiment"></div>
           </div>
           <div id="pg-text">
             <label data-i18n="pg.ans.label"></label>
@@ -288,6 +289,29 @@
             <div class="drop" id="pgDrop">
               <input type="file" id="pgFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
               <div class="drop-title" id="pgDropTitle" data-i18n="drop.title"></div>
+              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+            </div>
+          </div>
+          <!-- SENTIMENT — deliberately separate from the audio/text scoring modes above:
+               config here, own Save button, then a plain audio-in/sentiment-out tool that
+               shares the page's single pgRun button. -->
+          <div id="pg-sentiment" class="hidden">
+            <div class="sub" style="margin-bottom:14px">
+              <div class="inline" style="justify-content:space-between; align-items:baseline">
+                <b style="color:var(--mist)" data-i18n="sn.config"></b>
+                <span class="hint" id="snCfgMsg"></span>
+              </div>
+              <p class="hint" data-i18n="sn.config.desc"></p>
+              <p class="hint hidden" id="snReadonly" data-i18n="sn.readonly" style="color:var(--pending)"></p>
+              <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
+              <label data-i18n="sn.guidance"></label>
+              <textarea id="snGuidance" data-i18n-ph="sn.guidance.ph" style="min-height:70px"></textarea>
+              <div class="actions"><button class="ghost" id="snCfgSave" data-i18n="sn.save"></button></div>
+            </div>
+            <label data-i18n="sn.audiolabel"></label>
+            <div class="drop" id="pgSnDrop">
+              <input type="file" id="pgSnFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+              <div class="drop-title" id="pgSnDropTitle" data-i18n="drop.title"></div>
               <div class="drop-sub" data-i18n="drop.sub_kb"></div>
             </div>
           </div>
@@ -457,8 +481,6 @@
     const $ = id => document.getElementById(id);
     const authH = (extra={}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    function toArr(v){ if(v==null) return []; if(Array.isArray(v)) return v.filter(x=>x!=null).map(x=>typeof x==='object'?Object.values(x).filter(Boolean).join(' — '):String(x)); if(typeof v==='object') return Object.values(v).map(String); const s=String(v).trim(); return s?[s]:[]; }
-    const list = v => { const a=toArr(v); return a.length?'<ul class="tight">'+a.map(i=>`<li>${esc(i)}</li>`).join('')+'</ul>':'<span class="muted">—</span>'; };
 
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -1094,27 +1116,16 @@
       finally { btn.disabled=false; btn.textContent=t('btn.analyze'); }
     });
     function renderAnalysis(d) {
-      const a = d.analysis || {};
-      const topics = toArr(a.topics).map(x=>`<span class="chip">${esc(x)}</span>`).join('') || '<span class="muted">—</span>';
-      const kb = (d.kb_used||[]).length ? (d.kb_used||[]).map(k=>`<span class="chip">${esc(k.title||k.doc_type||'KB')}${k.score!=null?` · ${k.score}`:''}</span>`).join('') : `<span class="muted">${t('res.nokb')}</span>`;
-      return `<div class="card">
-        <h3>${t('res.analysis')}</h3>
-        <div class="kv"><b>${t('res.language')}</b> ${esc(a.language||d.language||'—')}</div>
-        <div class="kv"><b>${t('res.sentiment')}</b> ${esc(a.sentiment||'—')} &nbsp; <b>${t('res.quality')}</b> ${a.quality_score??'—'}/100</div>
-        <div class="kv"><b>${t('res.topics')}</b> ${topics}</div>
-        <div style="margin-top:8px"><b style="color:var(--mist)">${t('res.kbused')}</b><div style="margin-top:4px">${kb}</div></div>
-        <div style="margin-top:10px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${esc(a.summary)}</p></div>
-        <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div><div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
-      </div>
-      ${CQ.scorecardHTML(d.scoring)}
-      ${CQ.factcheckHTML(d.kb_check)}
-      <div class="card"><h3>${t('res.transcript')}</h3><pre class="tx">${esc(d.transcript)||t('res.empty')}</pre></div>`;
+      // Shared with the KB-admin console's Playground audio-score mode — see brand.js.
+      return CQ.analysisHTML(d) + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
     }
-    // ---- Playground: score typed text OR an uploaded audio/video against rubric + KB ----
+    // ---- Playground: score typed text, an uploaded audio/video, OR run standalone sentiment ----
     document.querySelectorAll('#pgTabs .subtab').forEach(s => s.addEventListener('click', () => {
       document.querySelectorAll('#pgTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       $('pg-text').classList.toggle('hidden', s.dataset.pg!=='text');
       $('pg-audio').classList.toggle('hidden', s.dataset.pg!=='audio');
+      $('pg-sentiment').classList.toggle('hidden', s.dataset.pg!=='sentiment');
+      if (s.dataset.pg==='sentiment') loadSentimentConfig();
     }));
     { const drop = $('pgDrop'), inp = $('pgFile');
       inp.addEventListener('change', () => { const f = inp.files[0];
@@ -1123,10 +1134,40 @@
       ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
       drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
     }
+    { const drop = $('pgSnDrop'), inp = $('pgSnFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('pgSnDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
+    // Sentiment config: same owner|apikey policy as the Scoring tab (ROLE is set in enter()).
+    async function loadSentimentConfig() {
+      const ro = ROLE !== 'owner';
+      $('snReadonly').classList.toggle('hidden', !ro);
+      $('snEnabled').disabled = ro; $('snGuidance').disabled = ro;
+      $('snCfgSave').classList.toggle('hidden', ro);
+      $('snCfgMsg').textContent='';
+      try {
+        const d = await CQ.readResp(await fetch(`${API}/sentiment/config`, { headers: authH() }));
+        $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
+      } catch(e){ $('snCfgMsg').textContent = e.message; }
+    }
+    $('snCfgSave').addEventListener('click', async () => {
+      const m = $('snCfgMsg'); m.textContent='';
+      const btn = $('snCfgSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      try {
+        await CQ.readResp(await fetch(`${API}/sentiment/config`, { method:'PUT',
+          headers: authH({'Content-Type':'application/json'}),
+          body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
+        m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'),'ok');
+      } catch(e){ m.textContent = e.message; CQ.toast(e.message,'err'); }
+      finally { btn.disabled=false; btn.textContent=t('sn.save'); }
+    });
     $('pgRun').addEventListener('click', async () => {
       const mode = (document.querySelector('#pgTabs .subtab.active')||{}).dataset.pg || 'text';
       const err = $('pgErr'), out = $('pgResult'); err.textContent=''; out.innerHTML='';
-      const btn = $('pgRun'), label = t('pg.run');
+      const btn = $('pgRun'), label = mode==='sentiment' ? t('sn.run') : t('pg.run');
       try {
         if (mode === 'text') {
           const text = $('pgText').value.trim();
@@ -1136,7 +1177,7 @@
           const d = await CQ.readResp(r);
           out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
             + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
-        } else {
+        } else if (mode === 'audio') {
           const f = $('pgFile').files[0];
           if (!f) { err.textContent = t('pg.audioempty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
@@ -1144,6 +1185,14 @@
           const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = renderAnalysis(d);
+        } else {
+          const f = $('pgSnFile').files[0];
+          if (!f) { err.textContent = t('pg.audioempty'); return; }
+          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/sentiment`, { method:'POST', headers: authH(), body: fd });
+          const d = await CQ.readResp(r);
+          out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
         }
         CQ.toast(t('res.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
