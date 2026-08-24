@@ -104,7 +104,13 @@
 
   <script>
     const API = CQ.API, t = CQ.t;
-    CQ.mountHeader({ tag: 'Voice AI', nav: [{ i18n: 'nav.signin', href: 'tenant.html' }],
+    // The public page must not pretend a signed-in visitor is signed out: with a live
+    // admin or tenant session in this tab, the nav links back to their surface instead of
+    // demanding credentials again.
+    const _navBack = sessionStorage.getItem('cq_admin_token') ? { i18n: 'nav.console', href: 'admin.html' }
+                   : sessionStorage.getItem('cq_tenant_token') ? { i18n: 'nav.workspace', href: 'tenant.html' }
+                   : { i18n: 'nav.signin', href: 'tenant.html' };
+    CQ.mountHeader({ tag: 'Voice AI', nav: [_navBack],
       extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
     CQ.enhanceSelects();
 

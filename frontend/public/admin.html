@@ -14,7 +14,7 @@
 </head>
 <body>
   <div id="cq-header"></div>
-  <main>
+  <main class="console">
     <div id="app" class="hidden">
       <div class="tabs">
         <div class="tab active" data-tab="tenants" data-i18n="adm.tenants"></div>
@@ -436,6 +436,7 @@
           <td>${x.users}</td><td>${x.documents}</td>
           <td class="inline"><button class="ghost" data-act="key" data-id="${x.id}">${t('btn.apikey')}</button>
             <button class="ghost" data-act="users" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.users')}</button>
+            <button class="ghost" data-act="edit" data-id="${x.id}" data-name="${esc(x.name)}">${t('kba.edit')}</button>
             <button class="danger" data-act="del" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.delete')}</button></td>
         </tr><tr><td colspan="7"><div id="sub-${x.id}"></div></td></tr>`).join('') + `</tbody></table></div>`;
       box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => tenantAction(b.dataset.act, b.dataset.id, b.dataset.name)));
@@ -459,19 +460,69 @@
         });
         return;
       }
+      if (act === 'edit') {
+        const r = await adminFetch(`${API}/admin/tenants`, { headers: hdr() });
+        const tn = (await r.json()).find(x => x.id === id) || {};
+        sub.innerHTML = `<div class="sub">
+          <h4 style="margin-top:0">${t('kba.edit')} · ${esc(tn.name || name)}</h4>
+          <div class="row" style="align-items:flex-end">
+            <div><label>${t('f.name')}</label><input id="te-name-${id}" value="${esc(tn.name||'')}" /></div>
+            <div><label>${t('f.industry')}</label><input id="te-ind-${id}" value="${esc(tn.industry||'')}" /></div>
+            <div><label>${t('f.region')}</label><input id="te-reg-${id}" value="${esc(tn.region||'')}" /></div>
+            <div style="flex:0"><label class="inline" style="gap:5px"><input type="checkbox" id="te-act-${id}" ${tn.is_active?'checked':''} style="width:auto"/> <span>${t('th.active')}</span></label></div>
+            <div style="flex:0"><button class="primary" id="te-save-${id}">${t('btn.save')}</button></div>
+          </div><div class="msg" id="te-msg-${id}"></div></div>`;
+        $('te-save-'+id).addEventListener('click', async () => {
+          const m = $('te-msg-'+id); m.className='msg'; m.textContent='';
+          const rr = await adminFetch(`${API}/admin/tenants/${id}`, { method:'PUT', headers: jhdr(),
+            body: JSON.stringify({ name: $('te-name-'+id).value.trim(), industry: $('te-ind-'+id).value.trim(),
+              region: $('te-reg-'+id).value.trim(), is_active: $('te-act-'+id).checked }) });
+          const dd = await rr.json().catch(() => ({}));
+          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
+          else { CQ.toast(t('toast.saved'),'ok'); loadTenants(); }
+        });
+        return;
+      }
       if (act === 'users') {
         const r = await adminFetch(`${API}/admin/tenants/${id}/users`, { headers: hdr() }); const users = await r.json();
+        const roleSel = (uid, cur) => `<select data-urole="${uid}" style="width:auto; padding:7px 10px">
+            <option value="member" ${cur==='member'?'selected':''}>${t('role.member')}</option>
+            <option value="owner" ${cur==='owner'?'selected':''}>${t('role.owner')}</option></select>`;
         sub.innerHTML = `<div class="sub">
           <h4 style="margin-top:0">${t('btn.users')} · ${esc(name)}</h4>
-          <div id="ulist-${id}">${users.map(u=>`<div class="inline" style="justify-content:space-between;padding:4px 0">
-            <span>${esc(u.username)} <span class="hint">(${esc(u.role)})</span></span>
-            <button class="danger" data-uid="${u.id}" data-uname="${esc(u.username)}">${t('btn.remove')}</button></div>`).join('') || `<span class="hint">—</span>`}</div>
-          <div class="row" style="margin-top:10px">
-            <div><input id="nu-${id}" data-i18n-ph="f.username" /></div>
-            <div><input id="np-${id}" type="password" data-i18n-ph="f.password" /></div>
+          <div id="ulist-${id}">${users.map(u=>`<div class="inline wrap" style="justify-content:space-between; padding:6px 0; border-bottom:1px solid color-mix(in oklab,var(--hairline) 60%,transparent)">
+            <span style="min-width:140px"><b>${esc(u.username)}</b></span>
+            <span class="inline wrap" style="gap:8px">
+              ${roleSel(u.id, u.role)}
+              <label class="inline" style="gap:5px; margin:0"><input type="checkbox" data-uactive="${u.id}" ${u.is_active?'checked':''} style="width:auto"/> <span>${t('th.active')}</span></label>
+              <input type="password" data-upw="${u.id}" placeholder="${esc(t('adm.user.newpw'))}" style="width:210px" autocomplete="new-password"/>
+              <button class="ghost" data-usave="${u.id}">${t('btn.save')}</button>
+              <button class="act danger" data-uid="${u.id}" data-uname="${esc(u.username)}" title="${t('btn.remove')}" aria-label="${t('btn.remove')}">🗑</button>
+            </span></div>`).join('') || `<span class="hint">—</span>`}</div>
+          <div class="row" style="margin-top:12px; align-items:flex-end">
+            <div><label>${t('f.username')}</label><input id="nu-${id}" /></div>
+            <div><label>${t('f.password')}</label><input id="np-${id}" type="password" autocomplete="new-password" /></div>
+            <div class="w-sel"><label>${t('f.role')}</label><select id="nr-${id}">
+              <option value="member">${t('role.member')}</option><option value="owner">${t('role.owner')}</option></select></div>
             <div style="flex:0"><button class="primary" id="addu-${id}">${t('btn.adduser')}</button></div>
           </div><div class="msg" id="umsg-${id}"></div></div>`;
         CQ.applyI18n(sub);
+        sub.querySelectorAll('button[data-usave]').forEach(b => b.addEventListener('click', async () => {
+          const uid = b.dataset.usave, m = $('umsg-'+id); m.className='msg'; m.textContent='';
+          const body = {
+            role: sub.querySelector(`[data-urole="${uid}"]`).value,
+            is_active: sub.querySelector(`[data-uactive="${uid}"]`).checked,
+          };
+          const pw = sub.querySelector(`[data-upw="${uid}"]`).value;
+          if (pw) body.password = pw;
+          b.disabled = true;
+          try {
+            const rr = await adminFetch(`${API}/admin/tenants/${id}/users/${uid}`, { method:'PUT', headers: jhdr(), body: JSON.stringify(body) });
+            const dd = await rr.json().catch(() => ({}));
+            if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
+            else { CQ.toast(t('adm.user.saved'),'ok'); sub.querySelector(`[data-upw="${uid}"]`).value=''; }
+          } finally { b.disabled = false; }
+        }));
         sub.querySelectorAll('button[data-uid]').forEach(b => b.addEventListener('click', async () => {
           if (!(await CQ.confirm(t('adm.rmuser.confirm').replace('{u}', () => b.dataset.uname || ''), {ok:t('btn.remove')}))) return;
           await adminFetch(`${API}/admin/tenants/${id}/users/${b.dataset.uid}`, { method:'DELETE', headers: hdr() });
@@ -480,9 +531,9 @@
         $('addu-'+id).addEventListener('click', async () => {
           const m = $('umsg-'+id); m.className='msg';
           const rr = await adminFetch(`${API}/admin/tenants/${id}/users`, { method:'POST', headers: jhdr(),
-            body: JSON.stringify({ username: $('nu-'+id).value.trim(), password: $('np-'+id).value }) });
+            body: JSON.stringify({ username: $('nu-'+id).value.trim(), password: $('np-'+id).value, role: $('nr-'+id).value }) });
           const dd = await rr.json();
-          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || 'Failed'; }
+          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
           else { CQ.toast(t('toast.created'),'ok'); tenantAction('users', id, name); loadTenants(); }
         });
       }

@@ -112,10 +112,22 @@ async def delete_tenant(tenant_id: str):
 
 
 # ---- tenant users ----------------------------------------------------------
+VALID_ROLES = ("member", "owner")
+
+
 class UserCreate(BaseModel):
     username: str
     password: str
     role: str = "member"
+
+
+class UserUpdate(BaseModel):
+    """Everything editable about a tenant user after creation. All optional — only the
+    supplied fields change. Username is deliberately immutable: it is the login identity
+    and audit-trail anchor; recreate the user to rename."""
+    password: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
 
 
 @router.get("/{tenant_id}/users", dependencies=[Depends(require_superadmin)])
@@ -131,6 +143,8 @@ async def list_users(tenant_id: str):
 async def create_user(tenant_id: str, body: UserCreate):
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Role must be member or owner")
     async with pool().acquire() as conn:
         if not await conn.fetchval("SELECT 1 FROM clients WHERE id = $1", tenant_id):
             raise HTTPException(status_code=404, detail="Tenant not found")
@@ -142,6 +156,32 @@ async def create_user(tenant_id: str, body: UserCreate):
             VALUES ($1, $2, $3, $4) RETURNING id
             """, tenant_id, body.username, auth.hash_password(body.password), body.role)
     return {"id": str(uid), "username": body.username, "role": body.role}
+
+
+@router.put("/{tenant_id}/users/{user_id}", dependencies=[Depends(require_superadmin)])
+async def update_user(tenant_id: str, user_id: str, body: UserUpdate):
+    """Edit a tenant user: reset password, change role, enable/disable. Tenant-scoped in
+    the WHERE like every other query here — a user id from another tenant is a 404."""
+    fields, vals = [], []
+    if body.password is not None:
+        if len(body.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        vals.append(auth.hash_password(body.password)); fields.append(f"password_hash = ${len(vals)+2}")
+    if body.role is not None:
+        if body.role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail="Role must be member or owner")
+        vals.append(body.role); fields.append(f"role = ${len(vals)+2}")
+    if body.is_active is not None:
+        vals.append(body.is_active); fields.append(f"is_active = ${len(vals)+2}")
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE tenant_users SET {', '.join(fields)} WHERE id = $1 AND client_id = $2 "
+            "RETURNING id, username, role, is_active", user_id, tenant_id, *vals)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {**dict(row), "id": str(row["id"])}
 
 
 @router.delete("/{tenant_id}/users/{user_id}", dependencies=[Depends(require_superadmin)])

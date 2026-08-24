@@ -60,7 +60,7 @@
 </head>
 <body>
   <div id="cq-header"></div>
-  <main>
+  <main class="console">
     <!-- unified login. A real <form> so Enter submits from EITHER field and password
          managers recognise the pair; submission is intercepted, never navigates. -->
     <form class="gate card" id="gate" autocomplete="on">
@@ -456,6 +456,7 @@
             </div>
             <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
+          <hr class="sep" />
           <label data-i18n="sc.rubric"></label>
           <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
           <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
@@ -1612,18 +1613,21 @@
     function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
     function scRow(d, i) {
       const dis = scEditable() ? '' : ' disabled';
-      return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
+      return `<div class="sc-edit" data-i="${i}">
+        <div class="inline" style="justify-content:space-between; margin-bottom:8px">
+          <span class="sc-edit-num">${i + 1}</span>
+          ${scEditable() ? `<button class="act danger sc-del" data-i="${i}" title="${t('sc.remove')}" aria-label="${t('sc.remove')}">🗑</button>` : ''}
+        </div>
         <div class="row">
           <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"${dis}/></div>
           <div class="w-num"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"${dis}/></div>
         </div>
         <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"${dis}/>
         <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}"${dis}>${esc(d.guidance||'')}</textarea>
-        ${scEditable() ? `<div class="actions"><button class="danger sc-del" data-i="${i}">${t('sc.remove')}</button></div>` : ''}
       </div>`;
     }
     function scReadDom() {
-      scDims = [...$('scDims').querySelectorAll('[data-i]')].filter(el=>el.classList.contains('fc-claim')).map(el => ({
+      scDims = [...$('scDims').querySelectorAll('[data-i]')].filter(el=>el.classList.contains('sc-edit')).map(el => ({
         key: (scDims[+el.dataset.i]||{}).key,
         name: el.querySelector('.sc-name').value.trim(),
         weight: parseFloat(el.querySelector('.sc-weight').value)||0,
@@ -1725,6 +1729,26 @@
           rb.addEventListener('click', () => location.reload());
           $('gateMsg').append(rb);
         });
+    } else if (sessionStorage.getItem('cq_admin_token')) {
+      // A superadmin who wandered to the public app and clicked "Sign in" still has a live
+      // console session — validate it and route them back instead of demanding a password.
+      fetch(`${API}/auth/me`, { headers: { 'X-Admin-Token': sessionStorage.getItem('cq_admin_token') } })
+        .then(r => r.ok ? r.json() : null)
+        .then(me => {
+          if (me && me.kind === 'superadmin') {
+            const next = new URLSearchParams(location.search).get('next');
+            if (NEXT_OK.includes(next)) { location.replace(next); return; }
+            $('gateMsg').className = 'msg';
+            $('gateMsg').innerHTML = '';
+            $('gateMsg').append(t('login.asadmin') + ' ');
+            const a = document.createElement('a'); a.href = 'admin.html'; a.textContent = t('nav.console') + ' →';
+            $('gateMsg').append(a);
+          } else {
+            sessionStorage.removeItem('cq_admin_token');
+          }
+        })
+        .catch(() => {});
+      $('u').focus();
     } else {
       $('u').focus();
     }
