@@ -61,15 +61,20 @@
 <body>
   <div id="cq-header"></div>
   <main>
-    <!-- unified login -->
-    <div class="gate card" id="gate">
+    <!-- unified login. A real <form> so Enter submits from EITHER field and password
+         managers recognise the pair; submission is intercepted, never navigates. -->
+    <form class="gate card" id="gate" autocomplete="on">
       <h3 data-i18n="login.heading"></h3>
       <label for="u" data-i18n="f.username"></label><input type="text" id="u" autocomplete="username" />
-      <label for="p" data-i18n="f.password"></label><input type="password" id="p" autocomplete="current-password" />
-      <div class="actions"><button class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
-      <div class="msg err" id="gateMsg"></div>
+      <label for="p" data-i18n="f.password"></label>
+      <div class="inline" style="gap:6px">
+        <input type="password" id="p" autocomplete="current-password" style="flex:1" />
+        <button type="button" class="icon-btn" id="pwToggle" data-i18n-title="login.showpw" aria-pressed="false">&#128065;</button>
+      </div>
+      <div class="actions"><button type="submit" class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
+      <div class="msg err" id="gateMsg" aria-live="polite"></div>
       <div class="hint" data-i18n="login.hint"></div>
-    </div>
+    </form>
 
     <div id="app" class="hidden">
       <div class="tabs">
@@ -164,7 +169,8 @@
             <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
             <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
             <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" />
+            <div class="hint" data-i18n="kb.csvhint"></div></div>
             <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
             <div class="msg" id="importMsg"></div>
           </div>
@@ -189,8 +195,8 @@
             <p class="hint" data-i18n="tkb.pg.hint"></p>
             <label data-i18n="kba.pg.query"></label><input id="kPgQuery" />
             <div class="row" style="margin-top:10px">
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="kPgThresh" type="number" step="0.05" value="0" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.threshold"></label><input id="kPgThresh" type="number" step="0.05" value="0" /></div>
               <div style="flex:0; align-self:flex-end"><button class="primary" id="kPgRun" data-i18n="kba.pg.run"></button></div>
             </div>
             <div id="kPgResults" style="margin-top:12px"></div>
@@ -261,7 +267,7 @@
           </div>
           <div class="rec-row">
             <span class="hint" data-i18n="rec.or"></span>
-            <button class="ghost" type="button" id="recBtn">● Record</button>
+            <button class="ghost" type="button" id="recBtn"></button>
             <span class="rec-status hint" id="recStatus"></span>
           </div>
           <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
@@ -312,7 +318,7 @@
             <div class="drop" id="pgSnDrop">
               <input type="file" id="pgSnFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
               <div class="drop-title" id="pgSnDropTitle" data-i18n="drop.title"></div>
-              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+              <div class="drop-sub" data-i18n="drop.sub_sn"></div>
             </div>
           </div>
           <div class="actions"><button class="primary" id="pgRun" data-i18n="pg.run"></button></div>
@@ -381,7 +387,7 @@
                customer reads, and a missing translation is invisible unless it is shown here. -->
           <div class="card">
             <h3 data-i18n="bot.greeting"></h3>
-            <div class="row">
+            <div class="row stack-md">
               <div><label data-i18n="bot.lang.en"></label><textarea id="b_greet_en"></textarea></div>
               <div><label data-i18n="bot.lang.ka"></label><textarea id="b_greet_ka"></textarea></div>
               <div><label data-i18n="bot.lang.ru"></label><textarea id="b_greet_ru"></textarea></div>
@@ -390,7 +396,7 @@
           <div class="card">
             <h3 data-i18n="bot.refusal"></h3>
             <p class="hint" data-i18n="bot.refusal.hint"></p>
-            <div class="row">
+            <div class="row stack-md">
               <div><label data-i18n="bot.lang.en"></label><textarea id="b_ref_en"></textarea></div>
               <div><label data-i18n="bot.lang.ka"></label><textarea id="b_ref_ka"></textarea></div>
               <div><label data-i18n="bot.lang.ru"></label><textarea id="b_ref_ru"></textarea></div>
@@ -402,6 +408,7 @@
             <input id="b_escalation" data-i18n-ph="bot.escalation.ph" />
             <div class="hint" data-i18n="bot.escalation.hint"></div>
             <h4 data-i18n="bot.retrieval"></h4>
+            <div class="hint" data-i18n="bot.limits.hint"></div>
             <div class="row">
               <div><label data-i18n="bot.minscore"></label><input id="b_minscore" type="number" step="0.01" min="0" max="1" /></div>
               <div><label data-i18n="bot.minhits"></label><input id="b_minhits" type="number" min="0" /></div>
@@ -522,27 +529,59 @@
       CQ.attachRecorder({ button: $('recBtn'), status: $('recStatus'), fileInput: audioInput });
     }
 
-    // unified login (tenant users + superadmin)
+    // unified login (tenant users + superadmin).
+    // Sessions are DELIBERATELY per-tab (sessionStorage): a QA console signed into customer
+    // data should not silently follow into every new tab on a shared machine.
+    const NEXT_OK = ['admin.html', 'kb-admin.html'];   // allowlist for ?next= after admin login
     async function login() {
       $('gateMsg').textContent='';
+      const u = $('u').value.trim(), pw = $('p').value;
+      if (!u || !pw) { $('gateMsg').textContent = t('login.empty'); (!u ? $('u') : $('p')).focus(); return; }
+      const b = $('loginBtn'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>' + t('btn.signin') + '…';
       try {
         const r = await fetch(`${API}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }) });
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Sign in failed');
-        if (d.scope === 'admin') { sessionStorage.setItem('cq_admin_token', d.token); location.href = 'admin.html'; return; }
+          body: JSON.stringify({ username: u, password: pw }) });
+        const d = await CQ.readResp(r).catch(err => { throw (r.status === 401 ? new Error(t('login.failed')) : err); });
+        if (d.scope === 'admin') {
+          sessionStorage.setItem('cq_admin_token', d.token);
+          const next = new URLSearchParams(location.search).get('next');
+          location.href = NEXT_OK.includes(next) ? next : 'admin.html'; return;
+        }
         TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client, d.role); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
       } catch(e){ $('gateMsg').textContent = e.message; }
+      finally { b.disabled = false; b.textContent = t('btn.signin'); }
     }
     function enter(client, role) {
       ROLE = role || '';
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
-      if (client) $('who').textContent = client.name;
+      if (client) { $('who').textContent = client.name; document.title = 'CommuniQ — ' + client.name; }
       CQ.enhanceSelects($('panel-kb'));
       kbLoad();
     }
-    $('loginBtn').addEventListener('click', login);
-    $('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
-    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_tenant_token'); location.reload(); });
+    // An expired token mid-session: one gate, one message, instead of every feature quietly
+    // failing in its own way. Every API caller funnels through apiFetch below.
+    function sessionExpired() {
+      TOKEN = ''; sessionStorage.removeItem('cq_tenant_token');
+      $('app').classList.add('hidden'); $('logout').classList.add('hidden');
+      $('gate').classList.remove('hidden');
+      $('gateMsg').textContent = t('session.expired');
+      document.title = 'CommuniQ — ' + t('login.heading');
+      $('u').focus();
+    }
+    async function apiFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401 && TOKEN) sessionExpired();
+      return r;
+    }
+    $('gate').addEventListener('submit', e => { e.preventDefault(); login(); });
+    $('pwToggle').addEventListener('click', () => {
+      const showing = $('p').type === 'text';
+      $('p').type = showing ? 'password' : 'text';
+      $('pwToggle').setAttribute('aria-pressed', String(!showing));
+    });
+    $('logout').addEventListener('click', e => { e.preventDefault();
+      sessionStorage.removeItem('cq_tenant_token'); sessionStorage.removeItem('cq_admin_token');
+      location.reload(); });
 
     // import
     $('importBtn').addEventListener('click', async () => {
@@ -556,14 +595,14 @@
       try {
         let r;
         if (mode==='text') {
-          if (!$('i_text').value.trim()) throw new Error('Enter some text.');
-          r = await fetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
+          if (!$('i_text').value.trim()) throw new Error(t('tts.needtext'));
+          r = await apiFetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
             body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
         } else {
-          const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error('Choose a file.');
+          const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error(t('kb.needfile'));
           const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags);
           fd.append('metadata', JSON.stringify(meta));
-          r = await fetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
+          r = await apiFetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
         }
         const d = await CQ.readResp(r);
         m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
@@ -597,7 +636,7 @@
       // A dead proxy rejects the fetch outright; swallowing it here means every section
       // renders its own "could not load" state instead of a silently blank card.
       try {
-        const r = await fetch(url, init || { headers: authH() });
+        const r = await apiFetch(url, init || { headers: authH() });
         if (!r.ok) return null;
         return await r.json().catch(() => null);
       } catch { return null; }
@@ -606,7 +645,7 @@
        an ordinary not-ok response the caller already knows how to report, rather than an
        unhandled rejection that leaves a spinner spinning and the user with no explanation. */
     async function kbSend(url, init) {
-      try { return await fetch(url, init); }
+      try { return await apiFetch(url, init); }
       catch { return { ok: false, status: 0, json: async () => ({ detail: t('err.unavailable') }) }; }
     }
     function kbPost(url, body, method) {
@@ -678,22 +717,22 @@
       }
       box.innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th><input type="checkbox" id="kSelAll"/></th><th>${t('th.title')}</th><th>${t('th.category')}</th>
-        <th>${t('kba.doc.tags')}</th><th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th>
-        <th class="tight">${t('vis.col')}</th><th class="tight">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
+        <th class="hide-md">${t('kba.doc.tags')}</th><th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th>
+        <th class="tight">${t('vis.col')}</th><th class="tight hide-md">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
         docs.map(x => `<tr>
           <td><input type="checkbox" class="krowsel" data-id="${esc(x.id)}"/></td>
           <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
-          <td>${(Array.isArray(x.tags)?x.tags:[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('') || '—'}</td>
+          <td class="hide-md">${(Array.isArray(x.tags)?x.tags:[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('') || '—'}</td>
           <td class="tight">${x.chunk_count ?? 0}</td>
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?t('vis.public'):t('vis.internal')}</span></td>
-          <td class="tight hint">${esc(x.source_type||'—')}</td>
+          <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
           <td class="inline">
-            <button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}</button>
-            <button class="ghost" data-act="edit" data-id="${esc(x.id)}">${t('kba.edit')}</button>
-            <button class="ghost" data-act="chunks" data-id="${esc(x.id)}">${t('kba.chunks')}</button>
-            <button class="ghost" data-act="reembed" data-id="${esc(x.id)}">${t('kba.reembed')}</button>
-            <button class="danger" data-act="del" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${t('kba.delete')}</button>
+            <button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}" aria-label="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}">${x.visibility==='public'?'🚫':'📢'}</button>
+            <button class="act" data-act="edit" data-id="${esc(x.id)}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
+            <button class="act" data-act="chunks" data-id="${esc(x.id)}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
+            <button class="act" data-act="reembed" data-id="${esc(x.id)}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>
+            <button class="act danger" data-act="del" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${t('kba.delete')}" aria-label="${t('kba.delete')}">🗑</button>
           </td></tr>`).join('') + `</tbody></table></div>`;
       box.querySelectorAll('button[data-act]').forEach(b =>
         b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
@@ -811,7 +850,7 @@
       if (action === 'reembed' && !(await CQ.confirm(t('tkb.bulk.reembed.confirm').replace('{n}', kSel.size), { ok: t('kba.reembed'), danger: false }))) return;
       const r = await kbPost(`${API}/kb/bulk`, { action, document_ids: [...kSel], tags });
       if (r.ok) { const d = await r.json().catch(()=>({}));
-        CQ.toast(`${action}: ${d.affected ?? 0}`, 'ok'); loadDocs(); }
+        CQ.toast(t('bulk.done.' + action).replace('{n}', d.affected ?? 0), 'ok'); loadDocs(); }
       else await kbFail(r);
     }
 
@@ -1105,11 +1144,11 @@
     $('analyzeBtn').addEventListener('click', async () => {
       const f = $('audio').files[0]; const err = $('analyzeErr'); const out = $('analyzeResult');
       err.textContent=''; out.innerHTML='';
-      if (!f) { err.textContent='Choose an audio file.'; return; }
+      if (!f) { err.textContent = t('stt.nofile'); return; }
       const btn = $('analyzeBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.analyze')+'…';
       try {
         const fd = new FormData(); fd.append('file', f);
-        const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+        const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
         const d = await CQ.readResp(r);
         out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
@@ -1149,7 +1188,7 @@
       $('snCfgSave').classList.toggle('hidden', ro);
       $('snCfgMsg').textContent='';
       try {
-        const d = await CQ.readResp(await fetch(`${API}/sentiment/config`, { headers: authH() }));
+        const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { headers: authH() }));
         $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
       } catch(e){ $('snCfgMsg').textContent = e.message; }
     }
@@ -1157,7 +1196,7 @@
       const m = $('snCfgMsg'); m.textContent='';
       const btn = $('snCfgSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
       try {
-        await CQ.readResp(await fetch(`${API}/sentiment/config`, { method:'PUT',
+        await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { method:'PUT',
           headers: authH({'Content-Type':'application/json'}),
           body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
         m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'),'ok');
@@ -1173,7 +1212,7 @@
           const text = $('pgText').value.trim();
           if (!text) { err.textContent = t('pg.ans.empty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
-          const r = await fetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
+          const r = await apiFetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
           const d = await CQ.readResp(r);
           out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
             + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
@@ -1182,7 +1221,7 @@
           if (!f) { err.textContent = t('pg.audioempty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+          const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = renderAnalysis(d);
         } else {
@@ -1190,11 +1229,11 @@
           if (!f) { err.textContent = t('pg.audioempty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch(`${API}/sentiment`, { method:'POST', headers: authH(), body: fd });
+          const r = await apiFetch(`${API}/sentiment`, { method:'POST', headers: authH(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
         }
-        CQ.toast(t('res.done'), 'ok');
+        CQ.toast(t(mode === 'sentiment' ? 'sn.done' : 'pg.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { btn.disabled=false; btn.textContent = label; }
     });
@@ -1287,7 +1326,7 @@
       const pct = v => v == null ? '—' : Math.round(v * 100) + '%';
       return `<div class="card" data-pid="${esc(p.id)}">
         <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px">
-          <div style="flex:1; min-width:220px">
+          <div class="w-name">
             <div class="inline" style="gap:8px; flex-wrap:wrap">
               ${bulkable ? `<input type="checkbox" class="cur-sel" data-id="${esc(p.id)}" style="width:auto" />` : ''}
               <span class="pill ${OP_PILL[op] || 'notinkb'}">${t('cur.op.' + op) }</span>
@@ -1326,7 +1365,7 @@
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
       let d;
       try {
-        const r = await fetch(`${CUR}?state=pending`, { headers: authH() });
+        const r = await apiFetch(`${CUR}?state=pending`, { headers: authH() });
         if (!r.ok) throw new Error(t('cur.loadfail'));
         d = await r.json();
       } catch (e) { box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
@@ -1336,7 +1375,7 @@
       // The list is deliberately light; body, quotes and the live target text come from the
       // per-proposal GET. The open queue is hard-capped at ~10 cards, so this stays cheap.
       curProposals = await Promise.all(listed.map(async p => {
-        try { const rr = await fetch(`${CUR}/${p.id}`, { headers: authH() });
+        try { const rr = await apiFetch(`${CUR}/${p.id}`, { headers: authH() });
           if (rr.ok) { const full = await rr.json(); if (full && full.id) return full; } } catch {}
         return p;
       }));
@@ -1422,12 +1461,12 @@
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
     }
     async function curPost(url, body) {
-      const r = await fetch(url, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+      const r = await apiFetch(url, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
       return CQ.readResp(r);
     }
     $('curBulkAccept').addEventListener('click', async () => {
       const ids = [...curSel]; if (!ids.length) return;
-      if (!(await CQ.confirm(`${t('cur.bulk.accept')} — ${ids.length}?`, { ok: t('cur.accept'), danger: false }))) return;
+      if (!(await CQ.confirm(t('cur.bulk.confirm').replace('{n}', () => ids.length), { ok: t('cur.accept'), danger: false }))) return;
       try { await curPost(`${CUR}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
@@ -1484,7 +1523,7 @@
       const m = $('botLoadMsg'); m.classList.add('hidden'); m.textContent = '';
       let d = null;
       try {
-        const r = await fetch(BOTCFG, { headers: authH() });
+        const r = await apiFetch(BOTCFG, { headers: authH() });
         if (r.status === 404 || r.status === 405) { throw new Error(t('bot.unavailable')); }
         if (!r.ok) throw new Error(t('bot.loadfail'));
         d = await r.json();
@@ -1550,7 +1589,7 @@
       };
       const b = $('saveBot'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
       try {
-        const r = await fetch(BOTCFG, { method:'PUT', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+        const r = await apiFetch(BOTCFG, { method:'PUT', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
         // 409 == "no published documents". Explain the reason and point at the fix; a toggle
         // that only fails is the difference between a broken product and one that teaches.
         if (r.status === 409) {
@@ -1576,7 +1615,7 @@
       return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
         <div class="row">
           <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"${dis}/></div>
-          <div style="flex:0; min-width:110px"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"${dis}/></div>
+          <div class="w-num"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"${dis}/></div>
         </div>
         <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"${dis}/>
         <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}"${dis}>${esc(d.guidance||'')}</textarea>
@@ -1624,7 +1663,7 @@
       ['scAdd','scNormalize','scSave'].forEach(id => $(id).classList.toggle('hidden', ro));
       $('scRubric').disabled = ro;
       try {
-        const cfg = await CQ.readResp(await fetch(`${API}/scoring/config`, { headers: authH() }));
+        const cfg = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }));
         scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
         $('scRubric').value = cfg.rubric || '';
         scVer = cfg.version || null; scLoaded = true; scShowVersion();
@@ -1639,7 +1678,7 @@
       if (Math.abs(total - 100) > 0.5) { $('scMsg').className='msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
       const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
       try {
-        const d = await CQ.readResp(await fetch(`${API}/scoring/config`, { method:'PUT',
+        const d = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { method:'PUT',
           headers: authH({'Content-Type':'application/json'}),
           body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) }));
         CQ.toast(t('sc.saved'),'ok');
@@ -1652,7 +1691,7 @@
     // history
     $('reloadJobs').addEventListener('click', loadJobs);
     async function loadJobs() {
-      const r = await fetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
+      const r = await apiFetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
       const box = $('jobList');
       box.innerHTML = jobs.length ? `<div class="table-wrap"><table><thead><tr><th>${t('th.file')}</th><th>${t('th.status')}</th><th>${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
         jobs.map(j=>`<tr style="cursor:pointer" data-id="${j.id}"><td>${esc(j.filename||'—')}</td><td><span class="pill ${j.status==='done'?'ready':j.status==='error'?'error':'processing'}">${esc(j.status)}</span></td><td>${esc(j.language||'—')}</td><td class="hint">${new Date(j.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`
@@ -1660,14 +1699,34 @@
       box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openJob(tr.dataset.id)));
     }
     async function openJob(id) {
-      const r = await fetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
+      const r = await apiFetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
       if (r.ok) $('jobDetail').innerHTML = renderAnalysis(d);
     }
 
     if (TOKEN) {
-      fetch(`${API}/auth/me`, { headers: authH() }).then(r => r.ok ? r.json() : Promise.reject())
-        .then(me => { if (me.kind==='tenant') enter(me.client, me.role); else throw 0; })
-        .catch(() => { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; });
+      // Freeze the gate while the session check is in flight, so a user with a valid
+      // session never sees an interactive sign-in form flash at them.
+      ['u','p','loginBtn'].forEach(id => $(id).disabled = true);
+      $('gateMsg').className = 'msg'; $('gateMsg').textContent = t('login.checking');
+      const unfreeze = () => { ['u','p','loginBtn'].forEach(id => $(id).disabled = false);
+        $('gateMsg').className = 'msg err'; if ($('gateMsg').textContent === t('login.checking')) $('gateMsg').textContent = ''; };
+      fetch(`${API}/auth/me`, { headers: authH() })
+        .then(r => {
+          if (r.ok) return r.json().then(me => { unfreeze(); if (me.kind === 'tenant') enter(me.client, me.role); else { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; } });
+          if (r.status === 401 || r.status === 403) { unfreeze(); sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; return; }
+          throw new Error('http ' + r.status);   // outage, not an invalid token
+        })
+        .catch(() => {  // network/API down: KEEP the token, offer a retry
+          unfreeze();
+          $('gateMsg').innerHTML = '';
+          $('gateMsg').append(t('err.unavailable') + ' ');
+          const rb = document.createElement('button');
+          rb.type = 'button'; rb.className = 'ghost'; rb.textContent = t('btn.retry');
+          rb.addEventListener('click', () => location.reload());
+          $('gateMsg').append(rb);
+        });
+    } else {
+      $('u').focus();
     }
   </script>
 </body>

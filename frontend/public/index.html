@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CommuniQ Voice AI — Analyze &amp; Text-to-Speech</title>
-  <meta name="description" content="Transcribe and analyze calls, and turn text into natural speech — including Georgian — powered by CommuniQ." />
+  <title>CommuniQ Voice AI — Speech, Transcripts &amp; Sentiment</title>
+  <meta name="description" content="Turn text into natural speech — including Georgian — or transcribe a call and hear how it sounded. Powered by CommuniQ." />
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -69,7 +69,7 @@
         </div>
         <div class="rec-row">
           <span class="hint" data-i18n="rec.or"></span>
-          <button class="ghost" type="button" id="recBtn" data-i18n="rec.record"></button>
+          <button class="ghost" type="button" id="recBtn"></button>
           <span class="rec-status hint" id="recStatus"></span>
         </div>
         <div class="actions"><button class="primary" id="sttBtn" data-i18n="btn.transcribe"></button></div>
@@ -92,7 +92,7 @@
         </div>
         <div class="rec-row">
           <span class="hint" data-i18n="rec.or"></span>
-          <button class="ghost" type="button" id="snRecBtn" data-i18n="rec.record"></button>
+          <button class="ghost" type="button" id="snRecBtn"></button>
           <span class="rec-status hint" id="snRecStatus"></span>
         </div>
         <div class="actions"><button class="primary" id="snBtn" data-i18n="sn.run"></button></div>
@@ -169,7 +169,7 @@
         const fd = new FormData(); fd.append('file', f);
         const r = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
         const d = await CQ.readResp(r);
-        out.innerHTML = renderTranscript(d); CQ.toast(t('res.done'), 'ok');
+        out.innerHTML = renderTranscript(d); CQ.toast(t('stt.done'), 'ok');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { sttBtn.disabled = false; sttBtn.textContent = t('btn.transcribe'); loadLimits(); }
     });
@@ -209,7 +209,7 @@
         const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
         const d = await CQ.readResp(r);
         out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
-        CQ.toast(t('res.done'), 'ok');
+        CQ.toast(t('sn.done'), 'ok');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { snBtn.disabled = false; snBtn.textContent = t('sn.run'); loadLimits(); }
     });
@@ -267,7 +267,7 @@
         const language_code = document.getElementById('langSelect').value || undefined;
         const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: 'Hello.', voice_id, language_code }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Preview failed'); }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || t('tts.previewfail')); }
         playInto(URL.createObjectURL(await r.blob()), 'preview.mp3');
       } catch (e) { err.textContent = e.message; }
       finally { btn.disabled = false; btn.textContent = '▶'; }
@@ -284,7 +284,7 @@
         const language_code = document.getElementById('langSelect').value || undefined;
         const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, voice_id, language_code }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Request failed'); }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || t('toast.error')); }
         playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { ttsBtn.disabled = false; ttsBtn.textContent = t('btn.synth'); loadLimits(); }

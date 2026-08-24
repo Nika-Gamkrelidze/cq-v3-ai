@@ -68,13 +68,11 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cora
 }
 .brand { display:inline-flex; align-items:center; gap:10px; color:var(--paper); flex:none; }
 .brand:hover { color:var(--paper); }
-.brand svg { flex:none; }
-/* Official mark: one asset per theme (navy C on light, white C on dark; red is constant).
-   The app always stamps data-theme on <html>, so exactly one of these is ever shown. */
-.brand-mark { flex:none; display:block; height:22px; width:auto; }
-[data-theme="dark"] .brand-mark.on-light,
-[data-theme="light"] .brand-mark.on-dark { display:none; }
-.brand-name { font-family:var(--font-display); font-weight:800; font-size:18px; letter-spacing:-.02em; white-space:nowrap; }
+/* Official logo lockup: one asset per theme (colour on light, the white "logotetri" on
+   dark). The app always stamps data-theme on <html>, so exactly one is ever painted. */
+.brand-logo { flex:none; display:block; height:40px; width:auto; }
+[data-theme="dark"] .brand-logo.on-light,
+[data-theme="light"] .brand-logo.on-dark { display:none; }
 .brand-tag { font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
   color:var(--beam); border:1px solid color-mix(in oklab,var(--beam) 55%,transparent);
   padding:2px 8px; border-radius:999px; white-space:nowrap; }
@@ -83,6 +81,8 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cora
 .app-nav a { font-size:13.5px; color:var(--mist); padding:7px 11px; border-radius:9px;
   white-space:nowrap; flex:none; }
 .app-nav a:hover { color:var(--paper); background:color-mix(in oklab,var(--surface-2) 60%,transparent); }
+.app-nav a.active { color:var(--paper); background:color-mix(in oklab,var(--surface-2) 75%,transparent);
+  box-shadow:inset 0 -2px 0 var(--beam); }
 .app-nav .who { color:var(--muted); font-size:13px; padding:0 4px;
   max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lang-switch { flex:none; }
@@ -286,14 +286,34 @@ audio { width:100%; margin-top:12px; border-radius:999px; }
 .cq-modal p { margin:0 0 18px; font-size:14.5px; }
 .cq-modal .actions { justify-content:flex-end; margin-top:0; }
 
-/* ---- Responsive ---- */
-@media (max-width:640px) {
-  .app-nav a { padding:6px 8px; font-size:13px; }
-  .app-nav .who { display:none; }
-  .brand-tag { display:none; }
-  .row > div { min-width:100%; }
-  main { padding-bottom:80px; }
-}
+/* ---- Width utilities ----
+   Fixed field widths must live in classes, never inline style="min-width:…" — an inline
+   style can never be reached by a media query, so it breaks phone stacking. */
+.row > .w-num  { flex:0 1 120px; min-width:110px; }
+.row > .w-sel  { flex:0 1 200px; min-width:170px; }
+.row > .w-name { flex:1 1 240px; min-width:200px; }
+.inline.wrap { flex-wrap:wrap; row-gap:4px; }
+
+/* Compact icon actions for table rows: five text pills per row made the documents tables
+   ~1100px wide; 34px icon buttons keep every column on screen. Always give them a
+   title + aria-label — the icon alone is not a label. */
+button.act { width:34px; height:34px; padding:0; border-radius:9px; border:1px solid var(--hairline);
+  background:transparent; color:var(--mist); cursor:pointer; font-size:15px; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center; transition:all .16s var(--ease); }
+button.act:hover { color:var(--beam); border-color:color-mix(in oklab,var(--beam) 60%,transparent); }
+button.act.danger { color:var(--coral); border-color:color-mix(in oklab,var(--alert) 40%,transparent); background:color-mix(in oklab,var(--alert) 10%,transparent); }
+button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transparent); }
+
+/* Expanded sub-panels inside horizontally scrolling tables (e.g. the admin tenants table's
+   API-key/users panel) pin to the visible viewport instead of inheriting the table width. */
+.table-wrap .sub { position:sticky; left:0; max-width:min(100%, calc(100vw - 90px)); }
+
+/* ---- Responsive ----
+   Two breakpoints, used everywhere — do not invent a third:
+     ≤900px  tablet — tighter form grids, expendable table columns hidden (.hide-md),
+             trilingual/limit rows stack (.stack-md)
+     ≤640px  phone — everything stacks, tab rows become one swipeable line, 16px inputs
+             (kills iOS focus-zoom), ≥44px touch targets, compact one-row header */
 /* ---- Language switch ---- */
 .lang-switch { display:inline-flex; border:1px solid var(--hairline); border-radius:999px; overflow:hidden; }
 .lang-switch button { background:transparent; border:none; color:var(--muted); font-size:11.5px; font-weight:700;
@@ -336,6 +356,45 @@ audio { width:100%; margin-top:12px; border-radius:999px; }
 .cq-seek::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px; margin-top:-4.5px; border-radius:50%; background:var(--beam); border:2px solid var(--card-solid); }
 .cq-seek::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--beam); border:2px solid var(--card-solid); }
 .cq-seek:focus-visible { outline:none; } .cq-seek:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px rgba(250,59,60,.3); }
+
+@media (max-width:900px) {
+  .row > div { min-width:150px; }
+  .stack-md > div { min-width:100% !important; }
+  .hide-md { display:none !important; }
+}
+@media (max-width:640px) {
+  .app-header { position:static; }
+  .app-nav a { padding:8px 8px; font-size:13px; }
+  .app-nav .who { display:none; }
+  .brand-tag { display:none; }
+  .brand-logo { height:28px; }
+  .app-header { gap:6px 10px; padding:10px 14px; }
+  .app-nav { gap:2px; }
+  .row > div { min-width:100% !important; }
+  .row > .w-num { flex-basis:calc(50% - 7px); min-width:calc(50% - 7px) !important; }
+  main { padding-bottom:80px; }
+  /* Tab pills: one swipeable row instead of a 4-row wall of buttons. Order is preserved,
+     so the active pill stays findable; the row bleeds to the screen edges on purpose. */
+  .tabs, .subtabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    margin-left:calc(-1*clamp(16px,4vw,28px)); margin-right:calc(-1*clamp(16px,4vw,28px));
+    padding-left:clamp(16px,4vw,28px); padding-right:clamp(16px,4vw,28px); padding-bottom:6px;
+    scrollbar-width:none; }
+  /* Subtab rows live inside .card, whose padding is clamp(16px,3vw,24px) — bleeding by
+     main's larger padding overshot the card border by a few px around 600px wide. */
+  .card .subtabs { margin-left:calc(-1*clamp(16px,3vw,24px)); margin-right:calc(-1*clamp(16px,3vw,24px));
+    padding-left:clamp(16px,3vw,24px); padding-right:clamp(16px,3vw,24px); }
+  .tabs::-webkit-scrollbar, .subtabs::-webkit-scrollbar { display:none; }
+  .tab, .subtab { flex:none; }
+  /* 16px is the iOS threshold below which focusing a field zooms the whole page in. */
+  input, textarea, select, .cq-select-trigger { font-size:16px; }
+  /* ≥44px effective touch targets for the primary controls. */
+  .subtab { padding:11px 14px; }
+  .lang-switch button { padding:10px 11px; }
+  .icon-btn { width:42px; height:42px; }
+  button.act { width:40px; height:40px; }
+  .cq-play { width:44px; height:44px; }
+  input[type=checkbox] { width:20px; height:20px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; }

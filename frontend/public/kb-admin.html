@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CommuniQ — Knowledge Base</title>
+  <title>CommuniQ — KB Admin Console</title>
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -58,8 +58,8 @@
   <main>
     <div class="card">
       <div class="row" style="align-items:flex-end">
-        <div style="flex:1; min-width:220px"><label data-i18n="kba.tenant"></label><select id="tenantSel"><option value="">—</option></select></div>
-        <div style="flex:2" id="healthStrip"></div>
+        <div class="w-name" style="flex:2"><label data-i18n="kba.tenant"></label><select id="tenantSel"><option value="">—</option></select></div>
+        <div style="flex:1; min-width:200px" id="healthStrip"></div>
       </div>
     </div>
     <div class="empty" id="tenantEmpty" data-i18n="kba.selecttenant"></div>
@@ -147,8 +147,8 @@
           <div id="pg-retrieval">
             <label data-i18n="kba.pg.query"></label><input id="pgQuery" />
             <div class="row" style="margin-top:10px">
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="pgTopk" type="number" value="8" /></div>
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="pgThresh" type="number" step="0.05" value="0" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.topk"></label><input id="pgTopk" type="number" value="8" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.threshold"></label><input id="pgThresh" type="number" step="0.05" value="0" /></div>
               <div style="flex:0; align-self:flex-end"><button class="primary" id="pgRun" data-i18n="kba.pg.run"></button></div>
             </div>
             <div id="pgResults" style="margin-top:12px"></div>
@@ -194,7 +194,7 @@
             <div class="drop" id="snDrop">
               <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
               <div class="drop-title" id="snDropTitle" data-i18n="drop.title"></div>
-              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+              <div class="drop-sub" data-i18n="drop.sub_sn"></div>
             </div>
             <div class="actions"><button class="primary" id="snRun" data-i18n="sn.run"></button></div>
             <div class="msg err" id="snErr"></div>
@@ -281,11 +281,13 @@
   <script>
     const API = CQ.API, t = CQ.t;
     CQ.mountHeader({ tag: 'KB', nav: [
-      { label: 'Console', href: 'admin.html' },
+      { i18n: 'nav.console', href: 'admin.html' },
+      { i18n: 'nav.kb', href: 'kb-admin.html' },
       { i18n: 'nav.logout', href: '#', id: 'logout' },
+      { i18n: 'nav.public', href: 'index.html' },
     ]});
     let TOKEN = sessionStorage.getItem('cq_admin_token') || '';
-    if (!TOKEN) location.replace('tenant.html');
+    if (!TOKEN) location.replace('tenant.html?next=kb-admin.html');
     const $ = id => document.getElementById(id);
     const H = (extra={}) => ({ 'X-Admin-Token': TOKEN, ...extra });
     const JH = () => H({ 'Content-Type': 'application/json' });
@@ -328,7 +330,16 @@
             'done.publish':'Опубликовано', 'done.unpublish':'Снято с публикации' },
     };
     const vt = k => (VT[CQ.lang()] || {})[k] || VT.en[k] || k;
-    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
+    $('logout').addEventListener('click', e => { e.preventDefault();
+      sessionStorage.removeItem('cq_admin_token'); sessionStorage.removeItem('cq_tenant_token');
+      location.replace('tenant.html'); });
+    // Central 401 interception: an admin token that expires MID-SESSION must land on the
+    // sign-in page, not masquerade as an empty tenant KB or paint 'undefined' tiles.
+    async function adminFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); throw new Error('unauthorized'); }
+      return r;
+    }
 
     // modal
     function showModal(inner) {
@@ -389,11 +400,25 @@
     // tenant selector
     async function loadTenants() {
       const r = await fetch(`${API}/admin/tenants`, { headers: H() });
-      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); return; }
       const list = await r.json(); const sel = $('tenantSel'); sel.innerHTML = '<option value="">—</option>';
       list.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} (${c.slug})`; sel.appendChild(o); });
+      noTenants = !list.length;
+      renderTenantEmpty();
       CQ.enhanceSelects();
       sel.addEventListener('change', () => setTenant(sel.value));
+    }
+    let noTenants = false;
+    // The empty-state carries data-i18n="kba.selecttenant", which applyI18n repaints on every
+    // language switch — so the no-tenants message owns the element (attribute removed) and is
+    // re-rendered from the cq:lang listener below.
+    function renderTenantEmpty() {
+      const el = $('tenantEmpty');
+      if (!noTenants) return;
+      el.removeAttribute('data-i18n');
+      el.textContent = t('kba.notenants') + ' ';
+      const a = document.createElement('a'); a.href = 'admin.html'; a.textContent = '→';
+      el.appendChild(a);
     }
     function setTenant(tid) {
       TID = tid;
@@ -412,15 +437,19 @@
       $('bulkPublish').textContent = vt('bulk.publish');
       $('bulkUnpublish').textContent = vt('bulk.unpublish');
     }
-    document.addEventListener('cq:lang', () => { paintVisLabels(); if (TID) loadTab(activeTab()); });
+    document.addEventListener('cq:lang', () => { paintVisLabels(); renderTenantEmpty(); if (TID) loadTab(activeTab()); });
 
     // ---- OVERVIEW ----
     $('reloadOverview').addEventListener('click', loadOverview);
     async function loadOverview() {
-      const [st, pa] = await Promise.all([
-        fetch(`${K()}/stats`, { headers: H() }).then(r=>r.json()),
-        fetch(`${K()}/params`, { headers: H() }).then(r=>r.json()),
-      ]);
+      let st, pa;
+      try {
+        [st, pa] = await Promise.all([
+          adminFetch(`${K()}/stats`, { headers: H() }).then(r => r.ok ? r.json() : null),
+          adminFetch(`${K()}/params`, { headers: H() }).then(r => r.ok ? r.json() : null),
+        ]);
+      } catch { return; }
+      if (!st || !pa) { $('statGrid').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('paramsBox').innerHTML = ''; $('healthStrip').innerHTML = ''; return; }
       const tile = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       $('statGrid').innerHTML =
         tile(st.documents, t('kba.stat.documents')) + tile(st.public_documents ?? 0, vt('stat.public')) +
@@ -432,13 +461,13 @@
       const e = pa.embedding, ch = pa.chunking, re = pa.retrieval;
       const kv = (b,s,warn) => `<div class="kv-line"><b>${b}</b><span class="${warn?'warn-flag':''}">${s}</span></div>`;
       $('paramsBox').innerHTML =
-        kv('Embedding provider', esc(e.provider)) + kv('Model', esc(e.model)) +
-        kv('Dimension (config)', e.dim) + kv('Dimension (column)', e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
+        kv(t('adm.embprov'), esc(e.provider)) + kv(t('f.model'), esc(e.model)) +
+        kv(t('f.dimension'), e.dim) + kv(t('tkb.params.columndim'), e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
         (e.dim_mismatch ? `<div class="warn-flag" style="margin:6px 0">${t('kba.warn.mismatch')}</div>` : '') +
-        kv('Chunk size / overlap', `${ch.size} / ${ch.overlap}`) +
-        kv('Retrieval threshold', re.similarity_threshold) + kv('Default top-k', re.default_top_k) +
-        kv('Distance metric', re.distance_metric) + kv('Index type', re.index_type) +
-        kv('Chunks without embedding', pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
+        kv(t('tkb.params.chunk'), `${ch.size} / ${ch.overlap}`) +
+        kv(t('tkb.params.threshold'), re.similarity_threshold) + kv(t('tkb.params.topk'), re.default_top_k) +
+        kv(t('tkb.params.metric'), re.distance_metric) + kv(t('tkb.params.index'), re.index_type) +
+        kv(t('tkb.params.noembed'), pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
     }
     function download(url) {
       fetch(url, { headers: H() }).then(r => r.blob()).then(b => {
@@ -469,27 +498,28 @@
       if ($('fTag').value.trim()) p.set('tag', $('fTag').value.trim());
       if ($('fVis').value) p.set('visibility', $('fVis').value);
       if ($('fSearch').value.trim()) p.set('q', $('fSearch').value.trim());
-      const r = await fetch(`${K()}/documents?${p}`, { headers: H() });
-      const d = r.ok ? await r.json() : { total: 0, documents: [] };
+      let r; try { r = await adminFetch(`${K()}/documents?${p}`, { headers: H() }); } catch { return; }
+      if (!r.ok) { $('docList').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('docPager').innerHTML=''; return; }
+      const d = await r.json().catch(() => ({ total: 0, documents: [] }));
       if (!Array.isArray(d.documents)) d.documents = [];
       page.total = d.total || 0;
       if (!d.documents.length) { $('docList').innerHTML = `<div class="empty">${t('kba.nodocs')}</div>`; $('docPager').innerHTML=''; return; }
       $('docList').innerHTML = `<div class="table-wrap"><table><thead><tr>
-        <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th>${t('kba.doc.tags')}</th>
-        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">${vt('col')}</th><th class="tight">src</th><th></th></tr></thead><tbody>` +
+        <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th class="hide-md">${t('kba.doc.tags')}</th>
+        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">${vt('col')}</th><th class="tight hide-md">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
         d.documents.map(x => `<tr>
           <td><input type="checkbox" class="rowsel" data-id="${x.id}"/></td>
           <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
-          <td>${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
+          <td class="hide-md">${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
           <td class="tight">${x.chunk_count}</td>
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?vt('public'):vt('internal')}</span></td>
-          <td class="tight hint">${esc(x.source_type||'—')}</td>
-          <td class="inline"><button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}">${x.visibility==='public'?vt('unpublish'):vt('publish')}</button>
-            <button class="ghost" data-act="edit" data-id="${x.id}">${t('kba.edit')}</button>
-            <button class="ghost" data-act="chunks" data-id="${x.id}">${t('kba.chunks')}</button>
-            <button class="ghost" data-act="reembed" data-id="${x.id}">${t('kba.reembed')}</button>
-            <button class="danger" data-act="del" data-id="${x.id}">${t('kba.delete')}</button></td></tr>`).join('') + `</tbody></table></div>`;
+          <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
+          <td class="inline"><button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}" title="${x.visibility==='public'?vt('unpublish'):vt('publish')}" aria-label="${x.visibility==='public'?vt('unpublish'):vt('publish')}">${x.visibility==='public'?'🚫':'📢'}</button>
+            <button class="act" data-act="edit" data-id="${x.id}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
+            <button class="act" data-act="chunks" data-id="${x.id}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
+            <button class="act" data-act="reembed" data-id="${x.id}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>
+            <button class="act danger" data-act="del" data-id="${x.id}" data-title="${esc(x.title)}" title="${t('kba.delete')}" aria-label="${t('kba.delete')}">🗑</button></td></tr>`).join('') + `</tbody></table></div>`;
       $('docList').querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
       $('docList').querySelectorAll('.rowsel').forEach(cb => cb.addEventListener('change', () => { cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); updateSelBar(); }));
       $('selAll').addEventListener('change', () => { $('docList').querySelectorAll('.rowsel').forEach(cb => { cb.checked = $('selAll').checked; cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); }); updateSelBar(); });
@@ -512,7 +542,7 @@
         else { const d = await r.json().catch(()=>({})); CQ.toast(d.detail || t('toast.error'), 'err'); }
         return;
       }
-      if (act==='del') { if(!(await CQ.confirm(t('kba.delete')+'?', {ok:t('kba.delete')}))) return;
+      if (act==='del') { if(!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', () => title || ''), {ok:t('kba.delete')}))) return;
         await fetch(`${K()}/documents/${id}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok'); loadDocuments(); return; }
       if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json().catch(()=>({}));
         // 502 when the encoder is unreachable — without the r.ok guard that toasts
@@ -553,12 +583,12 @@
       if (!Array.isArray(chunks)) { CQ.toast(t('toast.error')||'Error', 'err'); return; }
       const bg = showModal(`<h3>${t('kba.chunks')} (${chunks.length})</h3><div id="chList"></div>`);
       const render = list => { bg.querySelector('#chList').innerHTML = list.map(c => `<div class="fc-claim" style="border-left-color:${c.has_embedding?'var(--ok)':'var(--alert)'}">
-        <div class="inline" style="justify-content:space-between"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>
-          <span class="inline"><button class="ghost" data-cedit="${c.id}">${t('kba.chunk.edit')}</button><button class="danger" data-cdel="${c.id}">${t('kba.chunk.delete')}</button></span></div>
+        <div class="inline" style="justify-content:space-between; gap:8px; flex-wrap:wrap"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>
+          <span class="inline wrap"><button class="ghost" data-cedit="${c.id}">${t('kba.chunk.edit')}</button><button class="danger" data-cdel="${c.id}">${t('kba.chunk.delete')}</button></span></div>
         <div style="margin-top:6px; white-space:pre-wrap">${esc(c.content)}</div></div>`).join('') || `<div class="empty">—</div>`;
         bg.querySelectorAll('[data-cedit]').forEach(b => b.addEventListener('click', () => editChunk(id, b.dataset.cedit, bg)));
         bg.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', async () => {
-          if(!(await CQ.confirm(t('kba.chunk.delete')+'?', {ok:t('kba.delete')}))) return;
+          if(!(await CQ.confirm(t('tkb.chunk.del.confirm'), {ok:t('kba.delete')}))) return;
           await fetch(`${K()}/chunks/${b.dataset.cdel}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok');
           const fresh = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() }).then(r=>r.json()); render(fresh); loadDocuments();
         }));
@@ -601,7 +631,7 @@
       bulk('retag', tags.split(',').map(s=>s.trim()).filter(Boolean));
     });
     async function bulk(action, tags) {
-      if (action==='delete' && !(await CQ.confirm(`${t('kba.bulk.delete')} ${selected.size}?`, {ok:t('kba.delete')}))) return;
+      if (action==='delete' && !(await CQ.confirm(t('tkb.bulk.delete.confirm').replace('{n}', () => selected.size), {ok:t('kba.delete')}))) return;
       // Bulk publish is the single most consequential control on this page: it is the
       // moment internal text becomes something a customer can be shown word for word.
       // The confirmation states that plainly rather than just counting rows.
@@ -610,7 +640,7 @@
         if (!(await CQ.confirm(msg, { ok: vt(action), danger: action==='publish' }))) return;
       }
       const r = await fetch(`${K()}/bulk`, { method:'POST', headers: JH(), body: JSON.stringify({ action, document_ids:[...selected], tags }) });
-      const d = await r.json(); if (r.ok) { CQ.toast(`${action}: ${d.affected}`, 'ok'); loadDocuments(); } else CQ.toast(d.detail||'failed','err');
+      const d = await r.json(); if (r.ok) { CQ.toast(t('bulk.done.' + action).replace('{n}', d.affected ?? 0), 'ok'); loadDocuments(); } else CQ.toast(d.detail||t('toast.error'),'err');
     }
 
     // ---- IMPORT ----
@@ -782,11 +812,12 @@
     $('scanDup').addEventListener('click', loadDuplicates);
     async function loadDuplicates() {
       const box = $('dupBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const d = await fetch(`${K()}/duplicates`, { headers: H() }).then(r=>r.json());
+      let d; try { const r = await adminFetch(`${K()}/duplicates`, { headers: H() }); d = r.ok ? await r.json() : null; } catch { return; }
+      if (!d || !Array.isArray(d.exact_duplicate_groups)) { box.innerHTML = `<div class="msg err">${t('toast.error')}</div>`; return; }
       let html = '';
       if (d.exact_duplicate_groups.length) { html += `<h4>${t('kba.dup.exact')}</h4>` + d.exact_duplicate_groups.map(g => `<div class="fc-claim v-CONTRADICTED"><b>${g.count}×</b> ${g.titles.map(esc).join(', ')}<div class="hint">${g.document_ids.length} documents share identical content</div></div>`).join(''); }
       if (d.near_duplicate_pairs.length) { html += `<h4>${t('kba.dup.near')}</h4>` + d.near_duplicate_pairs.map(p => `<div class="fc-claim"><span class="pill notinkb">${(p.similarity*100).toFixed(1)}% ${t('kba.dup.sim')}</span> ${esc(p.a_title)} ↔ ${esc(p.b_title)}</div>`).join(''); }
-      if (d.near_scan_skipped) html += `<div class="hint">Near-dup scan skipped (KB too large).</div>`;
+      if (d.near_scan_skipped) html += `<div class="hint">${t('tkb.dup.skipped')}</div>`;
       box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
     }
 
@@ -1003,7 +1034,7 @@
     }
     $('curBulkAccept').addEventListener('click', async () => {
       const ids = [...curSel]; if (!ids.length) return;
-      if (!(await CQ.confirm(`${t('cur.bulk.accept')} — ${ids.length}?`, { ok: t('cur.accept'), danger: false }))) return;
+      if (!(await CQ.confirm(t('cur.bulk.confirm').replace('{n}', () => ids.length), { ok: t('cur.accept'), danger: false }))) return;
       try { await curPost(`${CUR()}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
@@ -1022,12 +1053,13 @@
     $('reloadAct').addEventListener('click', loadActivity);
     async function loadActivity() {
       const box = $('actBox');
-      const ev = (await fetch(`${K()}/activity`, { headers: H() }).then(r=>r.json())).events;
+      let ev; try { const r = await adminFetch(`${K()}/activity`, { headers: H() }); ev = r.ok ? (await r.json()).events : null; } catch { return; }
+      if (!Array.isArray(ev)) { box.innerHTML = `<div class="msg err">${t('toast.error')}</div>`; return; }
       if (!ev.length) { box.innerHTML = `<div class="empty">${t('kba.act.none')}</div>`; return; }
-      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>action</th><th>method</th><th>status</th><th>detail</th><th class="tight">chunks</th><th class="tight">ms</th><th>actor</th><th>when</th></tr></thead><tbody>` +
-        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td>${esc(e.method||'—')}</td>
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('tkb.act.filter')}</th><th class="hide-md">${t('tkb.act.method')}</th><th>${t('th.status')}</th><th>${t('tkb.act.detail')}</th><th class="tight">${t('th.chunks')}</th><th class="tight hide-md">ms</th><th>${t('tkb.act.actor')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td class="hide-md">${esc(e.method||'—')}</td>
           <td><span class="pill ${e.status==='ready'||e.status==='ok'?'ready':e.status==='error'?'error':'processing'}">${esc(e.status||'—')}</span></td>
-          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count??'—'}</td><td class="tight">${e.duration_ms??'—'}</td>
+          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count??'—'}</td><td class="tight hide-md">${e.duration_ms??'—'}</td>
           <td class="hint">${esc(e.actor||'—')}</td><td class="hint">${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`;
     }
 
@@ -1037,7 +1069,7 @@
       return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
         <div class="row">
           <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"/></div>
-          <div style="flex:0; min-width:110px"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"/></div>
+          <div class="w-num"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"/></div>
         </div>
         <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"/>
         <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}">${esc(d.guidance||'')}</textarea>
@@ -1105,7 +1137,7 @@
     // boot
     (async () => {
       const r = await fetch(`${API}/admin/tenants`, { headers: H() });
-      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); return; }
       await loadTenants();
       paintVisLabels();
     })();
