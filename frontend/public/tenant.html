@@ -529,7 +529,7 @@
       const l = CQ.lang() === 'ka' ? 'ka' : 'en';
       document.querySelectorAll('.tpl-links').forEach(el => {
         el.innerHTML = ['pdf','docx','txt','md','csv']
-          .map(x => ` <a href="templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
+          .map(x => ` <a href="guides/templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
           .join(' ·');
       });
     }
@@ -745,7 +745,7 @@
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?t('vis.public'):t('vis.internal')}</span></td>
           <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
           <td class="inline">
-            <button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}" aria-label="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}">${x.visibility==='public'?'🚫':'📢'}</button>
+            <button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}" aria-label="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}">${x.visibility==='public'?'🚫':'🤖'}</button>
             <button class="act" data-act="edit" data-id="${esc(x.id)}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
             <button class="act" data-act="chunks" data-id="${esc(x.id)}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
             <button class="act" data-act="reembed" data-id="${esc(x.id)}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>

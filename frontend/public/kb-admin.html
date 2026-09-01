@@ -304,33 +304,33 @@
        English so a missing translation degrades to a readable label, never to a raw key.
        If these ever need to appear in the tenant portal too, promote them to the DICT. */
     const VT = {
-      en: { 'col':'Visibility', 'public':'Public', 'internal':'Internal', 'all':'All',
-            'filter':'Visibility', 'publish':'Publish', 'unpublish':'Unpublish',
-            'bulk.publish':'Publish selected', 'bulk.unpublish':'Unpublish selected',
-            'stat.public':'Published',
-            'confirm.publish':'Publish {n} document(s)? The public bot may quote published documents verbatim to end customers.',
-            'confirm.unpublish':'Unpublish {n} document(s)? The public bot will stop quoting them.',
-            'confirm.publish.one':'Publish “{title}”? The public bot may quote it verbatim to end customers.',
-            'confirm.unpublish.one':'Unpublish “{title}”? The public bot will stop quoting it.',
-            'done.publish':'Published', 'done.unpublish':'Unpublished' },
-      ka: { 'col':'ხილვადობა', 'public':'საჯარო', 'internal':'შიდა', 'all':'ყველა',
-            'filter':'ხილვადობა', 'publish':'გამოქვეყნება', 'unpublish':'გამოქვეყნების გაუქმება',
-            'bulk.publish':'არჩეულის გამოქვეყნება', 'bulk.unpublish':'არჩეულის დამალვა',
-            'stat.public':'გამოქვეყნებული',
-            'confirm.publish':'გამოქვეყნდეს {n} დოკუმენტი? საჯარო ბოტს შეუძლია გამოქვეყნებული დოკუმენტი სიტყვასიტყვით მოუყვეს კლიენტს.',
-            'confirm.unpublish':'გაუქმდეს {n} დოკუმენტის გამოქვეყნება? საჯარო ბოტი მათ აღარ გამოიყენებს.',
-            'confirm.publish.one':'გამოქვეყნდეს „{title}“? საჯარო ბოტს შეუძლია იგი სიტყვასიტყვით მოუყვეს კლიენტს.',
-            'confirm.unpublish.one':'გაუქმდეს „{title}“-ის გამოქვეყნება? საჯარო ბოტი მას აღარ გამოიყენებს.',
-            'done.publish':'გამოქვეყნდა', 'done.unpublish':'გამოქვეყნება გაუქმდა' },
-      ru: { 'col':'Видимость', 'public':'Публичный', 'internal':'Внутренний', 'all':'Все',
-            'filter':'Видимость', 'publish':'Опубликовать', 'unpublish':'Снять с публикации',
-            'bulk.publish':'Опубликовать выбранные', 'bulk.unpublish':'Снять выбранные',
-            'stat.public':'Опубликовано',
-            'confirm.publish':'Опубликовать {n} документ(ов)? Публичный бот может дословно цитировать опубликованные документы клиентам.',
-            'confirm.unpublish':'Снять с публикации {n} документ(ов)? Публичный бот перестанет их цитировать.',
-            'confirm.publish.one':'Опубликовать «{title}»? Публичный бот сможет дословно цитировать его клиентам.',
-            'confirm.unpublish.one':'Снять с публикации «{title}»? Публичный бот перестанет его цитировать.',
-            'done.publish':'Опубликовано', 'done.unpublish':'Снято с публикации' },
+      en: { 'col':'Visibility', 'public':'Shared with bot', 'internal':'Internal', 'all':'All',
+            'filter':'Visibility', 'publish':'Share with bot', 'unpublish':'Stop sharing',
+            'bulk.publish':'Share selected with bot', 'bulk.unpublish':'Stop sharing selected',
+            'stat.public':'Shared with bot',
+            'confirm.publish':'Share {n} document(s) with the bot? The bot may quote shared documents word for word to end customers. Nothing is made public on the internet.',
+            'confirm.unpublish':'Stop sharing {n} document(s)? The bot will no longer use them.',
+            'confirm.publish.one':'Share “{title}” with the bot? The bot may quote it word for word to end customers. Nothing is made public on the internet.',
+            'confirm.unpublish.one':'Stop sharing “{title}”? The bot will no longer use it.',
+            'done.publish':'Shared with bot', 'done.unpublish':'Sharing stopped' },
+      ka: { 'col':'ხილვადობა', 'public':'ბოტისთვის დაშვებული', 'internal':'შიდა', 'all':'ყველა',
+            'filter':'ხილვადობა', 'publish':'ბოტისთვის დაშვება', 'unpublish':'დაშვების მოხსნა',
+            'bulk.publish':'მონიშნულის დაშვება ბოტისთვის', 'bulk.unpublish':'მონიშნულისთვის დაშვების მოხსნა',
+            'stat.public':'ბოტისთვის დაშვებული',
+            'confirm.publish':'დაეშვას {n} დოკუმენტი ბოტისთვის? ბოტი დაშვებულ დოკუმენტებს კლიენტებთან სიტყვასიტყვით ციტირებს. ინტერნეტში არაფერი ქვეყნდება.',
+            'confirm.unpublish':'მოეხსნას დაშვება {n} დოკუმენტს? ბოტი მათ აღარ გამოიყენებს.',
+            'confirm.publish.one':'დაეშვას „{title}“ ბოტისთვის? ბოტი მას კლიენტებთან სიტყვასიტყვით ციტირებს. ინტერნეტში არაფერი ქვეყნდება.',
+            'confirm.unpublish.one':'მოეხსნას დაშვება „{title}“-ს? ბოტი მას აღარ გამოიყენებს.',
+            'done.publish':'დაშვებულია ბოტისთვის', 'done.unpublish':'დაშვება მოხსნილია' },
+      ru: { 'col':'Видимость', 'public':'Доступен боту', 'internal':'Внутренний', 'all':'Все',
+            'filter':'Видимость', 'publish':'Открыть боту', 'unpublish':'Закрыть от бота',
+            'bulk.publish':'Открыть боту выбранные', 'bulk.unpublish':'Закрыть от бота выбранные',
+            'stat.public':'Доступны боту',
+            'confirm.publish':'Открыть боту {n} документ(ов)? Бот может дословно цитировать доступные документы клиентам. В интернете ничего не публикуется.',
+            'confirm.unpublish':'Закрыть от бота {n} документ(ов)? Бот перестанет их использовать.',
+            'confirm.publish.one':'Открыть боту «{title}»? Бот может дословно цитировать его клиентам. В интернете ничего не публикуется.',
+            'confirm.unpublish.one':'Закрыть от бота «{title}»? Бот перестанет его использовать.',
+            'done.publish':'Доступен боту', 'done.unpublish':'Закрыт от бота' },
     };
     const vt = k => (VT[CQ.lang()] || {})[k] || VT.en[k] || k;
     $('logout').addEventListener('click', e => { e.preventDefault();
@@ -352,7 +352,7 @@
       const l = CQ.lang() === 'ka' ? 'ka' : 'en';
       document.querySelectorAll('.tpl-links').forEach(el => {
         el.innerHTML = ['pdf','docx','txt','md','csv']
-          .map(x => ` <a href="templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
+          .map(x => ` <a href="guides/templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
           .join(' ·');
       });
     }
@@ -532,7 +532,7 @@
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?vt('public'):vt('internal')}</span></td>
           <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
-          <td class="inline"><button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}" title="${x.visibility==='public'?vt('unpublish'):vt('publish')}" aria-label="${x.visibility==='public'?vt('unpublish'):vt('publish')}">${x.visibility==='public'?'🚫':'📢'}</button>
+          <td class="inline"><button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}" title="${x.visibility==='public'?vt('unpublish'):vt('publish')}" aria-label="${x.visibility==='public'?vt('unpublish'):vt('publish')}">${x.visibility==='public'?'🚫':'🤖'}</button>
             <button class="act" data-act="edit" data-id="${x.id}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
             <button class="act" data-act="chunks" data-id="${x.id}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
             <button class="act" data-act="reembed" data-id="${x.id}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>
