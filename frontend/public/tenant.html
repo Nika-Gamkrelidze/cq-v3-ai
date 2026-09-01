@@ -168,7 +168,9 @@
             </div>
             <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
             <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
-            <span class="tpl-links"></span></div></div>
+            <span class="tpl-links"></span></div>
+            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
             <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
             <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" />
             <div class="hint" data-i18n="kb.csvhint"></div><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
@@ -464,6 +466,8 @@
             <div class="inline" style="gap:8px">
               <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
               <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+              <button class="ghost" id="scImport" data-i18n="sc.import"></button>
+              <input type="file" id="scImportFile" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" class="hidden" />
             </div>
             <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
@@ -618,6 +622,7 @@
       const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
       const title = $('i_title').value.trim(); const tags = $('i_tags').value.trim();
       const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.import')+'…';
+      let wantAI = false;
       try {
         let r;
         if (mode==='text') {
@@ -628,15 +633,35 @@
           const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error(t('kb.needfile'));
           const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags);
           fd.append('metadata', JSON.stringify(meta));
+          wantAI = mode !== 'csv' && $('i_restr').checked;
+          if (wantAI) fd.append('restructure', '1');
           r = await apiFetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
         }
         const d = await CQ.readResp(r);
         m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
-        $('i_text').value=''; $('i_file').value=''; $('i_csv').value='';
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; $('i_restr').checked=false;
         setTimeout(loadDocs, 1500); setTimeout(loadDocs, 4000);
+        if (wantAI) pollRestr(d.id);
       } catch(e){ m.className='msg err'; m.textContent = e.message; }
       finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
+
+    // A restructured import runs for minutes, far past the quick refresh timers above —
+    // poll the document until it settles and surface the outcome where the uploader is
+    // looking, instead of leaving the error as a tooltip they must hunt for.
+    async function pollRestr(id) {
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        let doc = null;
+        try { const r = await apiFetch(`${API}/kb/documents/${id}`, { headers: authH() });
+          if (r.ok) doc = await r.json(); } catch {}
+        if (!doc || !doc.status || doc.status === 'pending' || doc.status === 'processing') continue;
+        const m = $('importMsg');
+        if (doc.status === 'ready') { m.className='msg ok'; m.textContent = t('kb.restr.done'); CQ.toast(t('kb.restr.done'), 'ok'); }
+        else { m.className='msg err'; m.textContent = doc.error || t('kb.restr.fail'); CQ.toast(t('kb.restr.fail'), 'err'); }
+        loadDocs(); return;
+      }
+    }
 
     /* ==================================================================================
        KB CONSOLE
@@ -1685,6 +1710,28 @@
       return ok;
     }
     $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+
+    // Rubric import: upload a scoring-standard file (a scorecard spreadsheet, a policy
+    // DOCX...), the AI maps it to a dimensions DRAFT that lands in this editor — nothing
+    // is saved until the human presses save, so the existing version/audit flow holds.
+    $('scImport').addEventListener('click', () => $('scImportFile').click());
+    $('scImportFile').addEventListener('change', async () => {
+      const fInp = $('scImportFile'); const file = fInp.files[0]; if (!file) return;
+      const m = $('scMsg'); m.className='msg'; m.textContent = t('sc.import.loading');
+      const btn = $('scImport'); btn.disabled = true;
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await apiFetch(`${API}/scoring/import`, { method:'POST', headers: authH(), body: fd });
+        const d = await CQ.readResp(r);
+        scDims = (d.dimensions || []).map(x => ({ name:x.name||'', weight:+x.weight||0,
+          description:x.description||'', guidance:x.guidance||'' }));
+        if (d.rubric) $('scRubric').value = d.rubric;
+        scRenderDims();
+        m.className='msg ok'; m.textContent = t('sc.import.loaded');
+        CQ.toast(t('sc.import.loaded'), 'ok');
+      } catch(e) { m.className='msg err'; m.textContent = e.message || t('sc.import.fail'); CQ.toast(t('sc.import.fail'), 'err'); }
+      finally { btn.disabled = false; fInp.value=''; }
+    });
     // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
     $('scNormalize').addEventListener('click', () => {
       scReadDom(); const n = scDims.length; if (!n) return;
@@ -1698,7 +1745,7 @@
       $('scMsg').textContent=''; $('scMsg').className='msg';
       const ro = !scEditable();
       $('scReadonly').classList.toggle('hidden', !ro);
-      ['scAdd','scNormalize','scSave'].forEach(id => $(id).classList.toggle('hidden', ro));
+      ['scAdd','scNormalize','scSave','scImport'].forEach(id => $(id).classList.toggle('hidden', ro));
       $('scRubric').disabled = ro;
       try {
         const cfg = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }));

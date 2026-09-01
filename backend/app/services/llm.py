@@ -24,7 +24,6 @@ import time
 from collections.abc import AsyncIterator
 
 import anthropic
-import httpx
 
 from ..config import settings
 from ..db import pool
@@ -34,10 +33,18 @@ log = logging.getLogger("cq")
 # Per-feature timeout/retry profiles. Pass one of these as `opts=`.
 # connect is short everywhere (a slow TCP/TLS handshake is a dead upstream, not a slow model);
 # the read budget is what differs — batch work may wait, an interactive turn may not.
-ANALYSIS = dict(timeout=httpx.Timeout(60.0, connect=2.0), max_retries=1)
-COPILOT = dict(timeout=httpx.Timeout(6.0, connect=1.0), max_retries=0)
-ANSWER = dict(timeout=httpx.Timeout(25.0, connect=1.0), max_retries=1)
-CURATE = dict(timeout=httpx.Timeout(60.0, connect=2.0), max_retries=1)
+#
+# anthropic.Timeout, NOT httpx.Timeout: since the SDK vendored its HTTP stack (httpx2), a
+# Timeout built from the app-level httpx is a foreign object inside it, and every request
+# dies in the connect phase as APIConnectionError('Connection error.') — which silently took
+# every Claude feature down at once on the first image rebuild after the SDK upgrade.
+ANALYSIS = dict(timeout=anthropic.Timeout(60.0, connect=2.0), max_retries=1)
+COPILOT = dict(timeout=anthropic.Timeout(6.0, connect=1.0), max_retries=0)
+ANSWER = dict(timeout=anthropic.Timeout(25.0, connect=1.0), max_retries=1)
+CURATE = dict(timeout=anthropic.Timeout(60.0, connect=2.0), max_retries=1)
+# Background import work: nobody is staring at a spinner, and one segment can be 12k chars
+# of scorecard rows that all have to come back out as entries — give it a long read budget.
+RESTRUCTURE = dict(timeout=anthropic.Timeout(180.0, connect=2.0), max_retries=1)
 
 # How long a caller waits for an admission slot before being told to come back later.
 ADMIT_TIMEOUT_S = 1.0
@@ -49,6 +56,12 @@ class LLMError(RuntimeError):
 
 class LLMBusyError(LLMError):
     """Admission control rejected the call — the service is at its concurrency ceiling."""
+
+
+class LLMTruncatedError(LLMError):
+    """The model hit max_tokens mid-answer. A forced tool call cut off at the budget comes
+    back HTTP 200 with a PARTIAL tool input — treating it as success silently loses data,
+    so callers must either shrink the work and retry, or fail loudly."""
 
 
 # Memoized clients, keyed by (api_key, timeout, max_retries). Never closed: they are
@@ -76,9 +89,12 @@ def client(api_key: str, *, timeout, max_retries: int) -> anthropic.AsyncAnthrop
 
 
 @contextlib.asynccontextmanager
-async def _admit(feature: str):
+async def _admit(feature: str, timeout_s: float = ADMIT_TIMEOUT_S):
+    """The 1s default exists so interactive routes can 429 fast. Background callers
+    (imports, batch work) pass a long timeout_s instead — the one caller that can afford
+    to wait for a slot must not be the one that gives up after a second."""
     try:
-        await asyncio.wait_for(_LLM_SEM.acquire(), timeout=ADMIT_TIMEOUT_S)
+        await asyncio.wait_for(_LLM_SEM.acquire(), timeout=timeout_s)
     except asyncio.TimeoutError:
         log.warning("llm admission rejected (feature=%s, limit=%s)", feature,
                     settings.llm_max_concurrency)
@@ -153,24 +169,39 @@ def _wrap(exc: anthropic.APIError) -> LLMError:
 async def call_tool(*, feature: str, client_id: str | None, api_key: str, model: str,
                     system: str, user: str, tool: dict, opts: dict,
                     max_tokens: int = 4096, cache_system: bool = False,
-                    integration_id: str | None = None) -> dict:
+                    integration_id: str | None = None,
+                    admit_timeout_s: float = ADMIT_TIMEOUT_S,
+                    stream: bool = False) -> dict:
     """The house forced-tool-use pattern: one tool, tool_choice pinned to it, strict schema.
 
     Returns the tool_use block's input as a plain dict. Raises LLMError if the model answered
-    without calling the tool (which `tool_choice` makes very unlikely, but never impossible).
+    without calling the tool (which `tool_choice` makes very unlikely, but never impossible),
+    and LLMTruncatedError if the answer hit max_tokens — a truncated tool input parses as a
+    smaller-but-valid dict, so without this check the caller silently loses the cut-off tail.
+
+    `stream=True` transports the SAME call over SSE and collects the final message — the
+    result is identical. It exists because Anthropic drops long NON-streaming requests
+    ("Request timed out or interrupted... long-requests"): a big model writing thousands of
+    tokens of dense Georgian guidance takes minutes, which only a stream survives. Callers
+    whose outputs can be big (restructure, rubric import) must pass it.
     """
     cl = client(api_key, **opts)
     started = time.monotonic()
-    async with _admit(feature):
+    kwargs = dict(
+        model=model,
+        max_tokens=max_tokens,
+        system=_system_param(system, cache_system),
+        tools=[tool],
+        tool_choice={"type": "tool", "name": tool["name"]},
+        messages=[{"role": "user", "content": user}],
+    )
+    async with _admit(feature, timeout_s=admit_timeout_s):
         try:
-            message = await cl.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                system=_system_param(system, cache_system),
-                tools=[tool],
-                tool_choice={"type": "tool", "name": tool["name"]},
-                messages=[{"role": "user", "content": user}],
-            )
+            if stream:
+                async with cl.messages.stream(**kwargs) as st:
+                    message = await st.get_final_message()
+            else:
+                message = await cl.messages.create(**kwargs)
         except anthropic.APIError as exc:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
                     model=model, message=None,
@@ -181,6 +212,9 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
             model=model, message=message,
             latency_ms=int((time.monotonic() - started) * 1000), ok=True)
 
+    if getattr(message, "stop_reason", None) == "max_tokens":
+        raise LLMTruncatedError(
+            f"The model ran out of output budget ({max_tokens} tokens) before finishing.")
     for block in message.content:
         if block.type == "tool_use" and block.name == tool["name"]:
             return dict(block.input)

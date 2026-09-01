@@ -128,7 +128,9 @@
           </div>
           <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
           <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
-            <span class="tpl-links"></span></div></div>
+            <span class="tpl-links"></span></div>
+            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
           <div id="imp-text" class="hidden" style="margin-top:8px"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
           <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
             <span class="tpl-links"></span></div></div>
@@ -267,6 +269,8 @@
             <div class="inline" style="gap:8px">
               <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
               <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+              <button class="ghost" id="scImport" data-i18n="sc.import"></button>
+              <input type="file" id="scImportFile" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" class="hidden" />
             </div>
             <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
@@ -668,19 +672,39 @@
       const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
       const title = $('i_title').value.trim(), tags = $('i_tags').value.trim();
       const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      let wantAI = false;
       try {
         let r;
         if (mode==='text') { if(!$('i_text').value.trim()) throw new Error('Enter text');
           r = await fetch(`${K()}/documents/text`, { method:'POST', headers: JH(), body: JSON.stringify({ title, doc_type, text:$('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
         } else { const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if(!f) throw new Error('Choose a file');
           const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags); fd.append('metadata', JSON.stringify(meta));
+          wantAI = mode !== 'csv' && $('i_restr').checked;
+          if (wantAI) fd.append('restructure', '1');
           r = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
         }
         const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
         m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
-        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; setTimeout(loadOverview, 3000);
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; $('i_restr').checked=false; setTimeout(loadOverview, 3000);
+        const docId = d.id; if (wantAI && docId) pollRestr(docId);
       } catch(e){ m.className='msg err'; m.textContent=e.message; } finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
+
+    // A restructured import runs for minutes; poll until it settles and surface the outcome.
+    async function pollRestr(id) {
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        let doc = null;
+        try { const r = await fetch(`${K()}/documents/${id}`, { headers: H() });
+          if (r.ok) doc = await r.json(); } catch {}
+        if (!doc || !doc.status || doc.status === 'pending' || doc.status === 'processing') continue;
+        const m = $('importMsg');
+        if (doc.status === 'ready') { m.className='msg ok'; m.textContent = t('kb.restr.done'); CQ.toast(t('kb.restr.done'), 'ok'); }
+        else { m.className='msg err'; m.textContent = doc.error || t('kb.restr.fail'); CQ.toast(t('kb.restr.fail'), 'err'); }
+        loadOverview(); return;
+      }
+    }
+
 
     /* ---- RETRIEVAL CONFIDENCE (mirrors tenant.html — same product, same story) ----
        WHY: a BGE-M3 cosine score is NOT calibrated in absolute terms — only the ranking is
@@ -1122,6 +1146,26 @@
       return ok;
     }
     $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+
+    // Rubric import from file (AI draft) — mirrors the tenant editor.
+    $('scImport').addEventListener('click', () => $('scImportFile').click());
+    $('scImportFile').addEventListener('change', async () => {
+      const fInp = $('scImportFile'); const file = fInp.files[0]; if (!file) return;
+      const m = $('scMsg'); m.className='msg'; m.textContent = t('sc.import.loading');
+      const btn = $('scImport'); btn.disabled = true;
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await fetch(`${API}/admin/scoring/${TID}/import`, { method:'POST', headers: H(), body: fd });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || t('sc.import.fail'));
+        scDims = (d.dimensions || []).map(x => ({ name:x.name||'', weight:+x.weight||0,
+          description:x.description||'', guidance:x.guidance||'' }));
+        if (d.rubric) $('scRubric').value = d.rubric;
+        scRenderDims();
+        m.className='msg ok'; m.textContent = t('sc.import.loaded');
+        CQ.toast(t('sc.import.loaded'), 'ok');
+      } catch(e) { m.className='msg err'; m.textContent = e.message || t('sc.import.fail'); CQ.toast(t('sc.import.fail'), 'err'); }
+      finally { btn.disabled = false; fInp.value=''; }
+    });
     // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
     $('scNormalize').addEventListener('click', () => {
       scReadDom(); const n = scDims.length; if (!n) return;

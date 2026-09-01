@@ -227,7 +227,8 @@ def _checksum(text: str) -> str:
 
 async def ingest_document(doc_id: str, client_id: str, source_type: str,
                           *, text: str | None = None, csv_bytes: bytes | None = None,
-                          base_metadata: dict | None = None, event_id: str | None = None) -> None:
+                          base_metadata: dict | None = None, event_id: str | None = None,
+                          restructure: bool = False) -> None:
     """Background task: build chunks, embed them, store. Updates document status and,
     if given, the kb_events row (import history/audit).
 
@@ -245,6 +246,16 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
             await kb_events.finish(event_id, "processing")
         if csv_bytes is not None:
             pairs = csv_to_chunks(csv_bytes)
+            contents = [c for c, _ in pairs]
+            metas = [{**base_metadata, **m} for _, m in pairs]
+            full_text = "\n\n".join(contents)
+        elif restructure:
+            # Opt-in AI pass for files that do not follow the KB templates: Claude rewrites
+            # the raw extracted text as discrete entries, which then take the CSV rows' path —
+            # one entry, one chunk. Failures raise with an uploader-actionable sentence and
+            # land on the document as status=error via the handler below.
+            from . import kb_restructure
+            pairs = await kb_restructure.restructure(text or "", client_id=client_id)
             contents = [c for c, _ in pairs]
             metas = [{**base_metadata, **m} for _, m in pairs]
             full_text = "\n\n".join(contents)
@@ -287,8 +298,12 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
                         to_pgvector(vec), i, len(content) // 4,
                     )
         ms = int((time.monotonic() - started) * 1000)
+        # Restructured docs checksum the ORIGINAL extracted text: the model's rewrite is not
+        # deterministic, so hashing it would give the same source file a different checksum
+        # on every import and quietly break checksum-based duplicate detection.
+        checksum_src = (text or "") if restructure else full_text
         await _set_status(doc_id, "ready", chunk_count=len(contents), char_count=len(full_text),
-                          content_text=full_text[:200000], checksum=_checksum(full_text),
+                          content_text=full_text[:200000], checksum=_checksum(checksum_src),
                           ingest_ms=ms, error=None)
         if event_id:
             await kb_events.finish(event_id, "ready", chunk_count=len(contents), duration_ms=ms)
