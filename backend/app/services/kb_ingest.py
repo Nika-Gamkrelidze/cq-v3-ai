@@ -59,10 +59,28 @@ def extract_text(filename: str, content_type: str, data: bytes) -> str:
     ctype = (content_type or "").lower()
     if name.endswith(".pdf") or "pdf" in ctype:
         return _pdf_text(data)
-    if name.endswith(".docx") or "word" in ctype or "officedocument" in ctype:
+    # Legacy Office formats before the modern branches: ".doc" would otherwise fall into
+    # the docx branch via its "application/msword" content type and die inside python-docx
+    # with a parser traceback instead of a sentence the uploader can act on.
+    if name.endswith(".doc"):
+        raise ValueError("Legacy .doc is not supported — open the file in Word and save it "
+                         "as .docx, then import again.")
+    if name.endswith(".xls"):
+        raise ValueError("Legacy .xls is not supported — open the file in Excel and save it "
+                         "as .xlsx, then import again.")
+    if name.endswith(".docx") or "word" in ctype or "officedocument.wordprocessingml" in ctype:
         return _docx_text(data)
-    # txt / md / anything else -> decode as utf-8
-    return data.decode("utf-8", errors="replace")
+    if name.endswith((".xlsx", ".xlsm")) or "spreadsheet" in ctype:
+        return _xlsx_text(data)
+    # txt / md / anything else WITHOUT a known extension: accept only if it really is text.
+    # An unknown binary used to sail through this decode and die much later, in Postgres,
+    # as `invalid byte sequence for encoding "UTF8": 0x00` — an error no uploader can act on.
+    text = data.decode("utf-8", errors="replace")
+    sample = text[:4000]
+    if sample and (sample.count("\x00") + sample.count("�")) > len(sample) * 0.10:
+        raise ValueError("Unsupported file type. Supported formats: PDF, DOCX, XLSX, CSV, "
+                         "TXT, MD.")
+    return text.replace("\x00", "")
 
 
 def _pdf_text(data: bytes) -> str:
@@ -99,6 +117,50 @@ def _docx_text(data: bytes) -> str:
                 if line:
                     parts.append(line)
     return "\n".join(parts)
+
+
+def _xlsx_text(data: bytes) -> str:
+    """Every sheet, flattened row-by-row to "cell | cell" lines — same shape as DOCX tables.
+
+    Real spreadsheets are not clean grids: QA scorecards arrive with merged section
+    banners, label/value preamble rows, spacer columns and cached formula errors
+    ("#REF!"). This makes no attempt to understand the layout — it preserves every
+    non-empty cell in reading order so the facts are searchable, and drops cells whose
+    only content is a formula error (noise that would otherwise embed as "#REF! | #REF!").
+    Merged ranges keep their value in the top-left cell only, which is exactly what we
+    want: the banner text appears once.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        parts: list[str] = []
+        for ws in wb.worksheets:
+            sheet_parts: list[str] = []
+            for row in ws.iter_rows(values_only=True):
+                cells = []
+                for v in row:
+                    if v is None:
+                        continue
+                    s = str(v).strip()
+                    if not s or s in _XLSX_FORMULA_ERRORS:
+                        continue
+                    cells.append(s)
+                if cells:
+                    sheet_parts.append(" | ".join(cells))
+            if sheet_parts:
+                # Name the sheet only in multi-sheet workbooks: a lone default "Sheet1"
+                # label adds nothing, but "წონები" vs "შეფასება" disambiguates retrieval.
+                if len(wb.worksheets) > 1:
+                    parts.append(f"[{ws.title}]")
+                parts.extend(sheet_parts)
+                parts.append("")
+        return "\n".join(parts).strip()
+    finally:
+        wb.close()
+
+
+_XLSX_FORMULA_ERRORS = {"#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NULL!", "#NUM!"}
 
 
 # ---- chunking --------------------------------------------------------------

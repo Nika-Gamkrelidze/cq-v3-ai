@@ -152,6 +152,14 @@ async def upload_document(
         raise HTTPException(status_code=413, detail="File exceeds 25 MB limit")
     tag_list = _parse_json(tags, None) or [t.strip() for t in tags.split(",") if t.strip()]
     meta = _parse_json(metadata, {})
+    # A CSV dropped into the generic file box gets the same row-per-chunk treatment as the
+    # dedicated CSV path — decoded as one text blob it loses its row/field structure.
+    if (file.filename or "").lower().endswith(".csv") or "csv" in (file.content_type or "").lower():
+        doc_id = await _create_doc(client_id, doc_type, title or file.filename, "csv",
+                                   file.filename, meta, tag_list)
+        bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "csv",
+                    csv_bytes=data, base_metadata=meta)
+        return {"id": doc_id, "status": "pending", "title": title or file.filename}
     try:
         # pypdf/python-docx parsing is synchronous and CPU-bound; running it inline here
         # blocked the single event loop for the whole parse, stalling every other request.
