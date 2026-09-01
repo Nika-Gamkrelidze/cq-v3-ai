@@ -72,9 +72,33 @@ def _pdf_text(data: bytes) -> str:
 
 
 def _docx_text(data: bytes) -> str:
+    """Body text AND tables, in document order.
+
+    `document.paragraphs` alone silently DROPS every table — and real customer documents
+    (tariffs, product terms, SLA sheets) keep their load-bearing facts in tables. Verified
+    with a real installment-terms document: paragraphs-only extraction lost the amount,
+    term and rate rows entirely. Table rows are flattened to "cell | cell" lines, which
+    both embeds and reads back well.
+    """
     import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     document = docx.Document(io.BytesIO(data))
-    return "\n".join(p.text for p in document.paragraphs)
+    parts: list[str] = []
+    for child in document.element.body.iterchildren():
+        tag = child.tag
+        if tag.endswith('}p'):
+            t = Paragraph(child, document).text
+            if t.strip():
+                parts.append(t)
+        elif tag.endswith('}tbl'):
+            for row in Table(child, document).rows:
+                cells = [c.text.strip() for c in row.cells]
+                line = " | ".join(dict.fromkeys(c for c in cells if c))  # dedupe merged cells
+                if line:
+                    parts.append(line)
+    return "\n".join(parts)
 
 
 # ---- chunking --------------------------------------------------------------
@@ -170,11 +194,16 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
 
         ms = int((time.monotonic() - started) * 1000)
         if not contents:
-            await _set_status(doc_id, "ready", chunk_count=0, char_count=len(full_text),
-                              content_text=full_text[:200000], checksum=_checksum(full_text),
-                              ingest_ms=ms, error=None)
+            # No extractable text is a FAILURE the uploader must see, not a quiet "ready"
+            # with zero chunks: a scanned (image-only) PDF used to import as ready while
+            # contributing nothing to search, fact-check or the bot — the user believed
+            # their document was in the knowledge base when it was invisible.
+            msg = ("No readable text found in the file. If this is a scanned document, "
+                   "run OCR or export a text-based version, then import again.")
+            await _set_status(doc_id, "error", chunk_count=0, char_count=len(full_text),
+                              ingest_ms=ms, error=msg)
             if event_id:
-                await kb_events.finish(event_id, "ready", chunk_count=0, duration_ms=ms)
+                await kb_events.finish(event_id, "error", detail=msg, duration_ms=ms)
             return
 
         vectors = await _embed_batched(contents)
