@@ -380,6 +380,12 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
 .cq-seek::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--beam); border:2px solid var(--card-solid); }
 .cq-seek:focus-visible { outline:none; } .cq-seek:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px rgba(250,59,60,.3); }
 
+/* ---- "Coming soon" placeholder (feature not launched yet) ---- */
+.soon-card { text-align:center; padding:52px 24px; border:1px dashed var(--hairline); border-radius:14px; }
+.soon-card .soon-emoji { font-size:44px; display:block; margin-bottom:12px; }
+.soon-card h3 { margin:0 0 8px; font-size:21px; }
+.soon-card p { margin:0 auto; max-width:520px; color:var(--muted); font-size:14px; line-height:1.55; }
+
 @media (max-width:900px) {
   .row > div { min-width:150px; }
   .stack-md > div { min-width:100% !important; }

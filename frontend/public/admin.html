@@ -149,6 +149,15 @@
       </section>
       <!-- BOT CONTROL — the 3am brake. State first, one click to act, no settings blob. -->
       <section class="panel" id="panel-bot">
+        <!-- The bot has not launched: tenants see a "Coming soon" tab. The brake below stays
+             visible for the operator (it is a safety control), with this banner for context. -->
+        <div class="card">
+          <div class="soon-card" style="border:none; padding:26px 20px">
+            <span class="soon-emoji">🤖</span>
+            <h3 data-i18n="bot.soon.title"></h3>
+            <p data-i18n="bot.soon.desc.admin"></p>
+          </div>
+        </div>
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">

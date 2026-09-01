@@ -364,6 +364,15 @@
           <div class="msg err hidden" id="botLoadMsg"></div>
         </div>
 
+        <!-- Shown instead of the config form while the bot has not launched (BOT_COMING_SOON). -->
+        <div class="card hidden" id="botSoon">
+          <div class="soon-card" style="border:none; padding:44px 20px">
+            <span class="soon-emoji">🤖</span>
+            <h3 data-i18n="bot.soon.title"></h3>
+            <p data-i18n="bot.soon.desc"></p>
+          </div>
+        </div>
+
         <div id="botForm" class="hidden">
           <!-- Autopilot: the one switch that points a model at the public internet. -->
           <div class="card">
@@ -1495,6 +1504,9 @@
     // If that route is not deployed yet the tab says so rather than throwing: a tenant seeing
     // a dead tab must be told it is the server, not their browser.
     const BOTCFG = `${API}/chat/config`;
+    // The bot has not launched yet: the tab shows a "Coming soon" card instead of the config
+    // form. Flip to false when the bot ships — everything below is wired and ready.
+    const BOT_COMING_SOON = true;
     const BOT_LANGS = ['en','ka','ru'];
     let botCfg = null;
 
@@ -1537,6 +1549,12 @@
 
     $('reloadBot').addEventListener('click', loadBot);
     async function loadBot() {
+      if (BOT_COMING_SOON) {
+        $('botSoon').classList.remove('hidden');
+        $('botForm').classList.add('hidden'); $('botLoadMsg').classList.add('hidden');
+        $('botState').classList.add('hidden'); $('reloadBot').classList.add('hidden');
+        return;
+      }
       const m = $('botLoadMsg'); m.classList.add('hidden'); m.textContent = '';
       let d = null;
       try {
