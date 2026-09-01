@@ -127,9 +127,11 @@
             <div><label data-i18n="kba.doc.tags"></label><input id="i_tags" placeholder="a, b" /></div>
           </div>
           <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
-          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div></div>
           <div id="imp-text" class="hidden" style="margin-top:8px"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div></div>
           <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
           <div class="msg" id="importMsg"></div>
         </div>
@@ -342,6 +344,20 @@
       return r;
     }
 
+
+    // Template download links under the importer: users copy a working structure instead of
+    // guessing. Language-matched (KA files for the Georgian UI, EN otherwise), repainted on
+    // every language switch.
+    function paintTplLinks() {
+      const l = CQ.lang() === 'ka' ? 'ka' : 'en';
+      document.querySelectorAll('.tpl-links').forEach(el => {
+        el.innerHTML = ['pdf','docx','txt','md','csv']
+          .map(x => ` <a href="templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
+          .join(' ·');
+      });
+    }
+    paintTplLinks();
+    document.addEventListener('cq:lang', paintTplLinks);
     // modal
     function showModal(inner) {
       const bg = document.createElement('div'); bg.className = 'cq-modal-bg';

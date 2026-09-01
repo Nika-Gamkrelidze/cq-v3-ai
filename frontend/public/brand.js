@@ -252,6 +252,7 @@ const CQ = (() => {
       'role.owner':'Owner',
       'adm.user.newpw':'New password (leave empty to keep)',
       'adm.user.saved':'User updated',
+      'kb.templates':'Sample files to copy:',
     },
     ka: {
       'nav.public':'საჯარო აპლიკაცია','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'ცოდნის ბაზა',
@@ -474,6 +475,7 @@ const CQ = (() => {
       'role.owner':'მფლობელი',
       'adm.user.newpw':'ახალი პაროლი (ცარიელი — უცვლელი)',
       'adm.user.saved':'მომხმარებელი განახლდა',
+      'kb.templates':'ნიმუშის ფაილები:',
     },
     ru: {
       'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'База знаний',
@@ -696,6 +698,7 @@ const CQ = (() => {
       'role.owner':'Владелец',
       'adm.user.newpw':'Новый пароль (пусто — не менять)',
       'adm.user.saved':'Пользователь обновлён',
+      'kb.templates':'Файлы-образцы:',
     },
   };
   let LANG = (() => { try { return localStorage.getItem('cq_lang') || (navigator.language||'en').slice(0,2); } catch { return 'en'; } })();
