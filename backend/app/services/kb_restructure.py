@@ -32,6 +32,7 @@ restructure that loses data must surface as an error the uploader sees, never a 
 """
 import asyncio
 import logging
+import re
 
 from . import llm, settings_store
 
@@ -114,7 +115,13 @@ SYSTEM = (
     "- One fact/rule/criterion/row per entry. Merge lines only when they are one fact split "
     "by formatting.\n"
     "- Skip layout debris that carries no meaning (lone punctuation, page numbers, empty "
-    "headers), but never skip data."
+    "headers), but never skip data.\n"
+    "- Document titles, brand lines and section banners ARE data — including anything "
+    "before the first heading. Make an entry for what they name.\n"
+    "- Keep EVERY name variant: when a product/section has names in two languages "
+    "(e.g. 'იპოთეკური სესხი (Mortgage Loan)'), every entry for it must carry both.\n"
+    "- One fact per entry: never bundle unrelated values (a phone number and a URL) "
+    "into one entry."
 )
 
 
@@ -143,6 +150,110 @@ def _bisect(seg: str) -> list[str]:
     if cut < MIN_SEGMENT_CHARS // 2:
         cut = mid
     return [p for p in (seg[:cut], seg[cut:]) if p.strip()]
+
+
+# ---- coverage verification -------------------------------------------------
+# The model CAN silently drop content: verified in production against a real loans DOCX —
+# the pre-heading brand banner and 3 of 4 parenthetical English product names never made
+# it into the entries, with every number intact. Trusting the output is not an option, so
+# this gate deterministically extracts the tokens that must survive VERBATIM and proves
+# each one appears in the output; what is missing gets one targeted repair call, and what
+# is still missing after that fails the import loudly, naming the lost fragments.
+
+_URL_RE = re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b", re.IGNORECASE)
+# Real TLDs only: without this, PDF-extraction artifacts like "loans.Read" (a glued
+# sentence boundary) become mandatory "URLs" and fail legitimate rewrites.
+_TLDS = {"ge", "com", "net", "org", "io", "edu", "gov", "info", "biz", "me", "eu", "ru",
+         "uk", "de", "fr", "ai", "app", "dev", "online", "site", "shop", "cloud"}
+_PHONE_RE = re.compile(r"\d(?:[\d \-]{5,})\d")
+_PCT_RE = re.compile(r"\d+(?:[.,]\d+)?\s*%")
+_NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
+_LATIN_RE = re.compile(r"[A-Za-z]{3,}")
+_THOUSANDS_RE = re.compile(r"(?<=\d)[ ,](?=\d{3}\b)")
+
+
+def _significant_tokens(text: str, *, include_latin: bool
+                        ) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """(token -> example source line, phone-token -> component number groups).
+
+    Tokens are the things a rewrite must carry verbatim: URLs, phone numbers (normalized
+    to digits), percentages, multi-digit numbers (thousand separators collapsed), and —
+    in a predominantly non-Latin document — Latin-script words, because there they are
+    product/brand names, not prose. The component map lets a digit run that is really a
+    RANGE ("2024 - 2025", "100 000 - 500 000") pass when the rewrite keeps both numbers
+    but not adjacent, while a many-group run (a real phone) still demands contiguity.
+    """
+    out: dict[str, str] = {}
+    comps: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        work = line
+        for m in _URL_RE.findall(work):
+            tld = m.rsplit(".", 1)[-1].lower()
+            if m == m.lower() and tld in _TLDS and not m.replace(".", "").isdigit():
+                out.setdefault("u:" + m, line)
+        work = _URL_RE.sub(" ", work)
+
+        def _phone_repl(match):
+            digits = re.sub(r"\D", "", match.group())
+            if len(digits) < 7:
+                return match.group()     # not a phone: leave for the number pass below
+            tok = "t:" + digits
+            out.setdefault(tok, line)
+            groups = re.findall(r"\d{2,}", match.group())   # raw: phones keep >3 groups
+            comps.setdefault(tok, groups)
+            return " "
+        work = _PHONE_RE.sub(_phone_repl, work)
+
+        work = _THOUSANDS_RE.sub("", work)
+        for m in _PCT_RE.findall(work):
+            out.setdefault("p:" + re.sub(r"[\s%]", "", m).replace(",", "."), line)
+        work = _PCT_RE.sub(" ", work)
+        for m in _NUM_RE.findall(work):
+            if len(m) >= 2:                      # lone digits are list markers
+                out.setdefault("n:" + m.replace(",", "."), line)
+        if include_latin:
+            for m in _LATIN_RE.findall(line):
+                out.setdefault("l:" + m.lower(), line)
+    return out, comps
+
+
+def _latin_light(text: str) -> bool:
+    """True when Latin letters are the minority script (Georgian/Russian documents) —
+    exactly when a Latin word is a NAME that must survive, not rephraseable prose.
+    Covers all three Georgian scripts (Mkhedruli, Asomtavruli, Mtavruli) and Cyrillic."""
+    latin = len(re.findall(r"[A-Za-z]", text))
+    other = len(re.findall(r"[\u10A0-\u10FF\u1C90-\u1CBF\u0400-\u04FF]", text))
+    return other > 0 and latin < (latin + other) * 0.3
+
+
+def _num_present(val: str, hay: str) -> bool:
+    """Number match with digit boundaries: a dropped "12" is NOT satisfied by "120"."""
+    return re.search(r"(?<!\d)" + re.escape(val) + r"(?!\d)", hay) is not None
+
+
+def _missing_tokens(source: str, output: str) -> dict[str, str]:
+    """Which of the source's significant tokens do NOT appear in the output."""
+    # One normalized haystack: thousands collapsed, decimal commas -> dots, lowercased —
+    # so "100 000", "100,000" and "21,5" match their source forms symmetrically.
+    hay = _THOUSANDS_RE.sub("", output).lower().replace(",", ".")
+    hay_digits = re.sub(r"\D", "", output)
+    tokens, comps = _significant_tokens(source, include_latin=_latin_light(source))
+    missing: dict[str, str] = {}
+    for tok, line in tokens.items():
+        kind, val = tok[:2], tok[2:]
+        if kind == "t:":
+            # Contiguous digits = the phone survived as one value. Otherwise a run of
+            # up to 3 groups is a range/spaced amount — every group present counts.
+            groups = comps.get(tok) or []
+            ok = val in hay_digits or (
+                0 < len(groups) <= 3 and all(_num_present(g, hay) for g in groups))
+        elif kind in ("p:", "n:"):
+            ok = _num_present(val, hay)
+        else:
+            ok = val in hay
+        if not ok:
+            missing[tok] = line
+    return missing
 
 
 def _normalize(raw: dict) -> list[dict]:
@@ -224,6 +335,48 @@ async def restructure(text: str, *, client_id: str | None) -> list[tuple[str, di
     if not entries:
         raise RestructureError("AI restructuring produced no entries from this file. "
                                "Import it without restructuring instead.")
+
+    # Coverage gate: every significant source token must appear in the entries. One
+    # targeted repair call for the gaps; whatever survives that fails the import loudly.
+    def _joined() -> str:
+        return "\n".join(f"{e['topic']}\n{e['content']}" for e in entries)
+
+    # Pure-CPU token scan over up to 100k+100k chars: off the event loop, like chunking.
+    missing = await asyncio.to_thread(_missing_tokens, text, _joined())
+    repair_failed: str | None = None
+    if missing:
+        lines = list(dict.fromkeys(missing.values()))[:80]
+        log.warning("kb_restructure coverage gap client=%s tokens=%d — repairing",
+                    client_id, len(missing))
+        repair_user = ("Your earlier conversion of this document MISSED the facts below. "
+                       "Create knowledge-base entries covering EVERY fragment, keeping all "
+                       "names, numbers and values verbatim:\n\n<missed>\n"
+                       + "\n".join(lines) + "\n</missed>")
+        async with _gate:
+            try:
+                raw = await llm.call_tool(
+                    feature="kb_restructure", client_id=client_id, api_key=api_key,
+                    model=model, system=SYSTEM, user=repair_user, tool=RESTRUCTURE_TOOL,
+                    opts=llm.RESTRUCTURE, max_tokens=MAX_OUTPUT_TOKENS, cache_system=True,
+                    admit_timeout_s=ADMIT_PATIENCE_S, stream=True)
+                entries.extend(_normalize(raw))
+            except llm.LLMError as exc:
+                repair_failed = exc.__class__.__name__
+                log.error("kb_restructure repair call failed (client=%s): %s", client_id, exc)
+        missing = await asyncio.to_thread(_missing_tokens, text, _joined())
+        if missing:
+            if repair_failed:
+                # The repair CALL failed — an infrastructure error, not proven data loss;
+                # saying "lost facts" here would blame the document for a network blip.
+                raise RestructureError(
+                    f"AI restructuring failed partway through ({repair_failed}). "
+                    "Nothing was imported — try again, or import without restructuring.")
+            frags = list(dict.fromkeys(missing.values()))
+            shown = "; ".join(f"\u00ab{fr[:60]}\u00bb" for fr in frags[:5])
+            raise RestructureError(
+                f"AI restructuring lost {len(missing)} fact(s) from the document, e.g.: "
+                f"{shown}. Nothing was imported — try again, or import without "
+                "restructuring.")
 
     out: list[tuple[str, dict]] = []
     for e in entries:
