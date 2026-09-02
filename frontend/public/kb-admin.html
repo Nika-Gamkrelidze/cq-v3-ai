@@ -127,12 +127,12 @@
             <div><label data-i18n="kba.doc.tags"></label><input id="i_tags" placeholder="a, b" /></div>
           </div>
           <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
-          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
             <span class="tpl-links"></span></div>
             <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
             <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
           <div id="imp-text" class="hidden" style="margin-top:8px"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
             <span class="tpl-links"></span></div></div>
           <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
           <div class="msg" id="importMsg"></div>
@@ -677,16 +677,40 @@
         let r;
         if (mode==='text') { if(!$('i_text').value.trim()) throw new Error('Enter text');
           r = await fetch(`${K()}/documents/text`, { method:'POST', headers: JH(), body: JSON.stringify({ title, doc_type, text:$('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
-        } else { const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if(!f) throw new Error('Choose a file');
-          const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags); fd.append('metadata', JSON.stringify(meta));
+          const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
+          m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
+        } else {
+          // Several files of any accepted type at once — one request per file, so a bad
+          // file fails alone and is named, instead of aborting the whole batch.
+          const files = [...(mode==='csv'?$('i_csv'):$('i_file')).files];
+          if (!files.length) throw new Error('Choose a file');
           wantAI = mode !== 'csv' && $('i_restr').checked;
-          if (wantAI) fd.append('restructure', '1');
-          r = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
+          const failed = [], made = [];
+          for (let i = 0; i < files.length; i++) {
+            m.className='msg'; m.textContent = t('kb.files.progress')
+              .replace('{done}', () => i + 1).replace('{total}', () => files.length);
+            const fd = new FormData(); fd.append('file', files[i]); fd.append('doc_type', doc_type);
+            fd.append('title', files.length === 1 ? title : ''); fd.append('tags', tags);
+            fd.append('metadata', JSON.stringify(meta));
+            if (wantAI) fd.append('restructure', '1');
+            try {
+              const rr = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
+              const dd = await rr.json(); if (!rr.ok) throw new Error(dd.detail || 'Import failed');
+              if (dd && dd.id) made.push(dd.id);
+            } catch (err) { failed.push(`${files[i].name} — ${err.message}`); }
+          }
+          if (failed.length) {
+            m.className = 'msg err';
+            m.textContent = `${t('kb.files.done').replace('{n}', () => made.length)} ${t('kb.files.failed')} ${failed.join(' · ')}`;
+            CQ.toast(t('toast.error'), 'err');
+          } else {
+            m.className = 'msg ok';
+            m.textContent = t('kb.files.done').replace('{n}', () => made.length);
+            CQ.toast(t('toast.imported'), 'ok');
+          }
+          if (wantAI) made.forEach(pollRestr);
         }
-        const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
-        m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
         $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; $('i_restr').checked=false; setTimeout(loadOverview, 3000);
-        const docId = d.id; if (wantAI && docId) pollRestr(docId);
       } catch(e){ m.className='msg err'; m.textContent=e.message; } finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
 
