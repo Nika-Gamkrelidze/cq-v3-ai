@@ -9,12 +9,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="brand.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="favicon.png" />
   <script src="brand.js"></script>
 </head>
 <body>
   <div id="cq-header"></div>
-  <main>
+  <main class="console">
     <div id="app" class="hidden">
       <div class="tabs">
         <div class="tab active" data-tab="tenants" data-i18n="adm.tenants"></div>
@@ -75,7 +75,9 @@
             <div><label data-i18n="adm.maxanalyses"></label><input id="a_analyses" type="number" /></div>
             <div><label data-i18n="adm.maxmb"></label><input id="a_mb" type="number" /></div>
             <div><label data-i18n="adm.maxtts"></label><input id="a_tts" type="number" /></div>
+            <div><label data-i18n="adm.retention"></label><input id="a_retention" type="number" min="0" /></div>
           </div>
+          <div class="hint" data-i18n="adm.retention.hint"></div>
           <h4 data-i18n="adm.features"></h4>
           <div class="inline" style="gap:18px">
             <label class="inline" style="gap:6px"><input type="checkbox" id="f_analyze" /> <span data-i18n="feat.analyze"></span></label>
@@ -83,6 +85,15 @@
           </div>
           <div class="actions"><button class="primary" id="saveAnon" data-i18n="btn.savelimits"></button></div>
           <div class="msg" id="anonMsg"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="adm.sentiment.heading"></h3>
+          <p class="hint" data-i18n="adm.sentiment.desc"></p>
+          <label class="inline" style="gap:8px"><input type="checkbox" id="sn_enabled" /> <span data-i18n="sn.enabled"></span></label>
+          <label data-i18n="sn.guidance"></label>
+          <textarea id="sn_guidance" data-i18n-ph="sn.guidance.ph" style="min-height:80px"></textarea>
+          <div class="actions"><button class="primary" id="saveSentiment" data-i18n="sn.save"></button></div>
+          <div class="msg" id="sentimentMsg"></div>
         </div>
       </section>
 
@@ -138,6 +149,15 @@
       </section>
       <!-- BOT CONTROL — the 3am brake. State first, one click to act, no settings blob. -->
       <section class="panel" id="panel-bot">
+        <!-- The bot has not launched: tenants see a "Coming soon" tab. The brake below stays
+             visible for the operator (it is a safety control), with this banner for context. -->
+        <div class="card">
+          <div class="soon-card" style="border:none; padding:26px 20px">
+            <span class="soon-emoji">🤖</span>
+            <h3 data-i18n="bot.soon.title"></h3>
+            <p data-i18n="bot.soon.desc.admin"></p>
+          </div>
+        </div>
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">
@@ -163,6 +183,7 @@
   <script>
     const API = CQ.API, t = CQ.t;
     CQ.mountHeader({ tag: 'Console', nav: [
+      { i18n: 'nav.console', href: 'admin.html' },
       { i18n: 'nav.kb', href: 'kb-admin.html' },
       { i18n: 'nav.logout', href: '#', id: 'logout' },
       { i18n: 'nav.public', href: 'index.html' },
@@ -173,7 +194,16 @@
     const jhdr = () => hdr({ 'Content-Type': 'application/json' });
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
+    $('logout').addEventListener('click', e => { e.preventDefault();
+      sessionStorage.removeItem('cq_admin_token'); sessionStorage.removeItem('cq_tenant_token');
+      location.replace('tenant.html'); });
+    // Central 401 interception: an expired admin token lands on the sign-in page instead of
+    // silently no-op'ing every Refresh and turning saves into 'Save failed'.
+    async function adminFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=admin.html'); throw new Error('unauthorized'); }
+      return r;
+    }
     CQ.enhanceSelects();
 
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
@@ -187,36 +217,52 @@
       // The kill-switch pills/buttons are built in JS, so data-i18n cannot retranslate them.
       if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); } });
 
-    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadTenants(), loadVoices()]); }
+    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadSentimentSettings(), loadTenants(), loadVoices()]); }
 
     // Login happens on the unified sign-in page; this console is token-gated only.
+    let settingsLoaded = false;   // guards saveInt: never PUT fields that never loaded
     async function boot() {
-      if (!TOKEN) { location.replace('tenant.html'); return; }
-      const r = await fetch(`${API}/admin/settings`, { headers: hdr() });
-      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      if (!TOKEN) { location.replace('tenant.html?next=admin.html'); return; }
+      try {
+        const r = await fetch(`${API}/admin/settings`, { headers: hdr() });
+        if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=admin.html'); return; }
+        if (!r.ok) throw new Error('http ' + r.status);
+      } catch {
+        // API/proxy down: a visible retry state, not a permanently blank page.
+        const main = document.querySelector('main');
+        const box = document.createElement('div');
+        box.className = 'card'; box.style.textAlign = 'center';
+        box.innerHTML = `<p>${t('err.unavailable')}</p>`;
+        const rb = document.createElement('button'); rb.className = 'primary'; rb.textContent = t('btn.retry');
+        rb.addEventListener('click', () => location.reload());
+        box.appendChild(rb); main.prepend(box);
+        return;
+      }
       $('app').classList.remove('hidden');
-      await loadAll();
+      await loadAll().catch(() => {});
     }
 
     // integrations
     const INT_FIELDS = ['llm_model','stt_model','tts_model','tts_voice_id','analysis_instructions'];
     async function loadIntegrations() {
-      const r = await fetch(`${API}/admin/settings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      const r = await adminFetch(`${API}/admin/settings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
       INT_FIELDS.forEach(f => { if ($(f)) $(f).value = d[f] ?? ''; }); CQ.syncSelect($('llm_model'));
+      settingsLoaded = true;   // fields are populated — Save is safe from here on
       $('anthropicHint').textContent = d.anthropic_api_key_set ? `Key set (${d.anthropic_api_key_hint}).` : 'No key set.';
       $('elevenlabsHint').textContent = d.elevenlabs_api_key_set ? `Key set (${d.elevenlabs_api_key_hint}).` : 'No key set.';
     }
     $('saveInt').addEventListener('click', async () => {
       const m = $('intMsg'); m.className='msg'; m.textContent='';
+      if (!settingsLoaded) { m.className='msg err'; m.textContent = t('err.unavailable'); return; }
       const patch = {}; INT_FIELDS.forEach(f => patch[f] = $(f).value);
       if ($('anthropic_api_key').value.trim()) patch.anthropic_api_key = $('anthropic_api_key').value.trim();
       if ($('elevenlabs_api_key').value.trim()) patch.elevenlabs_api_key = $('elevenlabs_api_key').value.trim();
-      const r = await fetch(`${API}/admin/settings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      const r = await adminFetch(`${API}/admin/settings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
       if (r.ok) { $('anthropic_api_key').value=''; $('elevenlabs_api_key').value=''; await loadIntegrations();
         // a new ElevenLabs key may mean a different account -> refresh the voice list + preview map
         voicesFetched = false; voiceMap = {}; await loadVoices();
         m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
-      else { const d = await r.json().catch(()=>({})); m.className='msg err'; m.textContent = d.detail || 'Save failed'; }
+      else { const d = await r.json().catch(()=>({})); m.className='msg err'; m.textContent = d.detail || t('toast.error'); }
     });
     // One row per CAPABILITY, not per vendor. A single green "ElevenLabs" row used to hide a
     // key that could list voices but not transcribe — the capabilities carry separate
@@ -231,7 +277,7 @@
       box.innerHTML=''; $('testInt').disabled=true; $('testDeep').disabled=true;
       btn.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
       try {
-        const r = await fetch(`${API}/admin/test${deep?'?deep=true':''}`, { method:'POST', headers: hdr() });
+        const r = await adminFetch(`${API}/admin/test${deep?'?deep=true':''}`, { method:'POST', headers: hdr() });
         const d = await r.json();
         const order = Array.isArray(d.order) ? d.order : Object.keys(CAP_LABEL).filter(k => d[k]);
         box.innerHTML = order.map(k => {
@@ -250,7 +296,7 @@
     let voiceMap = {}, voicesFetched = false;
     // Admin-side map MUST come from /admin/voices (unfiltered): the public /voices is now
     // curated, so a hidden voice would miss the map and fall through to a paid POST /tts.
-    async function fetchVoices(){ if (voicesFetched) return; try { const r = await fetch(`${API}/admin/voices`, { headers: hdr() }); if(!r.ok) return;
+    async function fetchVoices(){ if (voicesFetched) return; try { const r = await adminFetch(`${API}/admin/voices`, { headers: hdr() }); if(!r.ok) return;
       const d = await r.json(); (Array.isArray(d.voices) ? d.voices : []).forEach(v => { if (v.preview_url) voiceMap[v.voice_id] = v.preview_url; }); voicesFetched = true; } catch{} }
     $('voicePreviewBtn').addEventListener('click', async () => {
       const box = $('voicePreviewAudio'); box.innerHTML=''; const vid = $('tts_voice_id').value.trim(); if(!vid) return;
@@ -273,7 +319,7 @@
       const prev = v.preview_url
         ? `<button class="ghost v-prev" type="button" data-id="${esc(v.voice_id)}" aria-label="Preview">▶</button>`
         : `<span class="chip" data-i18n="v.nopreview"></span>`;
-      return `<div class="inline v-row" style="gap:10px; padding:7px 0; border-bottom:1px solid var(--hairline)">
+      return `<div class="inline v-row" style="gap:10px; padding:7px 0; border-bottom:1px solid var(--hairline); flex-wrap:wrap; row-gap:4px">
         <input type="checkbox" class="v-tick" data-id="${esc(v.voice_id)}" ${v.selected?'checked':''} ${v.system?'disabled':''} />
         ${prev}
         <span style="flex:1">${esc(v.name || v.voice_id)}</span>
@@ -293,7 +339,7 @@
     function updateVCount(){ $('v_count').textContent = $('voicesList').querySelectorAll('.v-tick:checked').length; }
     async function loadVoices() {
       const m = $('voicesMsg'); m.className='msg'; m.textContent='';
-      const r = await fetch(`${API}/admin/voices`, { headers: hdr() });
+      const r = await adminFetch(`${API}/admin/voices`, { headers: hdr() });
       if (!r.ok) { m.className='msg err'; m.textContent = t('v.loadfail'); return; }
       const d = await r.json();
       VOICES = Array.isArray(d.voices) ? d.voices : [];
@@ -316,7 +362,7 @@
       const mode = $('v_restrict').checked ? 'allowlist' : 'all';
       if (mode === 'allowlist' && !ids.length) { m.className='msg err'; m.textContent = t('v.pickone'); return; }
       const b = $('saveVoices'); b.disabled=true; b.innerHTML='<span class="spinner"></span>';
-      const r = await fetch(`${API}/admin/voices`, { method:'PUT', headers: jhdr(), body: JSON.stringify({ mode, voice_ids: ids }) });
+      const r = await adminFetch(`${API}/admin/voices`, { method:'PUT', headers: jhdr(), body: JSON.stringify({ mode, voice_ids: ids }) });
       const d = await r.json(); b.disabled=false; b.textContent=t('btn.savesettings');
       if (r.ok) { VOICES = d.voices||[]; $('v_restrict').checked = d.mode==='allowlist'; window._vd = d; renderVoices(d);
         voicesFetched = false; voiceMap = {};   // integrations preview map may be stale
@@ -326,7 +372,7 @@
 
     // embeddings
     async function loadEmbeddings() {
-      const r = await fetch(`${API}/admin/embeddings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      const r = await adminFetch(`${API}/admin/embeddings`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
       $('e_provider').value = d.provider || 'tei'; CQ.syncSelect($('e_provider'));
       $('e_model').value = d.model || ''; $('e_base_url').value = d.base_url || '';
       $('e_dim').value = d.dim || ''; $('e_hint').textContent = d.api_key_set ? `API key set (${d.api_key_hint}).` : 'No API key set.';
@@ -335,47 +381,62 @@
       const m = $('embMsg'); m.className='msg'; m.textContent='';
       const patch = { provider: $('e_provider').value, model: $('e_model').value, base_url: $('e_base_url').value, dim: parseInt($('e_dim').value)||undefined };
       if ($('e_api_key').value.trim()) patch.api_key = $('e_api_key').value.trim();
-      const r = await fetch(`${API}/admin/embeddings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      const r = await adminFetch(`${API}/admin/embeddings`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
       if (r.ok) { $('e_api_key').value=''; await loadEmbeddings(); m.className='msg ok'; m.textContent=t('toast.saved'); CQ.toast(t('toast.saved'),'ok'); }
-      else { m.className='msg err'; m.textContent='Save failed'; }
+      else { m.className='msg err'; m.textContent=t('toast.error'); }
     });
     $('testEmb').addEventListener('click', async () => {
       const box = $('embTest'), b = $('testEmb'); box.innerHTML=''; b.disabled=true; b.innerHTML='<span class="spinner"></span>'+t('btn.test')+'…';
-      try { const r = await fetch(`${API}/admin/embeddings/test`, { method:'POST', headers: hdr() }); const d = await r.json();
+      try { const r = await adminFetch(`${API}/admin/embeddings/test`, { method:'POST', headers: hdr() }); const d = await r.json();
         box.innerHTML = `<div class="test">${d.ok?'✅':'❌'} ${esc(d.detail||'')}</div>`; }
       finally { b.disabled=false; b.textContent=t('btn.test'); }
     });
 
     // anonymous
     async function loadAnon() {
-      const r = await fetch(`${API}/admin/anonymous-limits`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      const r = await adminFetch(`${API}/admin/anonymous-limits`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
       $('a_enabled').checked = !!d.enabled; $('a_analyses').value = d.max_analyses_per_day ?? 0;
       $('a_mb').value = d.max_audio_mb ?? 0; $('a_tts').value = d.max_tts_per_day ?? 0;
+      $('a_retention').value = d.retention_days ?? 30;
       $('f_analyze').checked = !!(d.features||{}).analyze; $('f_tts').checked = !!(d.features||{}).tts;
     }
     $('saveAnon').addEventListener('click', async () => {
       const m = $('anonMsg'); m.className='msg'; m.textContent='';
       const patch = { enabled: $('a_enabled').checked, max_analyses_per_day: parseInt($('a_analyses').value)||0,
         max_audio_mb: parseInt($('a_mb').value)||0, max_tts_per_day: parseInt($('a_tts').value)||0,
+        retention_days: parseInt($('a_retention').value)||0,
         features: { analyze: $('f_analyze').checked, tts: $('f_tts').checked, kb: false } };
-      const r = await fetch(`${API}/admin/anonymous-limits`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
-      m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : 'Save failed'; if (r.ok) CQ.toast(t('toast.saved'),'ok');
+      const r = await adminFetch(`${API}/admin/anonymous-limits`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : t('toast.error'); if (r.ok) CQ.toast(t('toast.saved'),'ok');
+    });
+
+    // Public-app sentiment config — governs the public site's standalone Sentiment tab only;
+    // per-tenant configs are edited by each tenant (owner) or superadmin via KB-admin.
+    async function loadSentimentSettings() {
+      const r = await adminFetch(`${API}/admin/public-sentiment-config`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
+      $('sn_enabled').checked = !!d.enabled; $('sn_guidance').value = d.guidance || '';
+    }
+    $('saveSentiment').addEventListener('click', async () => {
+      const m = $('sentimentMsg'); m.className='msg'; m.textContent='';
+      const patch = { enabled: $('sn_enabled').checked, guidance: $('sn_guidance').value };
+      const r = await adminFetch(`${API}/admin/public-sentiment-config`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+      m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : t('toast.error'); if (r.ok) CQ.toast(t('toast.saved'),'ok');
     });
 
     // tenants
     $('reloadTenants').addEventListener('click', loadTenants);
     $('createTenantBtn').addEventListener('click', async () => {
       const m = $('createTenantMsg'); m.className='msg'; m.textContent='';
-      const r = await fetch(`${API}/admin/tenants`, { method:'POST', headers: jhdr(),
+      const r = await adminFetch(`${API}/admin/tenants`, { method:'POST', headers: jhdr(),
         body: JSON.stringify({ name: $('t_name').value.trim(), industry: $('t_industry').value.trim(), region: $('t_region').value.trim() }) });
       const d = await r.json();
-      if (!r.ok) { m.className='msg err'; m.textContent = d.detail || 'Create failed'; return; }
+      if (!r.ok) { m.className='msg err'; m.textContent = d.detail || t('toast.error'); return; }
       m.className='msg ok'; m.innerHTML = `${t('toast.created')}: <b>${esc(d.name)}</b> · API key: <code>${esc(d.api_key)}</code>`;
       CQ.toast(t('toast.created'),'ok');
       $('t_name').value=$('t_industry').value=$('t_region').value=''; loadTenants();
     });
     async function loadTenants() {
-      const r = await fetch(`${API}/admin/tenants`, { headers: hdr() }); if (!r.ok) return;
+      const r = await adminFetch(`${API}/admin/tenants`, { headers: hdr() }); if (!r.ok) return;
       const l = await r.json(); const box = $('tenantList');
       box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.name')}</th><th>${t('th.slug')}</th><th>${t('th.industry')}</th><th>${t('th.active')}</th><th>${t('th.users')}</th><th>${t('th.docs')}</th><th></th></tr></thead><tbody>` +
         l.map(x => `<tr>
@@ -384,6 +445,7 @@
           <td>${x.users}</td><td>${x.documents}</td>
           <td class="inline"><button class="ghost" data-act="key" data-id="${x.id}">${t('btn.apikey')}</button>
             <button class="ghost" data-act="users" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.users')}</button>
+            <button class="ghost" data-act="edit" data-id="${x.id}" data-name="${esc(x.name)}">${t('kba.edit')}</button>
             <button class="danger" data-act="del" data-id="${x.id}" data-name="${esc(x.name)}">${t('btn.delete')}</button></td>
         </tr><tr><td colspan="7"><div id="sub-${x.id}"></div></td></tr>`).join('') + `</tbody></table></div>`;
       box.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => tenantAction(b.dataset.act, b.dataset.id, b.dataset.name)));
@@ -391,45 +453,96 @@
     async function tenantAction(act, id, name) {
       const sub = $('sub-' + id);
       if (act === 'del') {
-        if (!(await CQ.confirm(`${t('btn.delete')} "${esc(name)}"?`, {ok:t('btn.delete')}))) return;
-        await fetch(`${API}/admin/tenants/${id}`, { method:'DELETE', headers: hdr() }); CQ.toast(t('toast.deleted'),'ok'); loadTenants(); return;
+        if (!(await CQ.confirm(t('adm.deltenant.confirm').replace('{name}', () => name), {ok:t('btn.delete')}))) return;
+        await adminFetch(`${API}/admin/tenants/${id}`, { method:'DELETE', headers: hdr() }); CQ.toast(t('toast.deleted'),'ok'); loadTenants(); return;
       }
       if (act === 'key') {
-        const r = await fetch(`${API}/admin/tenants/${id}/key`, { headers: hdr() }); const d = await r.json();
+        const r = await adminFetch(`${API}/admin/tenants/${id}/key`, { headers: hdr() }); const d = await r.json();
         sub.innerHTML = `<div class="sub inline" style="justify-content:space-between">
           <span>${t('btn.apikey')}: <code>${esc(d.api_key||'—')}</code></span>
           <button class="ghost" id="rot-${id}">${t('btn.rotate')}</button></div>`;
         $('rot-'+id).addEventListener('click', async () => {
-          if (!(await CQ.confirm(t('btn.rotate')+'?', {ok:t('btn.rotate')}))) return;
-          await fetch(`${API}/admin/tenants/${id}/rotate-key`, { method:'POST', headers: hdr() });
-          CQ.toast('OK','ok'); tenantAction('key', id, name);
+          if (!(await CQ.confirm(t('adm.rotate.confirm'), {ok:t('btn.rotate')}))) return;
+          const rr = await adminFetch(`${API}/admin/tenants/${id}/rotate-key`, { method:'POST', headers: hdr() });
+          if (rr.ok) { CQ.toast(t('adm.rotate.done'),'ok'); tenantAction('key', id, name); }
+          else CQ.toast(t('toast.error'),'err');
+        });
+        return;
+      }
+      if (act === 'edit') {
+        const r = await adminFetch(`${API}/admin/tenants`, { headers: hdr() });
+        const tn = (await r.json()).find(x => x.id === id) || {};
+        sub.innerHTML = `<div class="sub">
+          <h4 style="margin-top:0">${t('kba.edit')} · ${esc(tn.name || name)}</h4>
+          <div class="row" style="align-items:flex-end">
+            <div><label>${t('f.name')}</label><input id="te-name-${id}" value="${esc(tn.name||'')}" /></div>
+            <div><label>${t('f.industry')}</label><input id="te-ind-${id}" value="${esc(tn.industry||'')}" /></div>
+            <div><label>${t('f.region')}</label><input id="te-reg-${id}" value="${esc(tn.region||'')}" /></div>
+            <div style="flex:0"><label class="inline" style="gap:5px"><input type="checkbox" id="te-act-${id}" ${tn.is_active?'checked':''} style="width:auto"/> <span>${t('th.active')}</span></label></div>
+            <div style="flex:0"><button class="primary" id="te-save-${id}">${t('btn.save')}</button></div>
+          </div><div class="msg" id="te-msg-${id}"></div></div>`;
+        $('te-save-'+id).addEventListener('click', async () => {
+          const m = $('te-msg-'+id); m.className='msg'; m.textContent='';
+          const rr = await adminFetch(`${API}/admin/tenants/${id}`, { method:'PUT', headers: jhdr(),
+            body: JSON.stringify({ name: $('te-name-'+id).value.trim(), industry: $('te-ind-'+id).value.trim(),
+              region: $('te-reg-'+id).value.trim(), is_active: $('te-act-'+id).checked }) });
+          const dd = await rr.json().catch(() => ({}));
+          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
+          else { CQ.toast(t('toast.saved'),'ok'); loadTenants(); }
         });
         return;
       }
       if (act === 'users') {
-        const r = await fetch(`${API}/admin/tenants/${id}/users`, { headers: hdr() }); const users = await r.json();
+        const r = await adminFetch(`${API}/admin/tenants/${id}/users`, { headers: hdr() }); const users = await r.json();
+        const roleSel = (uid, cur) => `<select data-urole="${uid}" style="width:auto; padding:7px 10px">
+            <option value="member" ${cur==='member'?'selected':''}>${t('role.member')}</option>
+            <option value="owner" ${cur==='owner'?'selected':''}>${t('role.owner')}</option></select>`;
         sub.innerHTML = `<div class="sub">
           <h4 style="margin-top:0">${t('btn.users')} · ${esc(name)}</h4>
-          <div id="ulist-${id}">${users.map(u=>`<div class="inline" style="justify-content:space-between;padding:4px 0">
-            <span>${esc(u.username)} <span class="hint">(${esc(u.role)})</span></span>
-            <button class="danger" data-uid="${u.id}">${t('btn.remove')}</button></div>`).join('') || `<span class="hint">—</span>`}</div>
-          <div class="row" style="margin-top:10px">
-            <div><input id="nu-${id}" data-i18n-ph="f.username" /></div>
-            <div><input id="np-${id}" type="password" data-i18n-ph="f.password" /></div>
+          <div id="ulist-${id}">${users.map(u=>`<div class="inline wrap" style="justify-content:space-between; padding:6px 0; border-bottom:1px solid color-mix(in oklab,var(--hairline) 60%,transparent)">
+            <span style="min-width:140px"><b>${esc(u.username)}</b></span>
+            <span class="inline wrap" style="gap:8px">
+              ${roleSel(u.id, u.role)}
+              <label class="inline" style="gap:5px; margin:0"><input type="checkbox" data-uactive="${u.id}" ${u.is_active?'checked':''} style="width:auto"/> <span>${t('th.active')}</span></label>
+              <input type="password" data-upw="${u.id}" placeholder="${esc(t('adm.user.newpw'))}" style="width:210px" autocomplete="new-password"/>
+              <button class="ghost" data-usave="${u.id}">${t('btn.save')}</button>
+              <button class="act danger" data-uid="${u.id}" data-uname="${esc(u.username)}" title="${t('btn.remove')}" aria-label="${t('btn.remove')}">🗑</button>
+            </span></div>`).join('') || `<span class="hint">—</span>`}</div>
+          <div class="row" style="margin-top:12px; align-items:flex-end">
+            <div><label>${t('f.username')}</label><input id="nu-${id}" /></div>
+            <div><label>${t('f.password')}</label><input id="np-${id}" type="password" autocomplete="new-password" /></div>
+            <div class="w-sel"><label>${t('f.role')}</label><select id="nr-${id}">
+              <option value="member">${t('role.member')}</option><option value="owner">${t('role.owner')}</option></select></div>
             <div style="flex:0"><button class="primary" id="addu-${id}">${t('btn.adduser')}</button></div>
           </div><div class="msg" id="umsg-${id}"></div></div>`;
         CQ.applyI18n(sub);
+        sub.querySelectorAll('button[data-usave]').forEach(b => b.addEventListener('click', async () => {
+          const uid = b.dataset.usave, m = $('umsg-'+id); m.className='msg'; m.textContent='';
+          const body = {
+            role: sub.querySelector(`[data-urole="${uid}"]`).value,
+            is_active: sub.querySelector(`[data-uactive="${uid}"]`).checked,
+          };
+          const pw = sub.querySelector(`[data-upw="${uid}"]`).value;
+          if (pw) body.password = pw;
+          b.disabled = true;
+          try {
+            const rr = await adminFetch(`${API}/admin/tenants/${id}/users/${uid}`, { method:'PUT', headers: jhdr(), body: JSON.stringify(body) });
+            const dd = await rr.json().catch(() => ({}));
+            if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
+            else { CQ.toast(t('adm.user.saved'),'ok'); sub.querySelector(`[data-upw="${uid}"]`).value=''; }
+          } finally { b.disabled = false; }
+        }));
         sub.querySelectorAll('button[data-uid]').forEach(b => b.addEventListener('click', async () => {
-          if (!(await CQ.confirm(t('btn.remove')+'?', {ok:t('btn.remove')}))) return;
-          await fetch(`${API}/admin/tenants/${id}/users/${b.dataset.uid}`, { method:'DELETE', headers: hdr() });
+          if (!(await CQ.confirm(t('adm.rmuser.confirm').replace('{u}', () => b.dataset.uname || ''), {ok:t('btn.remove')}))) return;
+          await adminFetch(`${API}/admin/tenants/${id}/users/${b.dataset.uid}`, { method:'DELETE', headers: hdr() });
           CQ.toast(t('toast.deleted'),'ok'); tenantAction('users', id, name);
         }));
         $('addu-'+id).addEventListener('click', async () => {
           const m = $('umsg-'+id); m.className='msg';
-          const rr = await fetch(`${API}/admin/tenants/${id}/users`, { method:'POST', headers: jhdr(),
-            body: JSON.stringify({ username: $('nu-'+id).value.trim(), password: $('np-'+id).value }) });
+          const rr = await adminFetch(`${API}/admin/tenants/${id}/users`, { method:'POST', headers: jhdr(),
+            body: JSON.stringify({ username: $('nu-'+id).value.trim(), password: $('np-'+id).value, role: $('nr-'+id).value }) });
           const dd = await rr.json();
-          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || 'Failed'; }
+          if (!rr.ok) { m.className='msg err'; m.textContent = dd.detail || t('toast.error'); }
           else { CQ.toast(t('toast.created'),'ok'); tenantAction('users', id, name); loadTenants(); }
         });
       }
@@ -471,14 +584,14 @@
 
     async function loadKillTenants() {
       const box = $('killList');
-      const r = await fetch(`${API}/admin/tenants`, { headers: hdr() });
+      const r = await adminFetch(`${API}/admin/tenants`, { headers: hdr() });
       if (!r.ok) { box.innerHTML = `<div class="msg err">${esc(t('kill.overviewfail'))}</div>`; return; }
       const l = await r.json();
       const tenants = Array.isArray(l) ? l : [];
       killTenants = await Promise.all(tenants.map(async x => {
         let on = false, reachable = true;
         try {
-          const rr = await fetch(`${API}/admin/chat/${x.id}/config`, { headers: hdr() });
+          const rr = await adminFetch(`${API}/admin/chat/${x.id}/config`, { headers: hdr() });
           if (rr.ok) { const c = await rr.json(); on = !!(c && c.autopilot_enabled); } else reachable = false;
         } catch { reachable = false; }
         return { id: String(x.id), name: x.name, autopilot: on, reachable };

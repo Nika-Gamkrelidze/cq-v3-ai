@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CommuniQ — Knowledge Base</title>
+  <title>CommuniQ — KB Admin Console</title>
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="brand.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="favicon.png" />
   <script src="brand.js"></script>
   <style>
     .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; }
@@ -55,11 +55,11 @@
 </head>
 <body>
   <div id="cq-header"></div>
-  <main>
+  <main class="console">
     <div class="card">
       <div class="row" style="align-items:flex-end">
-        <div style="flex:1; min-width:220px"><label data-i18n="kba.tenant"></label><select id="tenantSel"><option value="">—</option></select></div>
-        <div style="flex:2" id="healthStrip"></div>
+        <div class="w-name" style="flex:2"><label data-i18n="kba.tenant"></label><select id="tenantSel"><option value="">—</option></select></div>
+        <div style="flex:1; min-width:200px" id="healthStrip"></div>
       </div>
     </div>
     <div class="empty" id="tenantEmpty" data-i18n="kba.selecttenant"></div>
@@ -127,9 +127,13 @@
             <div><label data-i18n="kba.doc.tags"></label><input id="i_tags" placeholder="a, b" /></div>
           </div>
           <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
-          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+          <div id="imp-file" style="margin-top:8px"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div>
+            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
           <div id="imp-text" class="hidden" style="margin-top:8px"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+          <div id="imp-csv" class="hidden" style="margin-top:8px"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div></div>
           <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
           <div class="msg" id="importMsg"></div>
         </div>
@@ -138,30 +142,70 @@
       <!-- PLAYGROUND -->
       <section class="panel" id="panel-playground">
         <div class="card">
-          <div class="subtabs">
+          <div class="subtabs" id="pgOuterTabs">
             <div class="subtab active" data-pg="retrieval" data-i18n="pg.tab.retrieval"></div>
             <div class="subtab" data-pg="score" data-i18n="pg.tab.score"></div>
+            <div class="subtab" data-pg="sentiment" data-i18n="pg.tab.sentiment"></div>
           </div>
 
           <div id="pg-retrieval">
             <label data-i18n="kba.pg.query"></label><input id="pgQuery" />
             <div class="row" style="margin-top:10px">
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="pgTopk" type="number" value="8" /></div>
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="pgThresh" type="number" step="0.05" value="0" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.topk"></label><input id="pgTopk" type="number" value="8" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.threshold"></label><input id="pgThresh" type="number" step="0.05" value="0" /></div>
               <div style="flex:0; align-self:flex-end"><button class="primary" id="pgRun" data-i18n="kba.pg.run"></button></div>
             </div>
             <div id="pgResults" style="margin-top:12px"></div>
           </div>
 
           <div id="pg-score" class="hidden">
-            <label data-i18n="pg.ans.label"></label>
-            <textarea id="ansText" style="min-height:120px" data-i18n-ph="pg.ans.ph"></textarea>
-            <div class="hint" style="margin-top:6px" data-i18n="pg.ans.hint"></div>
+            <div class="subtabs" id="ansModeTabs">
+              <div class="subtab active" data-ansmode="text" data-i18n="pg.mode.text"></div>
+              <div class="subtab" data-ansmode="audio" data-i18n="pg.mode.audio"></div>
+            </div>
+            <div id="ans-text">
+              <label data-i18n="pg.ans.label"></label>
+              <textarea id="ansText" style="min-height:120px" data-i18n-ph="pg.ans.ph"></textarea>
+              <div class="hint" style="margin-top:6px" data-i18n="pg.ans.hint"></div>
+            </div>
+            <div id="ans-audio" class="hidden">
+              <label data-i18n="pg.audiolabel"></label>
+              <div class="drop" id="ansDrop">
+                <input type="file" id="ansFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+                <div class="drop-title" id="ansDropTitle" data-i18n="drop.title"></div>
+                <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+              </div>
+            </div>
             <div class="actions"><button class="primary" id="ansRun" data-i18n="pg.ans.run"></button></div>
             <div class="msg" id="ansMsg"></div>
           </div>
+
+          <!-- SENTIMENT — standalone: this tenant's own config (superadmin can always edit
+               it here, unlike the tenant's own owner-only view) plus a plain analyze tool. -->
+          <div id="pg-sentiment" class="hidden">
+            <div class="sub" style="margin-bottom:14px">
+              <div class="inline" style="justify-content:space-between; align-items:baseline">
+                <b style="color:var(--mist)" data-i18n="sn.config"></b>
+                <span class="hint" id="snCfgMsg"></span>
+              </div>
+              <p class="hint" data-i18n="sn.config.desc"></p>
+              <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
+              <label data-i18n="sn.guidance"></label>
+              <textarea id="snGuidance" data-i18n-ph="sn.guidance.ph" style="min-height:70px"></textarea>
+              <div class="actions"><button class="ghost" id="snCfgSave" data-i18n="sn.save"></button></div>
+            </div>
+            <label data-i18n="sn.audiolabel"></label>
+            <div class="drop" id="snDrop">
+              <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+              <div class="drop-title" id="snDropTitle" data-i18n="drop.title"></div>
+              <div class="drop-sub" data-i18n="drop.sub_sn"></div>
+            </div>
+            <div class="actions"><button class="primary" id="snRun" data-i18n="sn.run"></button></div>
+            <div class="msg err" id="snErr"></div>
+          </div>
         </div>
         <div id="ansResults"></div>
+        <div id="snResults"></div>
       </section>
 
       <!-- DUPLICATES -->
@@ -225,9 +269,12 @@
             <div class="inline" style="gap:8px">
               <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
               <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+              <button class="ghost" id="scImport" data-i18n="sc.import"></button>
+              <input type="file" id="scImportFile" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" class="hidden" />
             </div>
             <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
+          <hr class="sep" />
           <label data-i18n="sc.rubric"></label>
           <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
           <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
@@ -241,11 +288,13 @@
   <script>
     const API = CQ.API, t = CQ.t;
     CQ.mountHeader({ tag: 'KB', nav: [
-      { label: 'Console', href: 'admin.html' },
+      { i18n: 'nav.console', href: 'admin.html' },
+      { i18n: 'nav.kb', href: 'kb-admin.html' },
       { i18n: 'nav.logout', href: '#', id: 'logout' },
+      { i18n: 'nav.public', href: 'index.html' },
     ]});
     let TOKEN = sessionStorage.getItem('cq_admin_token') || '';
-    if (!TOKEN) location.replace('tenant.html');
+    if (!TOKEN) location.replace('tenant.html?next=kb-admin.html');
     const $ = id => document.getElementById(id);
     const H = (extra={}) => ({ 'X-Admin-Token': TOKEN, ...extra });
     const JH = () => H({ 'Content-Type': 'application/json' });
@@ -259,37 +308,60 @@
        English so a missing translation degrades to a readable label, never to a raw key.
        If these ever need to appear in the tenant portal too, promote them to the DICT. */
     const VT = {
-      en: { 'col':'Visibility', 'public':'Public', 'internal':'Internal', 'all':'All',
-            'filter':'Visibility', 'publish':'Publish', 'unpublish':'Unpublish',
-            'bulk.publish':'Publish selected', 'bulk.unpublish':'Unpublish selected',
-            'stat.public':'Published',
-            'confirm.publish':'Publish {n} document(s)? The public bot may quote published documents verbatim to end customers.',
-            'confirm.unpublish':'Unpublish {n} document(s)? The public bot will stop quoting them.',
-            'confirm.publish.one':'Publish “{title}”? The public bot may quote it verbatim to end customers.',
-            'confirm.unpublish.one':'Unpublish “{title}”? The public bot will stop quoting it.',
-            'done.publish':'Published', 'done.unpublish':'Unpublished' },
-      ka: { 'col':'ხილვადობა', 'public':'საჯარო', 'internal':'შიდა', 'all':'ყველა',
-            'filter':'ხილვადობა', 'publish':'გამოქვეყნება', 'unpublish':'გამოქვეყნების გაუქმება',
-            'bulk.publish':'არჩეულის გამოქვეყნება', 'bulk.unpublish':'არჩეულის დამალვა',
-            'stat.public':'გამოქვეყნებული',
-            'confirm.publish':'გამოქვეყნდეს {n} დოკუმენტი? საჯარო ბოტს შეუძლია გამოქვეყნებული დოკუმენტი სიტყვასიტყვით მოუყვეს კლიენტს.',
-            'confirm.unpublish':'გაუქმდეს {n} დოკუმენტის გამოქვეყნება? საჯარო ბოტი მათ აღარ გამოიყენებს.',
-            'confirm.publish.one':'გამოქვეყნდეს „{title}“? საჯარო ბოტს შეუძლია იგი სიტყვასიტყვით მოუყვეს კლიენტს.',
-            'confirm.unpublish.one':'გაუქმდეს „{title}“-ის გამოქვეყნება? საჯარო ბოტი მას აღარ გამოიყენებს.',
-            'done.publish':'გამოქვეყნდა', 'done.unpublish':'გამოქვეყნება გაუქმდა' },
-      ru: { 'col':'Видимость', 'public':'Публичный', 'internal':'Внутренний', 'all':'Все',
-            'filter':'Видимость', 'publish':'Опубликовать', 'unpublish':'Снять с публикации',
-            'bulk.publish':'Опубликовать выбранные', 'bulk.unpublish':'Снять выбранные',
-            'stat.public':'Опубликовано',
-            'confirm.publish':'Опубликовать {n} документ(ов)? Публичный бот может дословно цитировать опубликованные документы клиентам.',
-            'confirm.unpublish':'Снять с публикации {n} документ(ов)? Публичный бот перестанет их цитировать.',
-            'confirm.publish.one':'Опубликовать «{title}»? Публичный бот сможет дословно цитировать его клиентам.',
-            'confirm.unpublish.one':'Снять с публикации «{title}»? Публичный бот перестанет его цитировать.',
-            'done.publish':'Опубликовано', 'done.unpublish':'Снято с публикации' },
+      en: { 'col':'Visibility', 'public':'Shared with bot', 'internal':'Internal', 'all':'All',
+            'filter':'Visibility', 'publish':'Share with bot', 'unpublish':'Stop sharing',
+            'bulk.publish':'Share selected with bot', 'bulk.unpublish':'Stop sharing selected',
+            'stat.public':'Shared with bot',
+            'confirm.publish':'Share {n} document(s) with the bot? The bot may quote shared documents word for word to end customers. Nothing is made public on the internet.',
+            'confirm.unpublish':'Stop sharing {n} document(s)? The bot will no longer use them.',
+            'confirm.publish.one':'Share “{title}” with the bot? The bot may quote it word for word to end customers. Nothing is made public on the internet.',
+            'confirm.unpublish.one':'Stop sharing “{title}”? The bot will no longer use it.',
+            'done.publish':'Shared with bot', 'done.unpublish':'Sharing stopped' },
+      ka: { 'col':'ხილვადობა', 'public':'ბოტისთვის დაშვებული', 'internal':'შიდა', 'all':'ყველა',
+            'filter':'ხილვადობა', 'publish':'ბოტისთვის დაშვება', 'unpublish':'დაშვების მოხსნა',
+            'bulk.publish':'მონიშნულის დაშვება ბოტისთვის', 'bulk.unpublish':'მონიშნულისთვის დაშვების მოხსნა',
+            'stat.public':'ბოტისთვის დაშვებული',
+            'confirm.publish':'დაეშვას {n} დოკუმენტი ბოტისთვის? ბოტი დაშვებულ დოკუმენტებს კლიენტებთან სიტყვასიტყვით ციტირებს. ინტერნეტში არაფერი ქვეყნდება.',
+            'confirm.unpublish':'მოეხსნას დაშვება {n} დოკუმენტს? ბოტი მათ აღარ გამოიყენებს.',
+            'confirm.publish.one':'დაეშვას „{title}“ ბოტისთვის? ბოტი მას კლიენტებთან სიტყვასიტყვით ციტირებს. ინტერნეტში არაფერი ქვეყნდება.',
+            'confirm.unpublish.one':'მოეხსნას დაშვება „{title}“-ს? ბოტი მას აღარ გამოიყენებს.',
+            'done.publish':'დაშვებულია ბოტისთვის', 'done.unpublish':'დაშვება მოხსნილია' },
+      ru: { 'col':'Видимость', 'public':'Доступен боту', 'internal':'Внутренний', 'all':'Все',
+            'filter':'Видимость', 'publish':'Открыть боту', 'unpublish':'Закрыть от бота',
+            'bulk.publish':'Открыть боту выбранные', 'bulk.unpublish':'Закрыть от бота выбранные',
+            'stat.public':'Доступны боту',
+            'confirm.publish':'Открыть боту {n} документ(ов)? Бот может дословно цитировать доступные документы клиентам. В интернете ничего не публикуется.',
+            'confirm.unpublish':'Закрыть от бота {n} документ(ов)? Бот перестанет их использовать.',
+            'confirm.publish.one':'Открыть боту «{title}»? Бот может дословно цитировать его клиентам. В интернете ничего не публикуется.',
+            'confirm.unpublish.one':'Закрыть от бота «{title}»? Бот перестанет его использовать.',
+            'done.publish':'Доступен боту', 'done.unpublish':'Закрыт от бота' },
     };
     const vt = k => (VT[CQ.lang()] || {})[k] || VT.en[k] || k;
-    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_admin_token'); location.replace('index.html'); });
+    $('logout').addEventListener('click', e => { e.preventDefault();
+      sessionStorage.removeItem('cq_admin_token'); sessionStorage.removeItem('cq_tenant_token');
+      location.replace('tenant.html'); });
+    // Central 401 interception: an admin token that expires MID-SESSION must land on the
+    // sign-in page, not masquerade as an empty tenant KB or paint 'undefined' tiles.
+    async function adminFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); throw new Error('unauthorized'); }
+      return r;
+    }
 
+
+    // Template download links under the importer: users copy a working structure instead of
+    // guessing. Language-matched (KA files for the Georgian UI, EN otherwise), repainted on
+    // every language switch.
+    function paintTplLinks() {
+      const l = CQ.lang() === 'ka' ? 'ka' : 'en';
+      document.querySelectorAll('.tpl-links').forEach(el => {
+        el.innerHTML = ['pdf','docx','txt','md','csv']
+          .map(x => ` <a href="guides/templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
+          .join(' ·');
+      });
+    }
+    paintTplLinks();
+    document.addEventListener('cq:lang', paintTplLinks);
     // modal
     function showModal(inner) {
       const bg = document.createElement('div'); bg.className = 'cq-modal-bg';
@@ -308,11 +380,34 @@
       document.querySelectorAll('#panel-import .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       ['file','text','csv'].forEach(k => $('imp-'+k).classList.toggle('hidden', k!==s.dataset.imp));
     }));
-    // Playground subtabs: retrieval | answer scoring
-    document.querySelectorAll('#panel-playground .subtab').forEach(s => s.addEventListener('click', () => {
-      document.querySelectorAll('#panel-playground .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
-      ['retrieval','score'].forEach(k => $('pg-'+k).classList.toggle('hidden', k!==s.dataset.pg));
+    // Playground subtabs: retrieval | answer scoring | sentiment. Scoped to #pgOuterTabs, NOT
+    // #panel-playground — the answer-scoring subtab has its OWN nested text/audio toggle
+    // (#ansModeTabs) using the same .subtab class, and a page-wide selector would fire this
+    // handler for that inner toggle too.
+    document.querySelectorAll('#pgOuterTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#pgOuterTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['retrieval','score','sentiment'].forEach(k => $('pg-'+k).classList.toggle('hidden', k!==s.dataset.pg));
+      if (s.dataset.pg==='sentiment') loadSentimentConfig();
     }));
+    // Answer-scoring's own text/audio toggle.
+    document.querySelectorAll('#ansModeTabs .subtab').forEach(s => s.addEventListener('click', () => {
+      document.querySelectorAll('#ansModeTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
+      ['text','audio'].forEach(k => $('ans-'+k).classList.toggle('hidden', k!==s.dataset.ansmode));
+    }));
+    { const drop = $('ansDrop'), inp = $('ansFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('ansDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
+    { const drop = $('snDrop'), inp = $('snFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
     function activeTab() { return (document.querySelector('.tab.active')||{}).dataset ? document.querySelector('.tab.active').dataset.tab : 'overview'; }
     function loadTab(tab) {
       if (tab==='overview') loadOverview();
@@ -326,11 +421,25 @@
     // tenant selector
     async function loadTenants() {
       const r = await fetch(`${API}/admin/tenants`, { headers: H() });
-      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); return; }
       const list = await r.json(); const sel = $('tenantSel'); sel.innerHTML = '<option value="">—</option>';
       list.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = `${c.name} (${c.slug})`; sel.appendChild(o); });
+      noTenants = !list.length;
+      renderTenantEmpty();
       CQ.enhanceSelects();
       sel.addEventListener('change', () => setTenant(sel.value));
+    }
+    let noTenants = false;
+    // The empty-state carries data-i18n="kba.selecttenant", which applyI18n repaints on every
+    // language switch — so the no-tenants message owns the element (attribute removed) and is
+    // re-rendered from the cq:lang listener below.
+    function renderTenantEmpty() {
+      const el = $('tenantEmpty');
+      if (!noTenants) return;
+      el.removeAttribute('data-i18n');
+      el.textContent = t('kba.notenants') + ' ';
+      const a = document.createElement('a'); a.href = 'admin.html'; a.textContent = '→';
+      el.appendChild(a);
     }
     function setTenant(tid) {
       TID = tid;
@@ -349,15 +458,19 @@
       $('bulkPublish').textContent = vt('bulk.publish');
       $('bulkUnpublish').textContent = vt('bulk.unpublish');
     }
-    document.addEventListener('cq:lang', () => { paintVisLabels(); if (TID) loadTab(activeTab()); });
+    document.addEventListener('cq:lang', () => { paintVisLabels(); renderTenantEmpty(); if (TID) loadTab(activeTab()); });
 
     // ---- OVERVIEW ----
     $('reloadOverview').addEventListener('click', loadOverview);
     async function loadOverview() {
-      const [st, pa] = await Promise.all([
-        fetch(`${K()}/stats`, { headers: H() }).then(r=>r.json()),
-        fetch(`${K()}/params`, { headers: H() }).then(r=>r.json()),
-      ]);
+      let st, pa;
+      try {
+        [st, pa] = await Promise.all([
+          adminFetch(`${K()}/stats`, { headers: H() }).then(r => r.ok ? r.json() : null),
+          adminFetch(`${K()}/params`, { headers: H() }).then(r => r.ok ? r.json() : null),
+        ]);
+      } catch { return; }
+      if (!st || !pa) { $('statGrid').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('paramsBox').innerHTML = ''; $('healthStrip').innerHTML = ''; return; }
       const tile = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       $('statGrid').innerHTML =
         tile(st.documents, t('kba.stat.documents')) + tile(st.public_documents ?? 0, vt('stat.public')) +
@@ -369,13 +482,13 @@
       const e = pa.embedding, ch = pa.chunking, re = pa.retrieval;
       const kv = (b,s,warn) => `<div class="kv-line"><b>${b}</b><span class="${warn?'warn-flag':''}">${s}</span></div>`;
       $('paramsBox').innerHTML =
-        kv('Embedding provider', esc(e.provider)) + kv('Model', esc(e.model)) +
-        kv('Dimension (config)', e.dim) + kv('Dimension (column)', e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
+        kv(t('adm.embprov'), esc(e.provider)) + kv(t('f.model'), esc(e.model)) +
+        kv(t('f.dimension'), e.dim) + kv(t('tkb.params.columndim'), e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
         (e.dim_mismatch ? `<div class="warn-flag" style="margin:6px 0">${t('kba.warn.mismatch')}</div>` : '') +
-        kv('Chunk size / overlap', `${ch.size} / ${ch.overlap}`) +
-        kv('Retrieval threshold', re.similarity_threshold) + kv('Default top-k', re.default_top_k) +
-        kv('Distance metric', re.distance_metric) + kv('Index type', re.index_type) +
-        kv('Chunks without embedding', pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
+        kv(t('tkb.params.chunk'), `${ch.size} / ${ch.overlap}`) +
+        kv(t('tkb.params.threshold'), re.similarity_threshold) + kv(t('tkb.params.topk'), re.default_top_k) +
+        kv(t('tkb.params.metric'), re.distance_metric) + kv(t('tkb.params.index'), re.index_type) +
+        kv(t('tkb.params.noembed'), pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
     }
     function download(url) {
       fetch(url, { headers: H() }).then(r => r.blob()).then(b => {
@@ -406,27 +519,28 @@
       if ($('fTag').value.trim()) p.set('tag', $('fTag').value.trim());
       if ($('fVis').value) p.set('visibility', $('fVis').value);
       if ($('fSearch').value.trim()) p.set('q', $('fSearch').value.trim());
-      const r = await fetch(`${K()}/documents?${p}`, { headers: H() });
-      const d = r.ok ? await r.json() : { total: 0, documents: [] };
+      let r; try { r = await adminFetch(`${K()}/documents?${p}`, { headers: H() }); } catch { return; }
+      if (!r.ok) { $('docList').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('docPager').innerHTML=''; return; }
+      const d = await r.json().catch(() => ({ total: 0, documents: [] }));
       if (!Array.isArray(d.documents)) d.documents = [];
       page.total = d.total || 0;
       if (!d.documents.length) { $('docList').innerHTML = `<div class="empty">${t('kba.nodocs')}</div>`; $('docPager').innerHTML=''; return; }
       $('docList').innerHTML = `<div class="table-wrap"><table><thead><tr>
-        <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th>${t('kba.doc.tags')}</th>
-        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">${vt('col')}</th><th class="tight">src</th><th></th></tr></thead><tbody>` +
+        <th><input type="checkbox" id="selAll"/></th><th>${t('kba.doc.title')}</th><th>${t('th.category')}</th><th class="hide-md">${t('kba.doc.tags')}</th>
+        <th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th><th class="tight">${vt('col')}</th><th class="tight hide-md">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
         d.documents.map(x => `<tr>
           <td><input type="checkbox" class="rowsel" data-id="${x.id}"/></td>
           <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
-          <td>${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
+          <td class="hide-md">${(x.tags||[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('')||'—'}</td>
           <td class="tight">${x.chunk_count}</td>
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?vt('public'):vt('internal')}</span></td>
-          <td class="tight hint">${esc(x.source_type||'—')}</td>
-          <td class="inline"><button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}">${x.visibility==='public'?vt('unpublish'):vt('publish')}</button>
-            <button class="ghost" data-act="edit" data-id="${x.id}">${t('kba.edit')}</button>
-            <button class="ghost" data-act="chunks" data-id="${x.id}">${t('kba.chunks')}</button>
-            <button class="ghost" data-act="reembed" data-id="${x.id}">${t('kba.reembed')}</button>
-            <button class="danger" data-act="del" data-id="${x.id}">${t('kba.delete')}</button></td></tr>`).join('') + `</tbody></table></div>`;
+          <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
+          <td class="inline"><button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${x.id}" data-title="${esc(x.title)}" title="${x.visibility==='public'?vt('unpublish'):vt('publish')}" aria-label="${x.visibility==='public'?vt('unpublish'):vt('publish')}">${x.visibility==='public'?'🚫':'🤖'}</button>
+            <button class="act" data-act="edit" data-id="${x.id}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
+            <button class="act" data-act="chunks" data-id="${x.id}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
+            <button class="act" data-act="reembed" data-id="${x.id}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>
+            <button class="act danger" data-act="del" data-id="${x.id}" data-title="${esc(x.title)}" title="${t('kba.delete')}" aria-label="${t('kba.delete')}">🗑</button></td></tr>`).join('') + `</tbody></table></div>`;
       $('docList').querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
       $('docList').querySelectorAll('.rowsel').forEach(cb => cb.addEventListener('change', () => { cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); updateSelBar(); }));
       $('selAll').addEventListener('change', () => { $('docList').querySelectorAll('.rowsel').forEach(cb => { cb.checked = $('selAll').checked; cb.checked ? selected.add(cb.dataset.id) : selected.delete(cb.dataset.id); }); updateSelBar(); });
@@ -449,7 +563,7 @@
         else { const d = await r.json().catch(()=>({})); CQ.toast(d.detail || t('toast.error'), 'err'); }
         return;
       }
-      if (act==='del') { if(!(await CQ.confirm(t('kba.delete')+'?', {ok:t('kba.delete')}))) return;
+      if (act==='del') { if(!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', () => title || ''), {ok:t('kba.delete')}))) return;
         await fetch(`${K()}/documents/${id}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok'); loadDocuments(); return; }
       if (act==='reembed') { const r = await fetch(`${K()}/documents/${id}/reembed`, { method:'POST', headers: H() }); const d = await r.json().catch(()=>({}));
         // 502 when the encoder is unreachable — without the r.ok guard that toasts
@@ -490,12 +604,12 @@
       if (!Array.isArray(chunks)) { CQ.toast(t('toast.error')||'Error', 'err'); return; }
       const bg = showModal(`<h3>${t('kba.chunks')} (${chunks.length})</h3><div id="chList"></div>`);
       const render = list => { bg.querySelector('#chList').innerHTML = list.map(c => `<div class="fc-claim" style="border-left-color:${c.has_embedding?'var(--ok)':'var(--alert)'}">
-        <div class="inline" style="justify-content:space-between"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>
-          <span class="inline"><button class="ghost" data-cedit="${c.id}">${t('kba.chunk.edit')}</button><button class="danger" data-cdel="${c.id}">${t('kba.chunk.delete')}</button></span></div>
+        <div class="inline" style="justify-content:space-between; gap:8px; flex-wrap:wrap"><span class="hint">#${c.chunk_index} · ${c.token_count||0} tok ${c.has_embedding?'':'· <span class="warn-flag">no embedding</span>'}</span>
+          <span class="inline wrap"><button class="ghost" data-cedit="${c.id}">${t('kba.chunk.edit')}</button><button class="danger" data-cdel="${c.id}">${t('kba.chunk.delete')}</button></span></div>
         <div style="margin-top:6px; white-space:pre-wrap">${esc(c.content)}</div></div>`).join('') || `<div class="empty">—</div>`;
         bg.querySelectorAll('[data-cedit]').forEach(b => b.addEventListener('click', () => editChunk(id, b.dataset.cedit, bg)));
         bg.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', async () => {
-          if(!(await CQ.confirm(t('kba.chunk.delete')+'?', {ok:t('kba.delete')}))) return;
+          if(!(await CQ.confirm(t('tkb.chunk.del.confirm'), {ok:t('kba.delete')}))) return;
           await fetch(`${K()}/chunks/${b.dataset.cdel}`, { method:'DELETE', headers: H() }); CQ.toast(t('toast.deleted'),'ok');
           const fresh = await fetch(`${K()}/documents/${id}/chunks`, { headers: H() }).then(r=>r.json()); render(fresh); loadDocuments();
         }));
@@ -538,7 +652,7 @@
       bulk('retag', tags.split(',').map(s=>s.trim()).filter(Boolean));
     });
     async function bulk(action, tags) {
-      if (action==='delete' && !(await CQ.confirm(`${t('kba.bulk.delete')} ${selected.size}?`, {ok:t('kba.delete')}))) return;
+      if (action==='delete' && !(await CQ.confirm(t('tkb.bulk.delete.confirm').replace('{n}', () => selected.size), {ok:t('kba.delete')}))) return;
       // Bulk publish is the single most consequential control on this page: it is the
       // moment internal text becomes something a customer can be shown word for word.
       // The confirmation states that plainly rather than just counting rows.
@@ -547,7 +661,7 @@
         if (!(await CQ.confirm(msg, { ok: vt(action), danger: action==='publish' }))) return;
       }
       const r = await fetch(`${K()}/bulk`, { method:'POST', headers: JH(), body: JSON.stringify({ action, document_ids:[...selected], tags }) });
-      const d = await r.json(); if (r.ok) { CQ.toast(`${action}: ${d.affected}`, 'ok'); loadDocuments(); } else CQ.toast(d.detail||'failed','err');
+      const d = await r.json(); if (r.ok) { CQ.toast(t('bulk.done.' + action).replace('{n}', d.affected ?? 0), 'ok'); loadDocuments(); } else CQ.toast(d.detail||t('toast.error'),'err');
     }
 
     // ---- IMPORT ----
@@ -558,19 +672,63 @@
       const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
       const title = $('i_title').value.trim(), tags = $('i_tags').value.trim();
       const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      let wantAI = false;
       try {
         let r;
         if (mode==='text') { if(!$('i_text').value.trim()) throw new Error('Enter text');
           r = await fetch(`${K()}/documents/text`, { method:'POST', headers: JH(), body: JSON.stringify({ title, doc_type, text:$('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
-        } else { const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if(!f) throw new Error('Choose a file');
-          const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags); fd.append('metadata', JSON.stringify(meta));
-          r = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
+          const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
+          m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
+        } else {
+          // Several files of any accepted type at once — one request per file, so a bad
+          // file fails alone and is named, instead of aborting the whole batch.
+          const files = [...(mode==='csv'?$('i_csv'):$('i_file')).files];
+          if (!files.length) throw new Error('Choose a file');
+          wantAI = mode !== 'csv' && $('i_restr').checked;
+          const failed = [], made = [];
+          for (let i = 0; i < files.length; i++) {
+            m.className='msg'; m.textContent = t('kb.files.progress')
+              .replace('{done}', () => i + 1).replace('{total}', () => files.length);
+            const fd = new FormData(); fd.append('file', files[i]); fd.append('doc_type', doc_type);
+            fd.append('title', files.length === 1 ? title : ''); fd.append('tags', tags);
+            fd.append('metadata', JSON.stringify(meta));
+            if (wantAI) fd.append('restructure', '1');
+            try {
+              const rr = await fetch(`${K()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: H(), body: fd });
+              const dd = await rr.json(); if (!rr.ok) throw new Error(dd.detail || 'Import failed');
+              if (dd && dd.id) made.push(dd.id);
+            } catch (err) { failed.push(`${files[i].name} — ${err.message}`); }
+          }
+          if (failed.length) {
+            m.className = 'msg err';
+            m.textContent = `${t('kb.files.done').replace('{n}', () => made.length)} ${t('kb.files.failed')} ${failed.join(' · ')}`;
+            CQ.toast(t('toast.error'), 'err');
+          } else {
+            m.className = 'msg ok';
+            m.textContent = t('kb.files.done').replace('{n}', () => made.length);
+            CQ.toast(t('toast.imported'), 'ok');
+          }
+          if (wantAI) made.forEach(pollRestr);
         }
-        const d = await r.json(); if(!r.ok) throw new Error(d.detail||'Import failed');
-        m.className='msg ok'; m.textContent = t('kb.processing'); CQ.toast(t('toast.imported'),'ok');
-        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; setTimeout(loadOverview, 3000);
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; $('i_restr').checked=false; setTimeout(loadOverview, 3000);
       } catch(e){ m.className='msg err'; m.textContent=e.message; } finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
+
+    // A restructured import runs for minutes; poll until it settles and surface the outcome.
+    async function pollRestr(id) {
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        let doc = null;
+        try { const r = await fetch(`${K()}/documents/${id}`, { headers: H() });
+          if (r.ok) doc = await r.json(); } catch {}
+        if (!doc || !doc.status || doc.status === 'pending' || doc.status === 'processing') continue;
+        const m = $('importMsg');
+        if (doc.status === 'ready') { m.className='msg ok'; m.textContent = t('kb.restr.done'); CQ.toast(t('kb.restr.done'), 'ok'); }
+        else { m.className='msg err'; m.textContent = doc.error || t('kb.restr.fail'); CQ.toast(t('kb.restr.fail'), 'err'); }
+        loadOverview(); return;
+      }
+    }
+
 
     /* ---- RETRIEVAL CONFIDENCE (mirrors tenant.html — same product, same story) ----
        WHY: a BGE-M3 cosine score is NOT calibrated in absolute terms — only the ranking is
@@ -644,36 +802,87 @@
     });
     $('pgQuery').addEventListener('keydown', e => { if(e.key==='Enter') $('pgRun').click(); });
 
-    // ---- PLAYGROUND: answer scoring (score written operator text against this tenant's rubric) ----
+    // ---- PLAYGROUND: answer scoring — a typed answer OR an uploaded call, against this
+    // tenant's rubric. The audio branch runs the SAME full pipeline as if the tenant had
+    // uploaded it themselves (POST /admin/analyze/{tenant_id}, see routers/scoring.py). ----
     $('ansRun').addEventListener('click', async () => {
-      const text = $('ansText').value.trim();
+      const mode = (document.querySelector('#ansModeTabs .subtab.active')||{}).dataset.ansmode || 'text';
       const msg = $('ansMsg'), box = $('ansResults');
       msg.className = 'msg'; msg.textContent = ''; box.innerHTML = '';
-      if (!text) { msg.className = 'msg err'; msg.textContent = t('pg.ans.empty'); return; }
-      const btn = $('ansRun'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('pg.ans.run') + '…';
-      box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      const btn = $('ansRun'); const label = t('pg.ans.run');
       try {
-        const r = await fetch(`${API}/admin/scoring/${TID}/score-text`, {
-          method: 'POST', headers: JH(), body: JSON.stringify({ text, factcheck: true }) });
-        const d = await r.json();
-        if (!r.ok) throw new Error(r.status === 400 && /rubric/i.test(d.detail || '') ? t('pg.ans.norubric') : (d.detail || 'Scoring failed'));
-        box.innerHTML = (d.config_version ? `<div class="hint" style="margin:10px 2px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
-          + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        if (mode === 'text') {
+          const text = $('ansText').value.trim();
+          if (!text) { msg.className = 'msg err'; msg.textContent = t('pg.ans.empty'); return; }
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+          box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+          const r = await fetch(`${API}/admin/scoring/${TID}/score-text`, {
+            method: 'POST', headers: JH(), body: JSON.stringify({ text, factcheck: true }) });
+          const d = await r.json();
+          if (!r.ok) throw new Error(r.status === 400 && /rubric/i.test(d.detail || '') ? t('pg.ans.norubric') : (d.detail || 'Scoring failed'));
+          box.innerHTML = (d.config_version ? `<div class="hint" style="margin:10px 2px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
+            + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        } else {
+          const f = $('ansFile').files[0];
+          if (!f) { msg.className = 'msg err'; msg.textContent = t('pg.audioempty'); return; }
+          btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+          box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/admin/analyze/${TID}`, { method: 'POST', headers: H(), body: fd });
+          const d = await CQ.readResp(r);
+          box.innerHTML = CQ.analysisHTML(d) + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
+        }
         CQ.toast(t('res.done'), 'ok');
       } catch (e) {
         box.innerHTML = ''; msg.className = 'msg err'; msg.textContent = e.message; CQ.toast(e.message, 'err');
-      } finally { btn.disabled = false; btn.textContent = t('pg.ans.run'); }
+      } finally { btn.disabled = false; btn.textContent = label; }
+    });
+
+    // ---- PLAYGROUND: standalone sentiment for this tenant (config + a plain analyze tool) ----
+    async function loadSentimentConfig() {
+      $('snCfgMsg').textContent = '';
+      try {
+        const d = await CQ.readResp(await fetch(`${API}/admin/sentiment/${TID}/config`, { headers: H() }));
+        $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
+      } catch (e) { $('snCfgMsg').textContent = e.message; }
+    }
+    $('snCfgSave').addEventListener('click', async () => {
+      const m = $('snCfgMsg'); m.textContent = '';
+      const btn = $('snCfgSave'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        await CQ.readResp(await fetch(`${API}/admin/sentiment/${TID}/config`, { method: 'PUT',
+          headers: JH(), body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
+        m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'), 'ok');
+      } catch (e) { m.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = t('sn.save'); }
+    });
+    $('snRun').addEventListener('click', async () => {
+      const f = $('snFile').files[0];
+      const err = $('snErr'), box = $('snResults');
+      err.textContent = ''; box.innerHTML = '';
+      if (!f) { err.textContent = t('pg.audioempty'); return; }
+      const btn = $('snRun'); const label = t('sn.run');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + label + '…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/admin/sentiment/${TID}`, { method: 'POST', headers: H(), body: fd });
+        const d = await CQ.readResp(r);
+        box.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
+        CQ.toast(t('res.done'), 'ok');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = label; }
     });
 
     // ---- DUPLICATES ----
     $('scanDup').addEventListener('click', loadDuplicates);
     async function loadDuplicates() {
       const box = $('dupBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const d = await fetch(`${K()}/duplicates`, { headers: H() }).then(r=>r.json());
+      let d; try { const r = await adminFetch(`${K()}/duplicates`, { headers: H() }); d = r.ok ? await r.json() : null; } catch { return; }
+      if (!d || !Array.isArray(d.exact_duplicate_groups)) { box.innerHTML = `<div class="msg err">${t('toast.error')}</div>`; return; }
       let html = '';
       if (d.exact_duplicate_groups.length) { html += `<h4>${t('kba.dup.exact')}</h4>` + d.exact_duplicate_groups.map(g => `<div class="fc-claim v-CONTRADICTED"><b>${g.count}×</b> ${g.titles.map(esc).join(', ')}<div class="hint">${g.document_ids.length} documents share identical content</div></div>`).join(''); }
       if (d.near_duplicate_pairs.length) { html += `<h4>${t('kba.dup.near')}</h4>` + d.near_duplicate_pairs.map(p => `<div class="fc-claim"><span class="pill notinkb">${(p.similarity*100).toFixed(1)}% ${t('kba.dup.sim')}</span> ${esc(p.a_title)} ↔ ${esc(p.b_title)}</div>`).join(''); }
-      if (d.near_scan_skipped) html += `<div class="hint">Near-dup scan skipped (KB too large).</div>`;
+      if (d.near_scan_skipped) html += `<div class="hint">${t('tkb.dup.skipped')}</div>`;
       box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
     }
 
@@ -890,7 +1099,7 @@
     }
     $('curBulkAccept').addEventListener('click', async () => {
       const ids = [...curSel]; if (!ids.length) return;
-      if (!(await CQ.confirm(`${t('cur.bulk.accept')} — ${ids.length}?`, { ok: t('cur.accept'), danger: false }))) return;
+      if (!(await CQ.confirm(t('cur.bulk.confirm').replace('{n}', () => ids.length), { ok: t('cur.accept'), danger: false }))) return;
       try { await curPost(`${CUR()}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
@@ -909,31 +1118,35 @@
     $('reloadAct').addEventListener('click', loadActivity);
     async function loadActivity() {
       const box = $('actBox');
-      const ev = (await fetch(`${K()}/activity`, { headers: H() }).then(r=>r.json())).events;
+      let ev; try { const r = await adminFetch(`${K()}/activity`, { headers: H() }); ev = r.ok ? (await r.json()).events : null; } catch { return; }
+      if (!Array.isArray(ev)) { box.innerHTML = `<div class="msg err">${t('toast.error')}</div>`; return; }
       if (!ev.length) { box.innerHTML = `<div class="empty">${t('kba.act.none')}</div>`; return; }
-      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>action</th><th>method</th><th>status</th><th>detail</th><th class="tight">chunks</th><th class="tight">ms</th><th>actor</th><th>when</th></tr></thead><tbody>` +
-        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td>${esc(e.method||'—')}</td>
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('tkb.act.filter')}</th><th class="hide-md">${t('tkb.act.method')}</th><th>${t('th.status')}</th><th>${t('tkb.act.detail')}</th><th class="tight">${t('th.chunks')}</th><th class="tight hide-md">ms</th><th>${t('tkb.act.actor')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        ev.map(e => `<tr><td><b>${esc(e.action)}</b></td><td class="hide-md">${esc(e.method||'—')}</td>
           <td><span class="pill ${e.status==='ready'||e.status==='ok'?'ready':e.status==='error'?'error':'processing'}">${esc(e.status||'—')}</span></td>
-          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count??'—'}</td><td class="tight">${e.duration_ms??'—'}</td>
+          <td>${esc(e.detail||'—')}</td><td class="tight">${e.chunk_count??'—'}</td><td class="tight hide-md">${e.duration_ms??'—'}</td>
           <td class="hint">${esc(e.actor||'—')}</td><td class="hint">${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`;
     }
 
     // ---- SCORING ----
     let scDims = [];
     function scRow(d, i) {
-      return `<div class="fc-claim" data-i="${i}" style="border-left-color:var(--beam)">
+      return `<div class="sc-edit" data-i="${i}">
+        <div class="inline" style="justify-content:space-between; margin-bottom:8px">
+          <span class="sc-edit-num">${i + 1}</span>
+          <button class="act danger sc-del" data-i="${i}" title="${t('sc.remove')}" aria-label="${t('sc.remove')}">🗑</button>
+        </div>
         <div class="row">
           <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"/></div>
-          <div style="flex:0; min-width:110px"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"/></div>
+          <div class="w-num"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"/></div>
         </div>
         <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"/>
         <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}">${esc(d.guidance||'')}</textarea>
-        <div class="actions"><button class="danger sc-del" data-i="${i}">${t('sc.remove')}</button></div>
       </div>`;
     }
     function scReadDom() {
       const box = $('scDims');
-      scDims = [...box.querySelectorAll('[data-i]')].filter(el=>el.classList.contains('fc-claim')).map(el => ({
+      scDims = [...box.querySelectorAll('[data-i]')].filter(el=>el.classList.contains('sc-edit')).map(el => ({
         key: (scDims[+el.dataset.i]||{}).key,
         name: el.querySelector('.sc-name').value.trim(),
         weight: parseFloat(el.querySelector('.sc-weight').value)||0,
@@ -957,6 +1170,26 @@
       return ok;
     }
     $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+
+    // Rubric import from file (AI draft) — mirrors the tenant editor.
+    $('scImport').addEventListener('click', () => $('scImportFile').click());
+    $('scImportFile').addEventListener('change', async () => {
+      const fInp = $('scImportFile'); const file = fInp.files[0]; if (!file) return;
+      const m = $('scMsg'); m.className='msg'; m.textContent = t('sc.import.loading');
+      const btn = $('scImport'); btn.disabled = true;
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await fetch(`${API}/admin/scoring/${TID}/import`, { method:'POST', headers: H(), body: fd });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || t('sc.import.fail'));
+        scDims = (d.dimensions || []).map(x => ({ name:x.name||'', weight:+x.weight||0,
+          description:x.description||'', guidance:x.guidance||'' }));
+        if (d.rubric) $('scRubric').value = d.rubric;
+        scRenderDims();
+        m.className='msg ok'; m.textContent = t('sc.import.loaded');
+        CQ.toast(t('sc.import.loaded'), 'ok');
+      } catch(e) { m.className='msg err'; m.textContent = e.message || t('sc.import.fail'); CQ.toast(t('sc.import.fail'), 'err'); }
+      finally { btn.disabled = false; fInp.value=''; }
+    });
     // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
     $('scNormalize').addEventListener('click', () => {
       scReadDom(); const n = scDims.length; if (!n) return;
@@ -992,7 +1225,7 @@
     // boot
     (async () => {
       const r = await fetch(`${API}/admin/tenants`, { headers: H() });
-      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html'); return; }
+      if (r.status === 401) { sessionStorage.removeItem('cq_admin_token'); location.replace('tenant.html?next=kb-admin.html'); return; }
       await loadTenants();
       paintVisLabels();
     })();

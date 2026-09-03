@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="brand.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="favicon.png" />
   <script src="brand.js"></script>
   <style>
     /* KB Health (curation review queue). Shared visual language with kb-admin.html. */
@@ -60,22 +60,28 @@
 </head>
 <body>
   <div id="cq-header"></div>
-  <main>
-    <!-- unified login -->
-    <div class="gate card" id="gate">
+  <main class="console">
+    <!-- unified login. A real <form> so Enter submits from EITHER field and password
+         managers recognise the pair; submission is intercepted, never navigates. -->
+    <form class="gate card" id="gate" autocomplete="on">
       <h3 data-i18n="login.heading"></h3>
       <label for="u" data-i18n="f.username"></label><input type="text" id="u" autocomplete="username" />
-      <label for="p" data-i18n="f.password"></label><input type="password" id="p" autocomplete="current-password" />
-      <div class="actions"><button class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
-      <div class="msg err" id="gateMsg"></div>
+      <label for="p" data-i18n="f.password"></label>
+      <div class="inline" style="gap:6px">
+        <input type="password" id="p" autocomplete="current-password" style="flex:1" />
+        <button type="button" class="icon-btn" id="pwToggle" data-i18n-title="login.showpw" aria-pressed="false">&#128065;</button>
+      </div>
+      <div class="actions"><button type="submit" class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
+      <div class="msg err" id="gateMsg" aria-live="polite"></div>
       <div class="hint" data-i18n="login.hint"></div>
-    </div>
+    </form>
 
     <div id="app" class="hidden">
       <div class="tabs">
         <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
         <div class="tab" data-tab="playground"><span>🧪</span> <span data-i18n="tab.playground"></span></div>
+        <div class="tab" data-tab="scoring"><span>🎯</span> <span data-i18n="tab.scoring"></span></div>
         <div class="tab" data-tab="health"><span>🩺</span> <span data-i18n="cur.tab"></span></div>
         <div class="tab" data-tab="bot"><span>🤖</span> <span data-i18n="tab.bot"></span></div>
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
@@ -161,9 +167,14 @@
               <div><label data-i18n="f.tags"></label><input id="i_tags" placeholder="refunds, billing" /></div>
             </div>
             <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
-            <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.txt,.md" /></div>
+            <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div>
+            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
+            <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
             <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" /></div>
+            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" multiple />
+            <div class="hint" data-i18n="kb.csvhint"></div><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <span class="tpl-links"></span></div></div>
             <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
             <div class="msg" id="importMsg"></div>
           </div>
@@ -188,8 +199,8 @@
             <p class="hint" data-i18n="tkb.pg.hint"></p>
             <label data-i18n="kba.pg.query"></label><input id="kPgQuery" />
             <div class="row" style="margin-top:10px">
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
-              <div style="flex:0; min-width:120px"><label data-i18n="kba.pg.threshold"></label><input id="kPgThresh" type="number" step="0.05" value="0" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
+              <div class="w-num"><label data-i18n="kba.pg.threshold"></label><input id="kPgThresh" type="number" step="0.05" value="0" /></div>
               <div style="flex:0; align-self:flex-end"><button class="primary" id="kPgRun" data-i18n="kba.pg.run"></button></div>
             </div>
             <div id="kPgResults" style="margin-top:12px"></div>
@@ -260,7 +271,7 @@
           </div>
           <div class="rec-row">
             <span class="hint" data-i18n="rec.or"></span>
-            <button class="ghost" type="button" id="recBtn">● Record</button>
+            <button class="ghost" type="button" id="recBtn"></button>
             <span class="rec-status hint" id="recStatus"></span>
           </div>
           <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
@@ -277,6 +288,7 @@
           <div class="subtabs" id="pgTabs">
             <div class="subtab active" data-pg="text" data-i18n="pg.mode.text"></div>
             <div class="subtab" data-pg="audio" data-i18n="pg.mode.audio"></div>
+            <div class="subtab" data-pg="sentiment" data-i18n="pg.mode.sentiment"></div>
           </div>
           <div id="pg-text">
             <label data-i18n="pg.ans.label"></label>
@@ -288,6 +300,29 @@
               <input type="file" id="pgFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
               <div class="drop-title" id="pgDropTitle" data-i18n="drop.title"></div>
               <div class="drop-sub" data-i18n="drop.sub_kb"></div>
+            </div>
+          </div>
+          <!-- SENTIMENT — deliberately separate from the audio/text scoring modes above:
+               config here, own Save button, then a plain audio-in/sentiment-out tool that
+               shares the page's single pgRun button. -->
+          <div id="pg-sentiment" class="hidden">
+            <div class="sub" style="margin-bottom:14px">
+              <div class="inline" style="justify-content:space-between; align-items:baseline">
+                <b style="color:var(--mist)" data-i18n="sn.config"></b>
+                <span class="hint" id="snCfgMsg"></span>
+              </div>
+              <p class="hint" data-i18n="sn.config.desc"></p>
+              <p class="hint hidden" id="snReadonly" data-i18n="sn.readonly" style="color:var(--pending)"></p>
+              <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
+              <label data-i18n="sn.guidance"></label>
+              <textarea id="snGuidance" data-i18n-ph="sn.guidance.ph" style="min-height:70px"></textarea>
+              <div class="actions"><button class="ghost" id="snCfgSave" data-i18n="sn.save"></button></div>
+            </div>
+            <label data-i18n="sn.audiolabel"></label>
+            <div class="drop" id="pgSnDrop">
+              <input type="file" id="pgSnFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+              <div class="drop-title" id="pgSnDropTitle" data-i18n="drop.title"></div>
+              <div class="drop-sub" data-i18n="drop.sub_sn"></div>
             </div>
           </div>
           <div class="actions"><button class="primary" id="pgRun" data-i18n="pg.run"></button></div>
@@ -331,6 +366,15 @@
           <div class="msg err hidden" id="botLoadMsg"></div>
         </div>
 
+        <!-- Shown instead of the config form while the bot has not launched (BOT_COMING_SOON). -->
+        <div class="card hidden" id="botSoon">
+          <div class="soon-card" style="border:none; padding:44px 20px">
+            <span class="soon-emoji">🤖</span>
+            <h3 data-i18n="bot.soon.title"></h3>
+            <p data-i18n="bot.soon.desc"></p>
+          </div>
+        </div>
+
         <div id="botForm" class="hidden">
           <!-- Autopilot: the one switch that points a model at the public internet. -->
           <div class="card">
@@ -356,7 +400,7 @@
                customer reads, and a missing translation is invisible unless it is shown here. -->
           <div class="card">
             <h3 data-i18n="bot.greeting"></h3>
-            <div class="row">
+            <div class="row stack-md">
               <div><label data-i18n="bot.lang.en"></label><textarea id="b_greet_en"></textarea></div>
               <div><label data-i18n="bot.lang.ka"></label><textarea id="b_greet_ka"></textarea></div>
               <div><label data-i18n="bot.lang.ru"></label><textarea id="b_greet_ru"></textarea></div>
@@ -365,7 +409,7 @@
           <div class="card">
             <h3 data-i18n="bot.refusal"></h3>
             <p class="hint" data-i18n="bot.refusal.hint"></p>
-            <div class="row">
+            <div class="row stack-md">
               <div><label data-i18n="bot.lang.en"></label><textarea id="b_ref_en"></textarea></div>
               <div><label data-i18n="bot.lang.ka"></label><textarea id="b_ref_ka"></textarea></div>
               <div><label data-i18n="bot.lang.ru"></label><textarea id="b_ref_ru"></textarea></div>
@@ -377,6 +421,7 @@
             <input id="b_escalation" data-i18n-ph="bot.escalation.ph" />
             <div class="hint" data-i18n="bot.escalation.hint"></div>
             <h4 data-i18n="bot.retrieval"></h4>
+            <div class="hint" data-i18n="bot.limits.hint"></div>
             <div class="row">
               <div><label data-i18n="bot.minscore"></label><input id="b_minscore" type="number" step="0.01" min="0" max="1" /></div>
               <div><label data-i18n="bot.minhits"></label><input id="b_minhits" type="number" min="0" /></div>
@@ -407,6 +452,33 @@
         </div>
       </section>
 
+      <!-- SCORING (self-serve rubric config; same editor as the KB-admin console) -->
+      <section class="panel" id="panel-scoring">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline">
+            <h3 style="margin:0" data-i18n="sc.heading"></h3>
+            <span class="hint" id="scVersion"></span>
+          </div>
+          <p class="hint" data-i18n="sc.desc"></p>
+          <p class="hint hidden" id="scReadonly" data-i18n="sc.readonly" style="color:var(--pending)"></p>
+          <div id="scDims"></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <div class="inline" style="gap:8px">
+              <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
+              <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+              <button class="ghost" id="scImport" data-i18n="sc.import"></button>
+              <input type="file" id="scImportFile" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" class="hidden" />
+            </div>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
+          </div>
+          <hr class="sep" />
+          <label data-i18n="sc.rubric"></label>
+          <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
+          <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
+          <div class="msg" id="scMsg"></div>
+        </div>
+      </section>
+
       <!-- HISTORY -->
       <section class="panel" id="panel-history">
         <div class="card">
@@ -428,11 +500,10 @@
       { i18n: 'nav.public', href: 'index.html' },
     ]});
     let TOKEN = sessionStorage.getItem('cq_tenant_token') || '';
+    let ROLE = '';   // tenant user role (owner|member) — owners can edit the scoring rubric
     const $ = id => document.getElementById(id);
     const authH = (extra={}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    function toArr(v){ if(v==null) return []; if(Array.isArray(v)) return v.filter(x=>x!=null).map(x=>typeof x==='object'?Object.values(x).filter(Boolean).join(' — '):String(x)); if(typeof v==='object') return Object.values(v).map(String); const s=String(v).trim(); return s?[s]:[]; }
-    const list = v => { const a=toArr(v); return a.length?'<ul class="tight">'+a.map(i=>`<li>${esc(i)}</li>`).join('')+'</ul>':'<span class="muted">—</span>'; };
 
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -440,6 +511,7 @@
       if (tb.dataset.tab==='kb') kbLoad(); if (tb.dataset.tab==='history') loadJobs();
       if (tb.dataset.tab==='health') loadCuration();
       if (tb.dataset.tab==='bot') loadBot();
+      if (tb.dataset.tab==='scoring') loadScoring();
     }));
     // KB console subtabs. Scoped by container id — the import switcher below and the rubric
     // playground's switcher are separate `.subtab` groups on the same page.
@@ -459,8 +531,23 @@
       ['kfStatus','kfVis','kChunkDoc'].forEach(id => CQ.syncSelect($(id)));
       kbLoad(); loadJobs();
       if ($('panel-health').classList.contains('active')) loadCuration();
+      if (scLoaded) { scReadDom(); scRenderDims(); scShowVersion(); } // relabel, keep unsaved edits
       if (botCfg) botStatePill(); } });   // the state pill is built in JS, not data-i18n
 
+
+    // Template download links under the importer: users copy a working structure instead of
+    // guessing. Language-matched (KA files for the Georgian UI, EN otherwise), repainted on
+    // every language switch.
+    function paintTplLinks() {
+      const l = CQ.lang() === 'ka' ? 'ka' : 'en';
+      document.querySelectorAll('.tpl-links').forEach(el => {
+        el.innerHTML = ['pdf','docx','txt','md','csv']
+          .map(x => ` <a href="guides/templates/kb-template-${l}.${x}" download>${x.toUpperCase()}</a>`)
+          .join(' ·');
+      });
+    }
+    paintTplLinks();
+    document.addEventListener('cq:lang', paintTplLinks);
     // dropzone
     const audioInput = $('audio');
     { const drop = $('audioDrop');
@@ -472,26 +559,59 @@
       CQ.attachRecorder({ button: $('recBtn'), status: $('recStatus'), fileInput: audioInput });
     }
 
-    // unified login (tenant users + superadmin)
+    // unified login (tenant users + superadmin).
+    // Sessions are DELIBERATELY per-tab (sessionStorage): a QA console signed into customer
+    // data should not silently follow into every new tab on a shared machine.
+    const NEXT_OK = ['admin.html', 'kb-admin.html'];   // allowlist for ?next= after admin login
     async function login() {
       $('gateMsg').textContent='';
+      const u = $('u').value.trim(), pw = $('p').value;
+      if (!u || !pw) { $('gateMsg').textContent = t('login.empty'); (!u ? $('u') : $('p')).focus(); return; }
+      const b = $('loginBtn'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>' + t('btn.signin') + '…';
       try {
         const r = await fetch(`${API}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ username: $('u').value.trim(), password: $('p').value }) });
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || 'Sign in failed');
-        if (d.scope === 'admin') { sessionStorage.setItem('cq_admin_token', d.token); location.href = 'admin.html'; return; }
-        TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
+          body: JSON.stringify({ username: u, password: pw }) });
+        const d = await CQ.readResp(r).catch(err => { throw (r.status === 401 ? new Error(t('login.failed')) : err); });
+        if (d.scope === 'admin') {
+          sessionStorage.setItem('cq_admin_token', d.token);
+          const next = new URLSearchParams(location.search).get('next');
+          location.href = NEXT_OK.includes(next) ? next : 'admin.html'; return;
+        }
+        TOKEN = d.token; sessionStorage.setItem('cq_tenant_token', TOKEN); enter(d.client, d.role); CQ.toast(t('toast.welcome') + (d.client?', '+d.client.name:''), 'ok');
       } catch(e){ $('gateMsg').textContent = e.message; }
+      finally { b.disabled = false; b.textContent = t('btn.signin'); }
     }
-    function enter(client) {
+    function enter(client, role) {
+      ROLE = role || '';
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
-      if (client) $('who').textContent = client.name;
+      if (client) { $('who').textContent = client.name; document.title = 'CommuniQ — ' + client.name; }
       CQ.enhanceSelects($('panel-kb'));
       kbLoad();
     }
-    $('loginBtn').addEventListener('click', login);
-    $('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
-    $('logout').addEventListener('click', e => { e.preventDefault(); sessionStorage.removeItem('cq_tenant_token'); location.reload(); });
+    // An expired token mid-session: one gate, one message, instead of every feature quietly
+    // failing in its own way. Every API caller funnels through apiFetch below.
+    function sessionExpired() {
+      TOKEN = ''; sessionStorage.removeItem('cq_tenant_token');
+      $('app').classList.add('hidden'); $('logout').classList.add('hidden');
+      $('gate').classList.remove('hidden');
+      $('gateMsg').textContent = t('session.expired');
+      document.title = 'CommuniQ — ' + t('login.heading');
+      $('u').focus();
+    }
+    async function apiFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401 && TOKEN) sessionExpired();
+      return r;
+    }
+    $('gate').addEventListener('submit', e => { e.preventDefault(); login(); });
+    $('pwToggle').addEventListener('click', () => {
+      const showing = $('p').type === 'text';
+      $('p').type = showing ? 'password' : 'text';
+      $('pwToggle').setAttribute('aria-pressed', String(!showing));
+    });
+    $('logout').addEventListener('click', e => { e.preventDefault();
+      sessionStorage.removeItem('cq_tenant_token'); sessionStorage.removeItem('cq_admin_token');
+      location.reload(); });
 
     // import
     $('importBtn').addEventListener('click', async () => {
@@ -502,25 +622,69 @@
       const doc_type = $('i_type').value.trim() || (mode==='csv'?'faq':mode==='text'?'note':'document');
       const title = $('i_title').value.trim(); const tags = $('i_tags').value.trim();
       const btn = $('importBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.import')+'…';
+      let wantAI = false;
       try {
         let r;
         if (mode==='text') {
-          if (!$('i_text').value.trim()) throw new Error('Enter some text.');
-          r = await fetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
+          if (!$('i_text').value.trim()) throw new Error(t('tts.needtext'));
+          r = await apiFetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
             body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
+          const d = await CQ.readResp(r);
+          m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
         } else {
-          const f = (mode==='csv'?$('i_csv'):$('i_file')).files[0]; if (!f) throw new Error('Choose a file.');
-          const fd = new FormData(); fd.append('file', f); fd.append('doc_type', doc_type); fd.append('title', title); fd.append('tags', tags);
-          fd.append('metadata', JSON.stringify(meta));
-          r = await fetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
+          // Several files of any accepted type in one go: each file is its own request and
+          // its own document, so one bad file fails alone (named below) instead of
+          // aborting the batch. Sequential — parsing is synchronous server-side.
+          const files = [...(mode==='csv'?$('i_csv'):$('i_file')).files];
+          if (!files.length) throw new Error(t('kb.needfile'));
+          wantAI = mode !== 'csv' && $('i_restr').checked;
+          const failed = [], made = [];
+          for (let i = 0; i < files.length; i++) {
+            m.className='msg'; m.textContent = t('kb.files.progress')
+              .replace('{done}', () => i + 1).replace('{total}', () => files.length);
+            const fd = new FormData(); fd.append('file', files[i]); fd.append('doc_type', doc_type);
+            fd.append('title', files.length === 1 ? title : ''); fd.append('tags', tags);
+            fd.append('metadata', JSON.stringify(meta));
+            if (wantAI) fd.append('restructure', '1');
+            try {
+              const rr = await apiFetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
+              const dd = await CQ.readResp(rr);
+              if (dd && dd.id) made.push(dd.id);
+            } catch (err) { failed.push(`${files[i].name} — ${err.message}`); }
+          }
+          if (failed.length) {
+            m.className = 'msg err';
+            m.textContent = `${t('kb.files.done').replace('{n}', () => made.length)} ${t('kb.files.failed')} ${failed.join(' · ')}`;
+            CQ.toast(t('toast.error'), 'err');
+          } else {
+            m.className = 'msg ok';
+            m.textContent = t('kb.files.done').replace('{n}', () => made.length);
+            CQ.toast(t('toast.imported'), 'ok');
+          }
+          if (wantAI) made.forEach(pollRestr);
         }
-        const d = await CQ.readResp(r);
-        m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
-        $('i_text').value=''; $('i_file').value=''; $('i_csv').value='';
+        $('i_text').value=''; $('i_file').value=''; $('i_csv').value=''; $('i_restr').checked=false;
         setTimeout(loadDocs, 1500); setTimeout(loadDocs, 4000);
       } catch(e){ m.className='msg err'; m.textContent = e.message; }
       finally { btn.disabled=false; btn.textContent=t('btn.import'); }
     });
+
+    // A restructured import runs for minutes, far past the quick refresh timers above —
+    // poll the document until it settles and surface the outcome where the uploader is
+    // looking, instead of leaving the error as a tooltip they must hunt for.
+    async function pollRestr(id) {
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        let doc = null;
+        try { const r = await apiFetch(`${API}/kb/documents/${id}`, { headers: authH() });
+          if (r.ok) doc = await r.json(); } catch {}
+        if (!doc || !doc.status || doc.status === 'pending' || doc.status === 'processing') continue;
+        const m = $('importMsg');
+        if (doc.status === 'ready') { m.className='msg ok'; m.textContent = t('kb.restr.done'); CQ.toast(t('kb.restr.done'), 'ok'); }
+        else { m.className='msg err'; m.textContent = doc.error || t('kb.restr.fail'); CQ.toast(t('kb.restr.fail'), 'err'); }
+        loadDocs(); return;
+      }
+    }
 
     /* ==================================================================================
        KB CONSOLE
@@ -546,7 +710,7 @@
       // A dead proxy rejects the fetch outright; swallowing it here means every section
       // renders its own "could not load" state instead of a silently blank card.
       try {
-        const r = await fetch(url, init || { headers: authH() });
+        const r = await apiFetch(url, init || { headers: authH() });
         if (!r.ok) return null;
         return await r.json().catch(() => null);
       } catch { return null; }
@@ -555,7 +719,7 @@
        an ordinary not-ok response the caller already knows how to report, rather than an
        unhandled rejection that leaves a spinner spinning and the user with no explanation. */
     async function kbSend(url, init) {
-      try { return await fetch(url, init); }
+      try { return await apiFetch(url, init); }
       catch { return { ok: false, status: 0, json: async () => ({ detail: t('err.unavailable') }) }; }
     }
     function kbPost(url, body, method) {
@@ -627,22 +791,22 @@
       }
       box.innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th><input type="checkbox" id="kSelAll"/></th><th>${t('th.title')}</th><th>${t('th.category')}</th>
-        <th>${t('kba.doc.tags')}</th><th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th>
-        <th class="tight">${t('vis.col')}</th><th class="tight">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
+        <th class="hide-md">${t('kba.doc.tags')}</th><th class="tight">${t('th.chunks')}</th><th>${t('th.status')}</th>
+        <th class="tight">${t('vis.col')}</th><th class="tight hide-md">${t('tkb.th.source')}</th><th></th></tr></thead><tbody>` +
         docs.map(x => `<tr>
           <td><input type="checkbox" class="krowsel" data-id="${esc(x.id)}"/></td>
           <td>${esc(x.title)}</td><td>${esc(x.doc_type)}</td>
-          <td>${(Array.isArray(x.tags)?x.tags:[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('') || '—'}</td>
+          <td class="hide-md">${(Array.isArray(x.tags)?x.tags:[]).map(tg=>`<span class="chip">${esc(tg)}</span>`).join('') || '—'}</td>
           <td class="tight">${x.chunk_count ?? 0}</td>
           <td><span class="pill ${esc(x.status)}">${esc(x.status)}</span>${x.error?` <span class="hint" title="${esc(x.error)}">⚠</span>`:''}</td>
           <td class="tight"><span class="pill ${x.visibility==='public'?'vis-public':'vis-internal'}">${x.visibility==='public'?t('vis.public'):t('vis.internal')}</span></td>
-          <td class="tight hint">${esc(x.source_type||'—')}</td>
+          <td class="tight hint hide-md">${esc(x.source_type||'—')}</td>
           <td class="inline">
-            <button class="ghost" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}</button>
-            <button class="ghost" data-act="edit" data-id="${esc(x.id)}">${t('kba.edit')}</button>
-            <button class="ghost" data-act="chunks" data-id="${esc(x.id)}">${t('kba.chunks')}</button>
-            <button class="ghost" data-act="reembed" data-id="${esc(x.id)}">${t('kba.reembed')}</button>
-            <button class="danger" data-act="del" data-id="${esc(x.id)}" data-title="${esc(x.title)}">${t('kba.delete')}</button>
+            <button class="act" data-act="${x.visibility==='public'?'unpublish':'publish'}" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}" aria-label="${x.visibility==='public'?t('vis.unpublish'):t('vis.publish')}">${x.visibility==='public'?'🚫':'🤖'}</button>
+            <button class="act" data-act="edit" data-id="${esc(x.id)}" title="${t('kba.edit')}" aria-label="${t('kba.edit')}">✏️</button>
+            <button class="act" data-act="chunks" data-id="${esc(x.id)}" title="${t('kba.chunks')}" aria-label="${t('kba.chunks')}">🧩</button>
+            <button class="act" data-act="reembed" data-id="${esc(x.id)}" title="${t('kba.reembed')}" aria-label="${t('kba.reembed')}">↻</button>
+            <button class="act danger" data-act="del" data-id="${esc(x.id)}" data-title="${esc(x.title)}" title="${t('kba.delete')}" aria-label="${t('kba.delete')}">🗑</button>
           </td></tr>`).join('') + `</tbody></table></div>`;
       box.querySelectorAll('button[data-act]').forEach(b =>
         b.addEventListener('click', () => docAction(b.dataset.act, b.dataset.id, b.dataset.title)));
@@ -760,7 +924,7 @@
       if (action === 'reembed' && !(await CQ.confirm(t('tkb.bulk.reembed.confirm').replace('{n}', kSel.size), { ok: t('kba.reembed'), danger: false }))) return;
       const r = await kbPost(`${API}/kb/bulk`, { action, document_ids: [...kSel], tags });
       if (r.ok) { const d = await r.json().catch(()=>({}));
-        CQ.toast(`${action}: ${d.affected ?? 0}`, 'ok'); loadDocs(); }
+        CQ.toast(t('bulk.done.' + action).replace('{n}', d.affected ?? 0), 'ok'); loadDocs(); }
       else await kbFail(r);
     }
 
@@ -1054,38 +1218,27 @@
     $('analyzeBtn').addEventListener('click', async () => {
       const f = $('audio').files[0]; const err = $('analyzeErr'); const out = $('analyzeResult');
       err.textContent=''; out.innerHTML='';
-      if (!f) { err.textContent='Choose an audio file.'; return; }
+      if (!f) { err.textContent = t('stt.nofile'); return; }
       const btn = $('analyzeBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.analyze')+'…';
       try {
         const fd = new FormData(); fd.append('file', f);
-        const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+        const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
         const d = await CQ.readResp(r);
         out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { btn.disabled=false; btn.textContent=t('btn.analyze'); }
     });
     function renderAnalysis(d) {
-      const a = d.analysis || {};
-      const topics = toArr(a.topics).map(x=>`<span class="chip">${esc(x)}</span>`).join('') || '<span class="muted">—</span>';
-      const kb = (d.kb_used||[]).length ? (d.kb_used||[]).map(k=>`<span class="chip">${esc(k.title||k.doc_type||'KB')}${k.score!=null?` · ${k.score}`:''}</span>`).join('') : `<span class="muted">${t('res.nokb')}</span>`;
-      return `<div class="card">
-        <h3>${t('res.analysis')}</h3>
-        <div class="kv"><b>${t('res.language')}</b> ${esc(a.language||d.language||'—')}</div>
-        <div class="kv"><b>${t('res.sentiment')}</b> ${esc(a.sentiment||'—')} &nbsp; <b>${t('res.quality')}</b> ${a.quality_score??'—'}/100</div>
-        <div class="kv"><b>${t('res.topics')}</b> ${topics}</div>
-        <div style="margin-top:8px"><b style="color:var(--mist)">${t('res.kbused')}</b><div style="margin-top:4px">${kb}</div></div>
-        <div style="margin-top:10px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${esc(a.summary)}</p></div>
-        <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div><div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
-      </div>
-      ${CQ.scorecardHTML(d.scoring)}
-      ${CQ.factcheckHTML(d.kb_check)}
-      <div class="card"><h3>${t('res.transcript')}</h3><pre class="tx">${esc(d.transcript)||t('res.empty')}</pre></div>`;
+      // Shared with the KB-admin console's Playground audio-score mode — see brand.js.
+      return CQ.analysisHTML(d) + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
     }
-    // ---- Playground: score typed text OR an uploaded audio/video against rubric + KB ----
+    // ---- Playground: score typed text, an uploaded audio/video, OR run standalone sentiment ----
     document.querySelectorAll('#pgTabs .subtab').forEach(s => s.addEventListener('click', () => {
       document.querySelectorAll('#pgTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
       $('pg-text').classList.toggle('hidden', s.dataset.pg!=='text');
       $('pg-audio').classList.toggle('hidden', s.dataset.pg!=='audio');
+      $('pg-sentiment').classList.toggle('hidden', s.dataset.pg!=='sentiment');
+      if (s.dataset.pg==='sentiment') loadSentimentConfig();
     }));
     { const drop = $('pgDrop'), inp = $('pgFile');
       inp.addEventListener('change', () => { const f = inp.files[0];
@@ -1094,29 +1247,67 @@
       ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
       drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
     }
+    { const drop = $('pgSnDrop'), inp = $('pgSnFile');
+      inp.addEventListener('change', () => { const f = inp.files[0];
+        $('pgSnDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
+    }
+    // Sentiment config: same owner|apikey policy as the Scoring tab (ROLE is set in enter()).
+    async function loadSentimentConfig() {
+      const ro = ROLE !== 'owner';
+      $('snReadonly').classList.toggle('hidden', !ro);
+      $('snEnabled').disabled = ro; $('snGuidance').disabled = ro;
+      $('snCfgSave').classList.toggle('hidden', ro);
+      $('snCfgMsg').textContent='';
+      try {
+        const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { headers: authH() }));
+        $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
+      } catch(e){ $('snCfgMsg').textContent = e.message; }
+    }
+    $('snCfgSave').addEventListener('click', async () => {
+      const m = $('snCfgMsg'); m.textContent='';
+      const btn = $('snCfgSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      try {
+        await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { method:'PUT',
+          headers: authH({'Content-Type':'application/json'}),
+          body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
+        m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'),'ok');
+      } catch(e){ m.textContent = e.message; CQ.toast(e.message,'err'); }
+      finally { btn.disabled=false; btn.textContent=t('sn.save'); }
+    });
     $('pgRun').addEventListener('click', async () => {
       const mode = (document.querySelector('#pgTabs .subtab.active')||{}).dataset.pg || 'text';
       const err = $('pgErr'), out = $('pgResult'); err.textContent=''; out.innerHTML='';
-      const btn = $('pgRun'), label = t('pg.run');
+      const btn = $('pgRun'), label = mode==='sentiment' ? t('sn.run') : t('pg.run');
       try {
         if (mode === 'text') {
           const text = $('pgText').value.trim();
           if (!text) { err.textContent = t('pg.ans.empty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
-          const r = await fetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
+          const r = await apiFetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
           const d = await CQ.readResp(r);
           out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
             + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
-        } else {
+        } else if (mode === 'audio') {
           const f = $('pgFile').files[0];
           if (!f) { err.textContent = t('pg.audioempty'); return; }
           btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
+          const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = renderAnalysis(d);
+        } else {
+          const f = $('pgSnFile').files[0];
+          if (!f) { err.textContent = t('pg.audioempty'); return; }
+          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
+          const fd = new FormData(); fd.append('file', f);
+          const r = await apiFetch(`${API}/sentiment`, { method:'POST', headers: authH(), body: fd });
+          const d = await CQ.readResp(r);
+          out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
         }
-        CQ.toast(t('res.done'), 'ok');
+        CQ.toast(t(mode === 'sentiment' ? 'sn.done' : 'pg.done'), 'ok');
       } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { btn.disabled=false; btn.textContent = label; }
     });
@@ -1209,7 +1400,7 @@
       const pct = v => v == null ? '—' : Math.round(v * 100) + '%';
       return `<div class="card" data-pid="${esc(p.id)}">
         <div class="row" style="justify-content:space-between; align-items:flex-start; gap:10px">
-          <div style="flex:1; min-width:220px">
+          <div class="w-name">
             <div class="inline" style="gap:8px; flex-wrap:wrap">
               ${bulkable ? `<input type="checkbox" class="cur-sel" data-id="${esc(p.id)}" style="width:auto" />` : ''}
               <span class="pill ${OP_PILL[op] || 'notinkb'}">${t('cur.op.' + op) }</span>
@@ -1248,7 +1439,7 @@
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
       let d;
       try {
-        const r = await fetch(`${CUR}?state=pending`, { headers: authH() });
+        const r = await apiFetch(`${CUR}?state=pending`, { headers: authH() });
         if (!r.ok) throw new Error(t('cur.loadfail'));
         d = await r.json();
       } catch (e) { box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
@@ -1258,7 +1449,7 @@
       // The list is deliberately light; body, quotes and the live target text come from the
       // per-proposal GET. The open queue is hard-capped at ~10 cards, so this stays cheap.
       curProposals = await Promise.all(listed.map(async p => {
-        try { const rr = await fetch(`${CUR}/${p.id}`, { headers: authH() });
+        try { const rr = await apiFetch(`${CUR}/${p.id}`, { headers: authH() });
           if (rr.ok) { const full = await rr.json(); if (full && full.id) return full; } } catch {}
         return p;
       }));
@@ -1344,12 +1535,12 @@
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
     }
     async function curPost(url, body) {
-      const r = await fetch(url, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+      const r = await apiFetch(url, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
       return CQ.readResp(r);
     }
     $('curBulkAccept').addEventListener('click', async () => {
       const ids = [...curSel]; if (!ids.length) return;
-      if (!(await CQ.confirm(`${t('cur.bulk.accept')} — ${ids.length}?`, { ok: t('cur.accept'), danger: false }))) return;
+      if (!(await CQ.confirm(t('cur.bulk.confirm').replace('{n}', () => ids.length), { ok: t('cur.accept'), danger: false }))) return;
       try { await curPost(`${CUR}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
@@ -1361,6 +1552,9 @@
     // If that route is not deployed yet the tab says so rather than throwing: a tenant seeing
     // a dead tab must be told it is the server, not their browser.
     const BOTCFG = `${API}/chat/config`;
+    // The bot has not launched yet: the tab shows a "Coming soon" card instead of the config
+    // form. Flip to false when the bot ships — everything below is wired and ready.
+    const BOT_COMING_SOON = true;
     const BOT_LANGS = ['en','ka','ru'];
     let botCfg = null;
 
@@ -1403,10 +1597,16 @@
 
     $('reloadBot').addEventListener('click', loadBot);
     async function loadBot() {
+      if (BOT_COMING_SOON) {
+        $('botSoon').classList.remove('hidden');
+        $('botForm').classList.add('hidden'); $('botLoadMsg').classList.add('hidden');
+        $('botState').classList.add('hidden'); $('reloadBot').classList.add('hidden');
+        return;
+      }
       const m = $('botLoadMsg'); m.classList.add('hidden'); m.textContent = '';
       let d = null;
       try {
-        const r = await fetch(BOTCFG, { headers: authH() });
+        const r = await apiFetch(BOTCFG, { headers: authH() });
         if (r.status === 404 || r.status === 405) { throw new Error(t('bot.unavailable')); }
         if (!r.ok) throw new Error(t('bot.loadfail'));
         d = await r.json();
@@ -1472,7 +1672,7 @@
       };
       const b = $('saveBot'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
       try {
-        const r = await fetch(BOTCFG, { method:'PUT', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+        const r = await apiFetch(BOTCFG, { method:'PUT', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify(body) });
         // 409 == "no published documents". Explain the reason and point at the fix; a toggle
         // that only fails is the difference between a broken product and one that teaches.
         if (r.status === 409) {
@@ -1489,10 +1689,117 @@
       } finally { b.disabled = false; b.textContent = t('bot.save'); }
     });
 
+    // ---- Scoring rubric (self-serve config; view-only for members, editable by owners) ----
+    let scDims = [], scLoaded = false, scVer = null;
+    const scEditable = () => ROLE === 'owner';
+    function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
+    function scRow(d, i) {
+      const dis = scEditable() ? '' : ' disabled';
+      return `<div class="sc-edit" data-i="${i}">
+        <div class="inline" style="justify-content:space-between; margin-bottom:8px">
+          <span class="sc-edit-num">${i + 1}</span>
+          ${scEditable() ? `<button class="act danger sc-del" data-i="${i}" title="${t('sc.remove')}" aria-label="${t('sc.remove')}">🗑</button>` : ''}
+        </div>
+        <div class="row">
+          <div style="flex:2"><label>${t('sc.dname')}</label><input class="sc-name" value="${esc(d.name||'')}" placeholder="${esc(t('sc.dname.ph'))}"${dis}/></div>
+          <div class="w-num"><label>${t('sc.dweight')}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight??0}"${dis}/></div>
+        </div>
+        <label>${t('sc.ddesc')}</label><input class="sc-desc" value="${esc(d.description||'')}"${dis}/>
+        <label>${t('sc.dguide')}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}"${dis}>${esc(d.guidance||'')}</textarea>
+      </div>`;
+    }
+    function scReadDom() {
+      scDims = [...$('scDims').querySelectorAll('[data-i]')].filter(el=>el.classList.contains('sc-edit')).map(el => ({
+        key: (scDims[+el.dataset.i]||{}).key,
+        name: el.querySelector('.sc-name').value.trim(),
+        weight: parseFloat(el.querySelector('.sc-weight').value)||0,
+        description: el.querySelector('.sc-desc').value.trim(),
+        guidance: el.querySelector('.sc-guide').value.trim(),
+      }));
+    }
+    function scRenderDims() {
+      const box = $('scDims');
+      box.innerHTML = scDims.length ? scDims.map(scRow).join('') : `<div class="empty">${t('sc.nodims')}</div>`;
+      box.querySelectorAll('.sc-del').forEach(b => b.addEventListener('click', () => { scReadDom(); scDims.splice(+b.dataset.i,1); scRenderDims(); }));
+      box.querySelectorAll('.sc-weight').forEach(inp => inp.addEventListener('input', scSum));
+      scSum();
+    }
+    function scSum() {
+      let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value)||0);
+      s = Math.round(s*10)/10;
+      const ok = Math.abs(s - 100) <= 0.5;
+      $('scSum').textContent = s; $('scSum').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      $('scSumFlag').textContent = ok ? '✓' : '✗'; $('scSumFlag').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      return ok;
+    }
+    $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
+
+    // Rubric import: upload a scoring-standard file (a scorecard spreadsheet, a policy
+    // DOCX...), the AI maps it to a dimensions DRAFT that lands in this editor — nothing
+    // is saved until the human presses save, so the existing version/audit flow holds.
+    $('scImport').addEventListener('click', () => $('scImportFile').click());
+    $('scImportFile').addEventListener('change', async () => {
+      const fInp = $('scImportFile'); const file = fInp.files[0]; if (!file) return;
+      const m = $('scMsg'); m.className='msg'; m.textContent = t('sc.import.loading');
+      const btn = $('scImport'); btn.disabled = true;
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        const r = await apiFetch(`${API}/scoring/import`, { method:'POST', headers: authH(), body: fd });
+        const d = await CQ.readResp(r);
+        scDims = (d.dimensions || []).map(x => ({ name:x.name||'', weight:+x.weight||0,
+          description:x.description||'', guidance:x.guidance||'' }));
+        if (d.rubric) $('scRubric').value = d.rubric;
+        scRenderDims();
+        m.className='msg ok'; m.textContent = t('sc.import.loaded');
+        CQ.toast(t('sc.import.loaded'), 'ok');
+      } catch(e) { m.className='msg err'; m.textContent = e.message || t('sc.import.fail'); CQ.toast(t('sc.import.fail'), 'err'); }
+      finally { btn.disabled = false; fInp.value=''; }
+    });
+    // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
+    $('scNormalize').addEventListener('click', () => {
+      scReadDom(); const n = scDims.length; if (!n) return;
+      const total = scDims.reduce((a,d)=>a+(d.weight||0),0);
+      if (total <= 0) scDims.forEach(d => d.weight = Math.round(100/n));
+      else scDims.forEach(d => d.weight = Math.round((d.weight/total)*100));
+      scDims[n-1].weight += 100 - scDims.reduce((a,d)=>a+d.weight,0);
+      scRenderDims();
+    });
+    async function loadScoring() {
+      $('scMsg').textContent=''; $('scMsg').className='msg';
+      const ro = !scEditable();
+      $('scReadonly').classList.toggle('hidden', !ro);
+      ['scAdd','scNormalize','scSave','scImport'].forEach(id => $(id).classList.toggle('hidden', ro));
+      $('scRubric').disabled = ro;
+      try {
+        const cfg = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }));
+        scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
+        $('scRubric').value = cfg.rubric || '';
+        scVer = cfg.version || null; scLoaded = true; scShowVersion();
+        scRenderDims();
+      } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
+    }
+    $('scSave').addEventListener('click', async () => {
+      scReadDom();
+      if (!scDims.length) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needone'); return; }
+      if (scDims.some(d => !d.name)) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needname'); return; }
+      const total = Math.round(scDims.reduce((a,d)=>a+(d.weight||0),0)*10)/10;
+      if (Math.abs(total - 100) > 0.5) { $('scMsg').className='msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
+      const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+      try {
+        const d = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { method:'PUT',
+          headers: authH({'Content-Type':'application/json'}),
+          body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) }));
+        CQ.toast(t('sc.saved'),'ok');
+        scDims = (d.dimensions||[]).map(x=>({key:x.key,name:x.name,weight:x.weight,description:x.description,guidance:x.guidance}));
+        $('scRubric').value = d.rubric||''; scVer = d.version||null; scShowVersion(); scRenderDims();
+      } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
+      finally { btn.disabled=false; btn.textContent=t('sc.save'); }
+    });
+
     // history
     $('reloadJobs').addEventListener('click', loadJobs);
     async function loadJobs() {
-      const r = await fetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
+      const r = await apiFetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
       const box = $('jobList');
       box.innerHTML = jobs.length ? `<div class="table-wrap"><table><thead><tr><th>${t('th.file')}</th><th>${t('th.status')}</th><th>${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
         jobs.map(j=>`<tr style="cursor:pointer" data-id="${j.id}"><td>${esc(j.filename||'—')}</td><td><span class="pill ${j.status==='done'?'ready':j.status==='error'?'error':'processing'}">${esc(j.status)}</span></td><td>${esc(j.language||'—')}</td><td class="hint">${new Date(j.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`
@@ -1500,14 +1807,54 @@
       box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openJob(tr.dataset.id)));
     }
     async function openJob(id) {
-      const r = await fetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
+      const r = await apiFetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
       if (r.ok) $('jobDetail').innerHTML = renderAnalysis(d);
     }
 
     if (TOKEN) {
-      fetch(`${API}/auth/me`, { headers: authH() }).then(r => r.ok ? r.json() : Promise.reject())
-        .then(me => { if (me.kind==='tenant') enter(me.client); else throw 0; })
-        .catch(() => { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; });
+      // Freeze the gate while the session check is in flight, so a user with a valid
+      // session never sees an interactive sign-in form flash at them.
+      ['u','p','loginBtn'].forEach(id => $(id).disabled = true);
+      $('gateMsg').className = 'msg'; $('gateMsg').textContent = t('login.checking');
+      const unfreeze = () => { ['u','p','loginBtn'].forEach(id => $(id).disabled = false);
+        $('gateMsg').className = 'msg err'; if ($('gateMsg').textContent === t('login.checking')) $('gateMsg').textContent = ''; };
+      fetch(`${API}/auth/me`, { headers: authH() })
+        .then(r => {
+          if (r.ok) return r.json().then(me => { unfreeze(); if (me.kind === 'tenant') enter(me.client, me.role); else { sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; } });
+          if (r.status === 401 || r.status === 403) { unfreeze(); sessionStorage.removeItem('cq_tenant_token'); TOKEN=''; return; }
+          throw new Error('http ' + r.status);   // outage, not an invalid token
+        })
+        .catch(() => {  // network/API down: KEEP the token, offer a retry
+          unfreeze();
+          $('gateMsg').innerHTML = '';
+          $('gateMsg').append(t('err.unavailable') + ' ');
+          const rb = document.createElement('button');
+          rb.type = 'button'; rb.className = 'ghost'; rb.textContent = t('btn.retry');
+          rb.addEventListener('click', () => location.reload());
+          $('gateMsg').append(rb);
+        });
+    } else if (sessionStorage.getItem('cq_admin_token')) {
+      // A superadmin who wandered to the public app and clicked "Sign in" still has a live
+      // console session — validate it and route them back instead of demanding a password.
+      fetch(`${API}/auth/me`, { headers: { 'X-Admin-Token': sessionStorage.getItem('cq_admin_token') } })
+        .then(r => r.ok ? r.json() : null)
+        .then(me => {
+          if (me && me.kind === 'superadmin') {
+            const next = new URLSearchParams(location.search).get('next');
+            if (NEXT_OK.includes(next)) { location.replace(next); return; }
+            $('gateMsg').className = 'msg';
+            $('gateMsg').innerHTML = '';
+            $('gateMsg').append(t('login.asadmin') + ' ');
+            const a = document.createElement('a'); a.href = 'admin.html'; a.textContent = t('nav.console') + ' →';
+            $('gateMsg').append(a);
+          } else {
+            sessionStorage.removeItem('cq_admin_token');
+          }
+        })
+        .catch(() => {});
+      $('u').focus();
+    } else {
+      $('u').focus();
     }
   </script>
 </body>

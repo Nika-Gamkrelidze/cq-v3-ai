@@ -59,10 +59,28 @@ def extract_text(filename: str, content_type: str, data: bytes) -> str:
     ctype = (content_type or "").lower()
     if name.endswith(".pdf") or "pdf" in ctype:
         return _pdf_text(data)
-    if name.endswith(".docx") or "word" in ctype or "officedocument" in ctype:
+    # Legacy Office formats before the modern branches: ".doc" would otherwise fall into
+    # the docx branch via its "application/msword" content type and die inside python-docx
+    # with a parser traceback instead of a sentence the uploader can act on.
+    if name.endswith(".doc"):
+        raise ValueError("Legacy .doc is not supported — open the file in Word and save it "
+                         "as .docx, then import again.")
+    if name.endswith(".xls"):
+        raise ValueError("Legacy .xls is not supported — open the file in Excel and save it "
+                         "as .xlsx, then import again.")
+    if name.endswith(".docx") or "word" in ctype or "officedocument.wordprocessingml" in ctype:
         return _docx_text(data)
-    # txt / md / anything else -> decode as utf-8
-    return data.decode("utf-8", errors="replace")
+    if name.endswith((".xlsx", ".xlsm")) or "spreadsheet" in ctype:
+        return _xlsx_text(data)
+    # txt / md / anything else WITHOUT a known extension: accept only if it really is text.
+    # An unknown binary used to sail through this decode and die much later, in Postgres,
+    # as `invalid byte sequence for encoding "UTF8": 0x00` — an error no uploader can act on.
+    text = data.decode("utf-8", errors="replace")
+    sample = text[:4000]
+    if sample and (sample.count("\x00") + sample.count("�")) > len(sample) * 0.10:
+        raise ValueError("Unsupported file type. Supported formats: PDF, DOCX, XLSX, CSV, "
+                         "TXT, MD.")
+    return text.replace("\x00", "")
 
 
 def _pdf_text(data: bytes) -> str:
@@ -72,9 +90,77 @@ def _pdf_text(data: bytes) -> str:
 
 
 def _docx_text(data: bytes) -> str:
+    """Body text AND tables, in document order.
+
+    `document.paragraphs` alone silently DROPS every table — and real customer documents
+    (tariffs, product terms, SLA sheets) keep their load-bearing facts in tables. Verified
+    with a real installment-terms document: paragraphs-only extraction lost the amount,
+    term and rate rows entirely. Table rows are flattened to "cell | cell" lines, which
+    both embeds and reads back well.
+    """
     import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     document = docx.Document(io.BytesIO(data))
-    return "\n".join(p.text for p in document.paragraphs)
+    parts: list[str] = []
+    for child in document.element.body.iterchildren():
+        tag = child.tag
+        if tag.endswith('}p'):
+            t = Paragraph(child, document).text
+            if t.strip():
+                parts.append(t)
+        elif tag.endswith('}tbl'):
+            for row in Table(child, document).rows:
+                cells = [c.text.strip() for c in row.cells]
+                line = " | ".join(dict.fromkeys(c for c in cells if c))  # dedupe merged cells
+                if line:
+                    parts.append(line)
+    return "\n".join(parts)
+
+
+def _xlsx_text(data: bytes) -> str:
+    """Every sheet, flattened row-by-row to "cell | cell" lines — same shape as DOCX tables.
+
+    Real spreadsheets are not clean grids: QA scorecards arrive with merged section
+    banners, label/value preamble rows, spacer columns and cached formula errors
+    ("#REF!"). This makes no attempt to understand the layout — it preserves every
+    non-empty cell in reading order so the facts are searchable, and drops cells whose
+    only content is a formula error (noise that would otherwise embed as "#REF! | #REF!").
+    Merged ranges keep their value in the top-left cell only, which is exactly what we
+    want: the banner text appears once.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        parts: list[str] = []
+        for ws in wb.worksheets:
+            sheet_parts: list[str] = []
+            for row in ws.iter_rows(values_only=True):
+                cells = []
+                for v in row:
+                    if v is None:
+                        continue
+                    s = str(v).strip()
+                    if not s or s in _XLSX_FORMULA_ERRORS:
+                        continue
+                    cells.append(s)
+                if cells:
+                    sheet_parts.append(" | ".join(cells))
+            if sheet_parts:
+                # Name the sheet only in multi-sheet workbooks: a lone default "Sheet1"
+                # label adds nothing, but "წონები" vs "შეფასება" disambiguates retrieval.
+                if len(wb.worksheets) > 1:
+                    parts.append(f"[{ws.title}]")
+                parts.extend(sheet_parts)
+                parts.append("")
+        return "\n".join(parts).strip()
+    finally:
+        wb.close()
+
+
+_XLSX_FORMULA_ERRORS = {"#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NULL!", "#NUM!"}
 
 
 # ---- chunking --------------------------------------------------------------
@@ -141,7 +227,8 @@ def _checksum(text: str) -> str:
 
 async def ingest_document(doc_id: str, client_id: str, source_type: str,
                           *, text: str | None = None, csv_bytes: bytes | None = None,
-                          base_metadata: dict | None = None, event_id: str | None = None) -> None:
+                          base_metadata: dict | None = None, event_id: str | None = None,
+                          restructure: bool = False) -> None:
     """Background task: build chunks, embed them, store. Updates document status and,
     if given, the kb_events row (import history/audit).
 
@@ -162,6 +249,16 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
             contents = [c for c, _ in pairs]
             metas = [{**base_metadata, **m} for _, m in pairs]
             full_text = "\n\n".join(contents)
+        elif restructure:
+            # Opt-in AI pass for files that do not follow the KB templates: Claude rewrites
+            # the raw extracted text as discrete entries, which then take the CSV rows' path —
+            # one entry, one chunk. Failures raise with an uploader-actionable sentence and
+            # land on the document as status=error via the handler below.
+            from . import kb_restructure
+            pairs = await kb_restructure.restructure(text or "", client_id=client_id)
+            contents = [c for c, _ in pairs]
+            metas = [{**base_metadata, **m} for _, m in pairs]
+            full_text = "\n\n".join(contents)
         else:
             full_text = text or ""
             # Pure-CPU string walk over a document that can be megabytes: off the loop.
@@ -170,11 +267,16 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
 
         ms = int((time.monotonic() - started) * 1000)
         if not contents:
-            await _set_status(doc_id, "ready", chunk_count=0, char_count=len(full_text),
-                              content_text=full_text[:200000], checksum=_checksum(full_text),
-                              ingest_ms=ms, error=None)
+            # No extractable text is a FAILURE the uploader must see, not a quiet "ready"
+            # with zero chunks: a scanned (image-only) PDF used to import as ready while
+            # contributing nothing to search, fact-check or the bot — the user believed
+            # their document was in the knowledge base when it was invisible.
+            msg = ("No readable text found in the file. If this is a scanned document, "
+                   "run OCR or export a text-based version, then import again.")
+            await _set_status(doc_id, "error", chunk_count=0, char_count=len(full_text),
+                              ingest_ms=ms, error=msg)
             if event_id:
-                await kb_events.finish(event_id, "ready", chunk_count=0, duration_ms=ms)
+                await kb_events.finish(event_id, "error", detail=msg, duration_ms=ms)
             return
 
         vectors = await _embed_batched(contents)
@@ -196,8 +298,12 @@ async def ingest_document(doc_id: str, client_id: str, source_type: str,
                         to_pgvector(vec), i, len(content) // 4,
                     )
         ms = int((time.monotonic() - started) * 1000)
+        # Restructured docs checksum the ORIGINAL extracted text: the model's rewrite is not
+        # deterministic, so hashing it would give the same source file a different checksum
+        # on every import and quietly break checksum-based duplicate detection.
+        checksum_src = (text or "") if restructure else full_text
         await _set_status(doc_id, "ready", chunk_count=len(contents), char_count=len(full_text),
-                          content_text=full_text[:200000], checksum=_checksum(full_text),
+                          content_text=full_text[:200000], checksum=_checksum(checksum_src),
                           ingest_ms=ms, error=None)
         if event_id:
             await kb_events.finish(event_id, "ready", chunk_count=len(contents), duration_ms=ms)

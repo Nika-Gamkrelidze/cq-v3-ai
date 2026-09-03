@@ -12,8 +12,8 @@ import logging
 import time
 
 from ..db import pool
-from . import (claude, elevenlabs, factcheck, retrieval, scoring,
-               scoring_store, settings_store)
+from . import (claude, elevenlabs, factcheck, media, retrieval, scoring,
+               scoring_store, sentiment, settings_store)
 
 log = logging.getLogger("cq")
 
@@ -30,7 +30,8 @@ async def _update(job_id: str, **fields) -> None:
     cols, vals = [], []
     for k, v in fields.items():
         vals.append(v)
-        cast = "::jsonb" if k in ("analysis", "kb_used", "kb_check", "scoring") else ""
+        cast = ("::jsonb" if k in ("analysis", "kb_used", "kb_check", "scoring", "sentiment")
+                else "")
         cols.append(f"{k} = ${len(vals)+1}{cast}")
     async with pool().acquire() as conn:
         await conn.execute(
@@ -38,19 +39,51 @@ async def _update(job_id: str, **fields) -> None:
 
 
 async def create_job(*, filename, content_type, size_bytes, client_id, principal_kind,
-                     anon_key, status="queued", batch_id=None, external_ref=None) -> str:
+                     anon_key, status="queued", batch_id=None, external_ref=None,
+                     client_ip=None, audio=None) -> str:
+    """Create the row. When `audio` is given the bytes are retained too.
+
+    Retention is applied to unregistered callers only: an anonymous visitor has no account to
+    delete from, so their submission gets an explicit deadline written at insert time. A
+    tenant's own recordings belong to that tenant's data, governed by their contract, and are
+    not on this timer.
+    """
     cfg = await settings_store.get_effective()
+    stored, purge_after = {}, None
+    if audio is not None and principal_kind == "anonymous":
+        anon = await settings_store.get_anonymous_config()
+        stored = media.save(audio, content_type=content_type, filename=filename)
+        purge_after = media.deadline(anon.get("retention_days"))
     async with pool().acquire() as conn:
         return str(await conn.fetchval(
             """
             INSERT INTO audio_jobs
                 (filename, content_type, size_bytes, status, stt_model, llm_model,
-                 client_id, principal_type, anon_key, batch_id, external_ref)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                 client_id, principal_type, anon_key, batch_id, external_ref,
+                 client_ip, audio_path, audio_bytes, audio_sha256, purge_after)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
             RETURNING id
             """,
             filename, content_type, size_bytes, status, cfg["stt_model"], cfg["llm_model"],
-            client_id, principal_kind, anon_key, batch_id, external_ref))
+            client_id, principal_kind, anon_key, batch_id, external_ref,
+            client_ip, stored.get("path"), stored.get("bytes"), stored.get("sha256"),
+            purge_after))
+
+
+async def mark_error(job_id: str, msg: str) -> None:
+    """Record a terminal failure on a row owned by a caller that is not run_pipeline."""
+    await _update(job_id, status="error", error=msg)
+
+
+async def mark_transcribed(job_id: str, *, transcript: str, language: str | None,
+                           sentiment: dict | None = None) -> None:
+    """Close out a transcribe-only job (/transcribe): no analysis, no LLM, still 'done'.
+
+    Separate from run_pipeline's own writes so the STT-only product cannot accidentally leave
+    a row stuck in 'transcribing' and get swept as abandoned.
+    """
+    await _update(job_id, status="done", transcript=transcript, language=language,
+                  sentiment=json.dumps(sentiment) if sentiment is not None else None)
 
 
 async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: str,
@@ -117,16 +150,27 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
         except Exception:  # noqa: BLE001
             scorecard = None
 
+    # 6. Sentiment — the words (from the analysis above) plus the voice (prosody sidecar).
+    # Runs for every caller, not just tenants: it needs no knowledge base and it is the one
+    # signal an anonymous visitor gets beyond the transcript. Never blocks the result.
+    try:
+        sent = await sentiment.analyse(audio, analysis, filename=filename,
+                                       content_type=content_type)
+    except Exception:  # noqa: BLE001 — a tone model must never cost anyone their transcript
+        log.exception("sentiment failed for job %s", job_id)
+        sent = None
+
     processing_ms = int((time.monotonic() - started) * 1000)
     await _update(job_id, status="done", analysis=json.dumps(analysis),
                   language=(analysis.get("language") or language), processing_ms=processing_ms,
                   kb_used=json.dumps(kb_used),
                   kb_check=json.dumps(kb_check) if kb_check is not None else None,
-                  scoring=json.dumps(scorecard) if scorecard is not None else None)
+                  scoring=json.dumps(scorecard) if scorecard is not None else None,
+                  sentiment=json.dumps(sent) if sent is not None else None)
     return {"id": job_id, "status": "done", "filename": filename,
             "language": analysis.get("language") or language, "transcript": transcript,
             "analysis": analysis, "kb_used": kb_used, "kb_check": kb_check,
-            "scoring": scorecard, "processing_ms": processing_ms}
+            "scoring": scorecard, "sentiment": sent, "processing_ms": processing_ms}
 
 
 async def run_background(job_id: str, audio: bytes, filename: str, content_type: str,

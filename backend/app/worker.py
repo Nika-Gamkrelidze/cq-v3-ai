@@ -51,7 +51,7 @@ import time
 
 from . import db
 from .config import settings
-from .services import chat_store, kb_reembed
+from .services import chat_store, kb_reembed, retention
 from .services.curation import apply as curation_apply
 from .services.curation import runner as curation_runner
 
@@ -86,6 +86,11 @@ CURATION_REQUESTED_BATCH = 5
 # The accepted-proposal applier. 5 s is a human-perceptible "it happened" after clicking Accept
 # in the review UI, without being a busy-wait: the predicate is served by
 # idx_curation_proposals_queue and matches nothing the vast majority of the time.
+RETENTION_INTERVAL_S = 3600.0
+# Hourly, not per-minute: the deadline is measured in days, so the only thing a tighter loop
+# buys is a shorter window between "expired" and "gone" — and a purge that scans two tables
+# and unlinks files is not something to run every 60 s for no benefit.
+
 CURATION_APPLY_INTERVAL_S = 5.0
 CURATION_APPLY_BATCH = 10
 
@@ -116,7 +121,13 @@ SHUTDOWN_TIMEOUT_S = 45.0
 # migrations, never here, so on a fresh volume they appear some seconds after the worker's
 # pool connects.
 REQUIRED_TABLES = ("copilot_suggestions", "curation_runs", "curation_proposals",
-                   "kb_reembed_jobs")
+                   "kb_reembed_jobs",
+                   # Sentinel for media.sql as a whole, not just for itself: that file ALTERs
+                   # audio_jobs (audio_path, purge_after — which retention_purge reads) BEFORE
+                   # it creates this table, so seeing the table means the columns are there
+                   # too. Without it the first purge on a fresh database raced the migration
+                   # and logged UndefinedColumnError.
+                   "tts_requests")
 # Bounded wait for those tables. Backs off 1 -> 2 -> 4 -> 8 s, capped, and gives up after this
 # long: if the api is genuinely broken the worker should start anyway and let each duty fail
 # loudly on its own interval, rather than sit silent forever pretending to be healthy.
@@ -320,6 +331,11 @@ async def _kb_reembed_pass() -> None:
         await kb_reembed.run_job(job, should_stop=_stop.is_set)
 
 
+async def _retention_purge() -> None:
+    """Delete anonymous submissions past their retention deadline (files, then rows)."""
+    await retention.purge_expired()
+
+
 async def _run_duty(name: str, interval_s: float, fn) -> None:
     """Run one duty forever on a fixed interval until the stop flag is set.
 
@@ -362,7 +378,8 @@ async def main() -> None:
         "curation_window=%02d:00-%02d:00 UTC tick=%ss apply_poll=%ss auto_apply=never | "
         "kb_reembed_poll=%ss doc_pause=%ss reclaim_after=%ss | "
         "db_pool=%s-%s | migrations=api-only sweep_stuck_jobs=api-only",
-        "reap_stale_suggestions,curation_pass,apply_accepted_proposals,kb_reembed_pass",
+        "reap_stale_suggestions,curation_pass,apply_accepted_proposals,kb_reembed_pass,"
+        "retention_purge",
         REAP_INTERVAL_S, REAP_STALE_AFTER_S,
         CURATION_WINDOW_START_S // 3600, (CURATION_WINDOW_START_S + CURATION_WINDOW_S) // 3600,
         CURATION_TICK_S, CURATION_APPLY_INTERVAL_S,
@@ -388,6 +405,9 @@ async def main() -> None:
                             name="apply_accepted_proposals"),
         asyncio.create_task(_run_duty("kb_reembed_pass", KB_REEMBED_TICK_S, _kb_reembed_pass),
                             name="kb_reembed_pass"),
+        asyncio.create_task(_run_duty("retention_purge", RETENTION_INTERVAL_S,
+                                      _retention_purge),
+                            name="retention_purge"),
     ]
     try:
         await _stop.wait()

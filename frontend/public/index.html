@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CommuniQ Voice AI — Analyze &amp; Text-to-Speech</title>
-  <meta name="description" content="Transcribe and analyze calls, and turn text into natural speech — including Georgian — powered by CommuniQ." />
+  <title>CommuniQ Voice AI — Speech, Transcripts &amp; Sentiment</title>
+  <meta name="description" content="Turn text into natural speech — including Georgian — or transcribe a call and hear how it sounded. Powered by CommuniQ." />
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="brand.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%2307263c'/%3E%3Ccircle cx='30' cy='29' r='14' fill='none' stroke='%23fa3b3c' stroke-width='5'/%3E%3Cpath d='M38 37 L48 47' stroke='%23fa3b3c' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" href="favicon.png" />
   <script src="brand.js"></script>
 </head>
 <body>
@@ -24,7 +24,8 @@
     </div>
     <div class="tabs">
       <div class="tab active" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
-      <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
+      <div class="tab" data-tab="stt"><span>🎧</span> <span data-i18n="tab.stt"></span></div>
+      <div class="tab" data-tab="sentiment"><span>🎭</span> <span data-i18n="tab.sentiment"></span></div>
     </div>
 
     <!-- TTS -->
@@ -40,7 +41,7 @@
             <label for="voiceSelect" data-i18n="f.voice"></label>
             <div class="inline">
               <div style="flex:1"><select id="voiceSelect"><option value="" data-i18n="f.defaultvoice"></option></select></div>
-              <button class="ghost" id="previewBtn" title="Preview voice (free sample)" aria-label="Preview voice">▶</button>
+              <button class="ghost" id="previewBtn" data-i18n-title="tts.previewtitle" aria-label="Preview voice">▶</button>
             </div>
           </div>
         </div>
@@ -55,31 +56,61 @@
       </div>
     </section>
 
-    <!-- ANALYZE -->
-    <section class="panel" id="panel-analyze">
+    <!-- SPEECH TO TEXT -->
+    <section class="panel" id="panel-stt">
       <div class="card">
-        <h3 data-i18n="an.heading"></h3>
+        <h3 data-i18n="stt.heading"></h3>
+        <p class="lead" style="font-size:14px" data-i18n="stt.sub"></p>
         <label data-i18n="f.audiofile"></label>
         <div class="drop" id="audioDrop">
           <input type="file" id="audioFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
           <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
-          <div class="drop-sub" data-i18n="drop.sub"></div>
+          <div class="drop-sub" data-i18n="drop.sub_stt"></div>
         </div>
         <div class="rec-row">
           <span class="hint" data-i18n="rec.or"></span>
-          <button class="ghost" type="button" id="recBtn">● Record</button>
+          <button class="ghost" type="button" id="recBtn"></button>
           <span class="rec-status hint" id="recStatus"></span>
         </div>
-        <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
-        <div class="err" id="analyzeErr"></div>
+        <div class="actions"><button class="primary" id="sttBtn" data-i18n="btn.transcribe"></button></div>
+        <div class="err" id="sttErr"></div>
       </div>
-      <div id="analyzeResult"></div>
+      <div id="sttResult"></div>
+    </section>
+
+    <!-- SENTIMENT — its own tab, deliberately separate from STT: upload/record audio and get
+         only a sentiment read-out (what was said + how it sounded), no transcript clutter. -->
+    <section class="panel" id="panel-sentiment">
+      <div class="card">
+        <h3 data-i18n="sn.heading"></h3>
+        <p class="lead" style="font-size:14px" data-i18n="sn.sub"></p>
+        <label data-i18n="f.audiofile"></label>
+        <div class="drop" id="snDrop">
+          <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+          <div class="drop-title" id="snDropTitle" data-i18n="drop.title"></div>
+          <div class="drop-sub" data-i18n="drop.sub_stt"></div>
+        </div>
+        <div class="rec-row">
+          <span class="hint" data-i18n="rec.or"></span>
+          <button class="ghost" type="button" id="snRecBtn"></button>
+          <span class="rec-status hint" id="snRecStatus"></span>
+        </div>
+        <div class="actions"><button class="primary" id="snBtn" data-i18n="sn.run"></button></div>
+        <div class="err" id="snErr"></div>
+      </div>
+      <div id="snResult"></div>
     </section>
   </main>
 
   <script>
     const API = CQ.API, t = CQ.t;
-    CQ.mountHeader({ tag: 'Voice AI', nav: [{ i18n: 'nav.signin', href: 'tenant.html' }],
+    // The public page must not pretend a signed-in visitor is signed out: with a live
+    // admin or tenant session in this tab, the nav links back to their surface instead of
+    // demanding credentials again.
+    const _navBack = sessionStorage.getItem('cq_admin_token') ? { i18n: 'nav.console', href: 'admin.html' }
+                   : sessionStorage.getItem('cq_tenant_token') ? { i18n: 'nav.workspace', href: 'tenant.html' }
+                   : { i18n: 'nav.signin', href: 'tenant.html' };
+    CQ.mountHeader({ tag: 'Voice AI', nav: [_navBack],
       extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
     CQ.enhanceSelects();
 
@@ -102,7 +133,15 @@
       } catch {}
     }
     loadLimits();
-    document.addEventListener('cq:lang', loadLimits);
+    document.addEventListener('cq:lang', () => {
+      loadLimits();
+      // The language <option> labels and the pronunciation note are painted from the DICT,
+      // so they have to be repainted on a language switch — applyI18n only touches data-i18n.
+      const sel = document.getElementById('langSelect');
+      [...sel.options].forEach(o => { const k = 'lang.' + o.value, tr = t(k); if (tr !== k) o.textContent = tr; });
+      CQ.syncSelect(sel);
+      if (langNoteRefresh) langNoteRefresh();
+    });
 
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
@@ -122,64 +161,91 @@
     // mic recorder -> drops the recording into the file input, then Analyze works as usual
     CQ.attachRecorder({ button: document.getElementById('recBtn'), status: document.getElementById('recStatus'), fileInput: audioInput });
 
-    // ---- Analyze ----
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    analyzeBtn.addEventListener('click', async () => {
+    // ---- Speech to text ----
+    // The public site does transcription + sentiment only. The Claude analysis pass lives
+    // behind a tenant login: it is the expensive half and it is what the product sells.
+    const sttBtn = document.getElementById('sttBtn');
+    sttBtn.addEventListener('click', async () => {
       const f = document.getElementById('audioFile').files[0];
-      const err = document.getElementById('analyzeErr'), out = document.getElementById('analyzeResult');
+      const err = document.getElementById('sttErr'), out = document.getElementById('sttResult');
       err.textContent = ''; out.innerHTML = '';
-      if (!f) { err.textContent = 'Choose an audio file first.'; return; }
-      analyzeBtn.disabled = true; analyzeBtn.innerHTML = '<span class="spinner"></span>' + t('btn.analyze') + '…';
+      if (!f) { err.textContent = t('stt.nofile'); return; }
+      sttBtn.disabled = true; sttBtn.innerHTML = '<span class="spinner"></span>' + t('btn.transcribe') + '…';
       try {
         const fd = new FormData(); fd.append('file', f);
-        const r = await fetch(`${API}/analyze`, { method: 'POST', body: fd });
+        const r = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
         const d = await CQ.readResp(r);
-        out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
+        out.innerHTML = renderTranscript(d); CQ.toast(t('stt.done'), 'ok');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
-      finally { analyzeBtn.disabled = false; analyzeBtn.textContent = t('btn.analyze'); loadLimits(); }
+      finally { sttBtn.disabled = false; sttBtn.textContent = t('btn.transcribe'); loadLimits(); }
     });
 
     function esc(s) { return (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-    function toArr(v) {
-      if (v == null) return [];
-      if (Array.isArray(v)) return v.filter(x => x != null).map(x => typeof x === 'object' ? Object.values(x).filter(Boolean).join(' — ') : String(x)).filter(s => s.trim());
-      if (typeof v === 'object') return Object.values(v).filter(Boolean).map(String);
-      const s = String(v).trim(); return s ? [s] : [];
-    }
-    function list(items) { const a = toArr(items); return a.length ? '<ul class="tight">' + a.map(i => `<li>${esc(i)}</li>`).join('') + '</ul>' : '<span class="muted">—</span>'; }
-    function renderAnalysis(d) {
-      const a = d.analysis || {};
-      const topics = toArr(a.topics).map(x => `<span class="chip">${esc(x)}</span>`).join('') || '<span class="muted">—</span>';
+
+    function renderTranscript(d) {
       return `<div class="card">
           <div class="row">
             <div>
-              <h3>${t('res.analysis')}</h3>
-              <div class="kv"><b>${t('res.language')}</b><span>${esc(a.language || d.language || '—')}</span></div>
-              <div class="kv"><b>${t('res.sentiment')}</b><span>${esc(a.sentiment || '—')}</span></div>
-              <div class="kv"><b>${t('res.topics')}</b><span>${topics}</span></div>
-              <div class="kv"><b>${t('res.time')}</b><span class="muted">${d.processing_ms ? (d.processing_ms/1000).toFixed(1)+'s' : '—'}</span></div>
-            </div>
-            <div style="max-width:120px;text-align:center">
-              <label>${t('res.quality')}</label><div class="score">${a.quality_score ?? '—'}</div><span class="muted">/ 100</span>
+              <h3>${t('res.transcript')}</h3>
+              <div class="kv"><b>${t('res.language')}</b><span>${esc(d.language || '—')}</span></div>
             </div>
           </div>
-          <div style="margin-top:14px"><b style="color:var(--mist)">${t('res.summary')}</b><p>${esc(a.summary)}</p></div>
-          <div class="row"><div><b style="color:var(--mist)">${t('res.keypoints')}</b>${list(a.key_points)}</div>
-            <div><b style="color:var(--mist)">${t('res.actions')}</b>${list(a.action_items)}</div></div>
-        </div>
-        <div class="card"><h3>${t('res.transcript')}</h3><pre class="transcript">${esc(d.transcript) || t('res.empty')}</pre></div>`;
+          <pre class="transcript">${esc(d.transcript) || t('res.empty')}</pre>
+        </div>`;
     }
 
+    // ---- Sentiment (its own tab — see panel-sentiment above for why) ----
+    const snInput = document.getElementById('snFile'), snDrop = document.getElementById('snDrop');
+    snInput.addEventListener('change', () => { const f = snInput.files[0];
+      document.getElementById('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+    ['dragover','dragenter'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.remove('drag'); }));
+    snDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { snInput.files = e.dataTransfer.files; snInput.dispatchEvent(new Event('change')); } });
+    CQ.attachRecorder({ button: document.getElementById('snRecBtn'), status: document.getElementById('snRecStatus'), fileInput: snInput });
+
+    const snBtn = document.getElementById('snBtn');
+    snBtn.addEventListener('click', async () => {
+      const f = snInput.files[0];
+      const err = document.getElementById('snErr'), out = document.getElementById('snResult');
+      err.textContent = ''; out.innerHTML = '';
+      if (!f) { err.textContent = t('stt.nofile'); return; }
+      snBtn.disabled = true; snBtn.innerHTML = '<span class="spinner"></span>' + t('sn.run') + '…';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
+        const d = await CQ.readResp(r);
+        out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
+        CQ.toast(t('sn.done'), 'ok');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { snBtn.disabled = false; snBtn.textContent = t('sn.run'); loadLimits(); }
+    });
+
     // ---- TTS (single reusable player) ----
-    let ttsLoaded = false, ttsPlayer = null, curSrc = null;
+    let ttsLoaded = false, ttsPlayer = null, curSrc = null, langNoteRefresh = null;
     const previewMap = {};
     async function loadTts() {
       if (ttsLoaded) return;
       try { const r = await fetch(`${API}/languages`); if (r.ok) {
-        const langs = await r.json(); const sel = document.getElementById('langSelect'); const notes = {};
-        langs.forEach(l => { notes[l.code] = l.note || ''; const o = document.createElement('option'); o.value = l.code; o.textContent = l.name; sel.appendChild(o); });
-        const showNote = () => { document.getElementById('langNote').textContent = notes[sel.value] || ''; };
+        // The API is the source of truth for WHICH languages exist; the wording is ours.
+        // Its `name`/`note` are English-only, so they are the fallback, not the display text —
+        // otherwise the Georgian dropdown and its pronunciation note stay in English.
+        const langs = await r.json(); const sel = document.getElementById('langSelect');
+        const fallback = {};   // English text from the API, used only when we have no key
+        langs.forEach(l => {
+          fallback[l.code] = l.note || '';
+          const nameKey = 'lang.' + l.code, trName = t(nameKey);
+          const o = document.createElement('option'); o.value = l.code;
+          o.textContent = (trName === nameKey ? l.name : trName); sel.appendChild(o);
+        });
+        // Resolved on every call, not cached at load: t() follows the CURRENT language, so a
+        // cached map would keep repainting the note in whichever language happened to be
+        // active when the page loaded.
+        const showNote = () => {
+          const key = 'lang.note.' + sel.value, tr = t(key);
+          document.getElementById('langNote').textContent = (tr === key ? (fallback[sel.value] || '') : tr);
+        };
         sel.addEventListener('change', showNote); showNote();
+        langNoteRefresh = showNote;
       } } catch {}
       try { const r = await fetch(`${API}/voices`); if (r.ok) {
         const voices = await r.json(); const sel = document.getElementById('voiceSelect');
@@ -200,14 +266,14 @@
     document.getElementById('previewBtn').addEventListener('click', async () => {
       const err = document.getElementById('ttsErr'); err.textContent = '';
       const voice_id = document.getElementById('voiceSelect').value;
-      if (!voice_id) { err.textContent = 'Pick a specific voice to preview.'; return; }
+      if (!voice_id) { err.textContent = t('tts.pickvoice'); return; }
       if (previewMap[voice_id]) { playInto(previewMap[voice_id], 'preview.mp3'); return; }
       const btn = document.getElementById('previewBtn'); btn.disabled = true; btn.textContent = '…';
       try {
         const language_code = document.getElementById('langSelect').value || undefined;
         const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: 'Hello.', voice_id, language_code }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Preview failed'); }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || t('tts.previewfail')); }
         playInto(URL.createObjectURL(await r.blob()), 'preview.mp3');
       } catch (e) { err.textContent = e.message; }
       finally { btn.disabled = false; btn.textContent = '▶'; }
@@ -217,14 +283,14 @@
     ttsBtn.addEventListener('click', async () => {
       const text = document.getElementById('ttsText').value.trim();
       const err = document.getElementById('ttsErr'); err.textContent = '';
-      if (!text) { err.textContent = 'Enter some text.'; return; }
+      if (!text) { err.textContent = t('tts.needtext'); return; }
       ttsBtn.disabled = true; ttsBtn.innerHTML = '<span class="spinner"></span>' + t('btn.synth') + '…';
       try {
         const voice_id = document.getElementById('voiceSelect').value || undefined;
         const language_code = document.getElementById('langSelect').value || undefined;
         const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, voice_id, language_code }) });
-        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'Request failed'); }
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || t('toast.error')); }
         playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { ttsBtn.disabled = false; ttsBtn.textContent = t('btn.synth'); loadLimits(); }

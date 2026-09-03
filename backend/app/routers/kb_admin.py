@@ -24,7 +24,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import kb_console, kb_events, kb_ingest
+from ..services import kb_console, kb_events, kb_ingest, kb_restructure
 from ..services.auth import Principal, resolve_principal
 from .kb import count_public_documents
 
@@ -192,7 +192,7 @@ async def _new_doc(tid, doc_type, title, source_type, source_uri, metadata, tags
 @router.post("/{tenant_id}/documents/upload")
 async def upload(bg: BackgroundTasks, tid: str = Depends(scope), file: UploadFile = File(...),
                  doc_type: str = Form("document"), title: str = Form(""),
-                 tags: str = Form(""), metadata: str = Form("")):
+                 tags: str = Form(""), metadata: str = Form(""), restructure: str = Form("")):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -207,10 +207,21 @@ async def upload(bg: BackgroundTasks, tid: str = Depends(scope), file: UploadFil
             kb_ingest.extract_text, file.filename, file.content_type, data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
+    want_ai = restructure.strip().lower() in ("1", "true", "yes", "on")
+    # Same upload-time rejections as the tenant route: knowable-now failures are not
+    # deferred to a background error the operator has to hunt for.
+    if not text.strip():
+        raise HTTPException(status_code=422, detail=(
+            "No readable text found in the file. If this is a scanned document, run OCR "
+            "or export a text-based version, then import again."))
+    if want_ai and len(text) > kb_restructure.MAX_INPUT_CHARS:
+        raise HTTPException(status_code=422, detail=kb_restructure.OVERSIZE_MESSAGE)
     doc_id = await _new_doc(tid, doc_type, title or file.filename, "file", file.filename, meta, _tags(tags))
     ev = await kb_events.log(tid, "import", document_id=doc_id, method="file", status="pending",
-                             actor=ACTOR, detail=title or file.filename)
-    bg.add_task(kb_ingest.ingest_document, doc_id, tid, "file", text=text, base_metadata=meta, event_id=ev)
+                             actor=ACTOR,
+                             detail=(title or file.filename) + (" [AI]" if want_ai else ""))
+    bg.add_task(kb_ingest.ingest_document, doc_id, tid, "file", text=text, base_metadata=meta,
+                event_id=ev, restructure=want_ai)
     return {"id": doc_id, "status": "pending"}
 
 

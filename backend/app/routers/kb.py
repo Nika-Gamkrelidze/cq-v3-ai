@@ -43,7 +43,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..db import pool
-from ..services import kb_console, kb_ingest, retrieval
+from ..services import kb_console, kb_ingest, kb_restructure, retrieval
 from ..services.auth import Principal, resolve_principal
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -143,6 +143,7 @@ async def upload_document(
     title: str = Form(""),
     tags: str = Form(""),
     metadata: str = Form(""),
+    restructure: str = Form(""),
     client_id: str = Depends(require_tenant),
 ):
     data = await file.read()
@@ -152,6 +153,20 @@ async def upload_document(
         raise HTTPException(status_code=413, detail="File exceeds 25 MB limit")
     tag_list = _parse_json(tags, None) or [t.strip() for t in tags.split(",") if t.strip()]
     meta = _parse_json(metadata, {})
+    # Uploader said the file does NOT follow the KB templates: Claude restructures the raw
+    # extracted text into clean entries during ingestion (background, like everything else).
+    want_ai = restructure.strip().lower() in ("1", "true", "yes", "on")
+    # A CSV dropped into the generic file box gets the same row-per-chunk treatment as the
+    # dedicated CSV path — decoded as one text blob it loses its row/field structure.
+    # Unless AI restructuring was requested: a CSV that needs restructuring is by definition
+    # NOT template-shaped rows, so it takes the text path below instead.
+    if not want_ai and (
+            (file.filename or "").lower().endswith(".csv") or "csv" in (file.content_type or "").lower()):
+        doc_id = await _create_doc(client_id, doc_type, title or file.filename, "csv",
+                                   file.filename, meta, tag_list)
+        bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "csv",
+                    csv_bytes=data, base_metadata=meta)
+        return {"id": doc_id, "status": "pending", "title": title or file.filename}
     try:
         # pypdf/python-docx parsing is synchronous and CPU-bound; running it inline here
         # blocked the single event loop for the whole parse, stalling every other request.
@@ -159,9 +174,18 @@ async def upload_document(
             kb_ingest.extract_text, file.filename, file.content_type, data)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
+    # Failures knowable NOW are rejected NOW — not stored minutes later as a background
+    # error the uploader has to go hunting for in the documents list.
+    if not text.strip():
+        raise HTTPException(status_code=422, detail=(
+            "No readable text found in the file. If this is a scanned document, run OCR "
+            "or export a text-based version, then import again."))
+    if want_ai and len(text) > kb_restructure.MAX_INPUT_CHARS:
+        raise HTTPException(status_code=422, detail=kb_restructure.OVERSIZE_MESSAGE)
     doc_id = await _create_doc(client_id, doc_type, title or file.filename, "file",
                                file.filename, meta, tag_list)
-    bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "file", text=text, base_metadata=meta)
+    bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "file", text=text,
+                base_metadata=meta, restructure=want_ai)
     return {"id": doc_id, "status": "pending", "title": title or file.filename}
 
 

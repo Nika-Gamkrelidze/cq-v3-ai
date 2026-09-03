@@ -1,0 +1,20 @@
+﻿Knowledge Base Template — Support Policies (sample)
+========================================
+
+HOW TO USE THIS TEMPLATE (delete this section before importing): replace the sample sections below with your own policies. Keep one topic per section, give every section a clear heading, and write short paragraphs — the system splits documents into searchable chunks automatically, and clean sections make clean chunks. Import this file in your portal: Knowledge Base → Import.
+
+SUPPORT HOURS
+------------------------------
+Support is available 24/7 by phone and chat. Email tickets are answered within 4 business hours. Outside business hours, critical issues are handled by the on-call team.
+
+REFUND POLICY
+------------------------------
+Refunds are available within 14 days of purchase. The customer contacts support with the order number; processing takes 3–5 business days. Partial refunds are possible for unused subscription months.
+
+SERVICE PLANS
+------------------------------
+Basic includes up to 10 users. Business includes up to 50 users and priority support. Enterprise includes unlimited users, a dedicated manager and a service-level agreement. Yearly billing saves 20%.
+
+ESCALATING AN URGENT ISSUE
+------------------------------
+A customer can say "urgent escalation" to any agent, or mark a ticket Critical. A supervisor replies within 30 minutes. Escalations are never closed without customer confirmation.
