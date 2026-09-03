@@ -86,7 +86,6 @@
             <button class="ghost" id="reloadOverview" data-i18n="kba.refresh"></button>
           </div>
         </div>
-        <div class="card"><h3 data-i18n="kba.params"></h3><div id="paramsBox"></div></div>
       </section>
 
       <!-- DOCUMENTS -->
@@ -475,14 +474,11 @@
     // ---- OVERVIEW ----
     $('reloadOverview').addEventListener('click', loadOverview);
     async function loadOverview() {
-      let st, pa;
+      let st;
       try {
-        [st, pa] = await Promise.all([
-          adminFetch(`${K()}/stats`, { headers: H() }).then(r => r.ok ? r.json() : null),
-          adminFetch(`${K()}/params`, { headers: H() }).then(r => r.ok ? r.json() : null),
-        ]);
+        st = await adminFetch(`${K()}/stats`, { headers: H() }).then(r => r.ok ? r.json() : null);
       } catch { return; }
-      if (!st || !pa) { $('statGrid').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('paramsBox').innerHTML = ''; $('healthStrip').innerHTML = ''; return; }
+      if (!st) { $('statGrid').innerHTML = `<div class="msg err">${t('toast.error')}</div>`; $('healthStrip').innerHTML = ''; return; }
       const tile = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       $('statGrid').innerHTML =
         tile(st.documents, t('kba.stat.documents')) + tile(st.public_documents ?? 0, vt('stat.public')) +
@@ -491,16 +487,6 @@
         tile(st.approx_tokens, t('kba.stat.tokens')) + tile(st.in_progress, t('kba.stat.inprogress')) +
         tile(st.last_updated ? new Date(st.last_updated).toLocaleDateString() : '—', t('kba.stat.lastupd'));
       $('healthStrip').innerHTML = `<div class="hint" style="text-align:right">${st.documents} docs · ${st.chunks} chunks · ${st.embedding_coverage}% embedded${st.failed?` · <span class="warn-flag">${st.failed} failed</span>`:''}</div>`;
-      const e = pa.embedding, ch = pa.chunking, re = pa.retrieval;
-      const kv = (b,s,warn) => `<div class="kv-line"><b>${b}</b><span class="${warn?'warn-flag':''}">${s}</span></div>`;
-      $('paramsBox').innerHTML =
-        kv(t('adm.embprov'), esc(e.provider)) + kv(t('f.model'), esc(e.model)) +
-        kv(t('f.dimension'), e.dim) + kv(t('tkb.params.columndim'), e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
-        (e.dim_mismatch ? `<div class="warn-flag" style="margin:6px 0">${t('kba.warn.mismatch')}</div>` : '') +
-        kv(t('tkb.params.chunk'), `${ch.size} / ${ch.overlap}`) +
-        kv(t('tkb.params.threshold'), re.similarity_threshold) + kv(t('tkb.params.topk'), re.default_top_k) +
-        kv(t('tkb.params.metric'), re.distance_metric) + kv(t('tkb.params.index'), re.index_type) +
-        kv(t('tkb.params.noembed'), pa.warnings.chunks_without_embedding, pa.warnings.chunks_without_embedding>0);
     }
     function download(url) {
       fetch(url, { headers: H() }).then(r => r.blob()).then(b => {

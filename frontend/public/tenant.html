@@ -111,11 +111,6 @@
             </div>
             <div class="stat-grid" id="kStats" style="margin-top:14px"></div>
           </div>
-          <div class="card">
-            <h3 data-i18n="kba.params"></h3>
-            <p class="hint" data-i18n="tkb.params.hint"></p>
-            <div id="kParams"></div>
-          </div>
         </div>
 
         <!-- DOCUMENTS -->
@@ -747,7 +742,7 @@
     // ---- OVERVIEW ----
     $('kReloadOverview').addEventListener('click', loadKbOverview);
     async function loadKbOverview() {
-      const [st, pa] = await Promise.all([kbJson(`${API}/kb/stats`), kbJson(`${API}/kb/params`)]);
+      const st = await kbJson(`${API}/kb/stats`);
       if (!st || typeof st !== 'object') { $('kStats').innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
       const tile = (n, l) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`;
       $('kStats').innerHTML =
@@ -759,18 +754,6 @@
         tile(st.in_progress ?? 0, t('kba.stat.inprogress')) +
         tile(st.approx_tokens ?? 0, t('kba.stat.tokens')) +
         tile(st.last_updated ? new Date(st.last_updated).toLocaleDateString() : '—', t('kba.stat.lastupd'));
-      if (!pa || !pa.embedding) { $('kParams').innerHTML = `<div class="hint">${t('tkb.loadfail')}</div>`; return; }
-      const e = pa.embedding, ch = pa.chunking || {}, re = pa.retrieval || {}, w = pa.warnings || {};
-      const kv = (b, s, warn) => `<div class="kv-line"><b>${esc(b)}</b><span class="${warn?'warn-flag':''}">${esc(s)}</span></div>`;
-      $('kParams').innerHTML =
-        kv(t('f.provider'), e.provider) + kv(t('f.model'), e.model) +
-        kv(t('f.dimension'), e.dim) +
-        kv(t('tkb.params.columndim'), e.column_dim + (e.dim_mismatch ? ' ⚠' : ''), e.dim_mismatch) +
-        (e.dim_mismatch ? `<div class="warn-flag" style="margin:8px 0">${t('kba.warn.mismatch')}</div>` : '') +
-        kv(t('tkb.params.chunk'), `${ch.size} / ${ch.overlap}`) +
-        kv(t('tkb.params.threshold'), re.similarity_threshold) + kv(t('tkb.params.topk'), re.default_top_k) +
-        kv(t('tkb.params.metric'), re.distance_metric) + kv(t('tkb.params.index'), re.index_type) +
-        kv(t('tkb.params.noembed'), w.chunks_without_embedding, (w.chunks_without_embedding||0) > 0);
     }
 
     // ---- DOCUMENTS ----
