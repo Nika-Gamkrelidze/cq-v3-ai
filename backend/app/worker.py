@@ -51,7 +51,7 @@ import time
 
 from . import db
 from .config import settings
-from .services import chat_store, kb_reembed, retention
+from .services import audio_convert, chat_store, kb_reembed, retention
 from .services.curation import apply as curation_apply
 from .services.curation import runner as curation_runner
 
@@ -112,6 +112,14 @@ CURATION_APPLY_BATCH = 10
 # line ends up reading as "this tenant's re-embed took N seconds" — which is the number you want
 # anyway. Do not read it as the pathology it means for the other three duties.
 KB_REEMBED_TICK_S = 15.0
+
+# ---- Audio converter: expiring the download batches --------------------------
+# A converted batch is a ZIP on the `media` volume with a two-hour life (audio_convert.
+# TTL_SECONDS). Ten minutes rather than the hourly cadence the retention purge uses, because
+# these are not the same kind of debt: retention deadlines are measured in DAYS and the rows
+# are small, while a batch is tens of megabytes of raw PCM written by anyone who can reach the
+# public page. The tick is one `iterdir` over a directory that is empty almost always.
+CONVERT_SWEEP_TICK_S = 600.0
 
 # Shutdown budget. Must stay BELOW the compose `stop_grace_period`, or the "graceful" path is
 # never actually taken.
@@ -336,6 +344,18 @@ async def _retention_purge() -> None:
     await retention.purge_expired()
 
 
+async def _convert_sweep() -> None:
+    """Delete audio-converter batches past their TTL.
+
+    The one duty here that touches no table at all: a batch's manifest lives beside its bytes
+    (see services/audio_convert), so deleting the directory deletes the whole record and there
+    is no row left to fall out of step. That also makes it self-healing — a batch whose api
+    process died mid-conversion has no readable manifest, and is collected on the directory's
+    mtime like any other.
+    """
+    await audio_convert.sweep_expired()
+
+
 async def _run_duty(name: str, interval_s: float, fn) -> None:
     """Run one duty forever on a fixed interval until the stop flag is set.
 
@@ -379,7 +399,7 @@ async def main() -> None:
         "kb_reembed_poll=%ss doc_pause=%ss reclaim_after=%ss | "
         "db_pool=%s-%s | migrations=api-only sweep_stuck_jobs=api-only",
         "reap_stale_suggestions,curation_pass,apply_accepted_proposals,kb_reembed_pass,"
-        "retention_purge",
+        "retention_purge,convert_sweep",
         REAP_INTERVAL_S, REAP_STALE_AFTER_S,
         CURATION_WINDOW_START_S // 3600, (CURATION_WINDOW_START_S + CURATION_WINDOW_S) // 3600,
         CURATION_TICK_S, CURATION_APPLY_INTERVAL_S,
@@ -408,6 +428,8 @@ async def main() -> None:
         asyncio.create_task(_run_duty("retention_purge", RETENTION_INTERVAL_S,
                                       _retention_purge),
                             name="retention_purge"),
+        asyncio.create_task(_run_duty("convert_sweep", CONVERT_SWEEP_TICK_S, _convert_sweep),
+                            name="convert_sweep"),
     ]
     try:
         await _stop.wait()

@@ -9,8 +9,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routers import (admin, analyze, auth, calls, chat, curation, kb, kb_admin,
-                     partner, scoring, sentiment, tenants, tts)
+from .routers import (admin, analyze, auth, calls, chat, convert, curation, kb,
+                     kb_admin, partner, scoring, sentiment, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
 
@@ -57,6 +57,9 @@ async def _data_error_handler(request: Request, exc: asyncpg.DataError):
 app.include_router(calls.router)
 app.include_router(analyze.router)
 app.include_router(tts.router)
+# Asterisk audio converter: open to signed-out visitors within the anonymous quota, so it
+# sits on the root surface beside /analyze and /tts rather than behind /v1.
+app.include_router(convert.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(kb.router)

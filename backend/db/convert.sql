@@ -1,0 +1,12 @@
+-- CQ v3 AI — audio converter (idempotent; applied on API startup).
+--
+-- One column, and no table for the batches themselves. The converted bytes and the manifest
+-- that describes them live together in a directory on the `media` volume with a two-hour TTL
+-- (see services/audio_convert.py): they are scratch, not business data, and a Postgres row
+-- would only be a second half to fall out of step with the files.
+--
+-- What DOES belong in the database is the meter. `conversions` counts FILES, not requests —
+-- ffmpeg demuxing a video is the one CPU-expensive thing an unregistered visitor can ask this
+-- box for, and it shares the machine with the TEI encoder that serves live retrieval, so a
+-- thirty-file batch has to cost thirty units. Charging per request would make bulk free.
+ALTER TABLE anon_usage ADD COLUMN IF NOT EXISTS conversions integer NOT NULL DEFAULT 0;

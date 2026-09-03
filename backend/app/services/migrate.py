@@ -87,6 +87,9 @@ async def run_startup_migrations() -> list[str]:
         # After media.sql for no structural reason — just keeps the "recent additions"
         # together at the tail of the list.
         await _apply(conn, "sentiment_config.sql")
+        # convert.sql: the anonymous meter column for the Asterisk audio converter. Its only
+        # statement ALTERs anon_usage, which kb.sql created above.
+        await _apply(conn, "convert.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

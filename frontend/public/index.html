@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CommuniQ Voice AI — Speech, Transcripts &amp; Sentiment</title>
-  <meta name="description" content="Turn text into natural speech — including Georgian — or transcribe a call and hear how it sounded. Powered by CommuniQ." />
+  <meta name="description" content="Turn text into natural speech — including Georgian — convert audio and video into the formats Asterisk expects, or transcribe a call and hear how it sounded. Powered by CommuniQ." />
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -26,6 +26,7 @@
       <div class="tab active" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
       <div class="tab" data-tab="stt"><span>🎧</span> <span data-i18n="tab.stt"></span></div>
       <div class="tab" data-tab="sentiment"><span>🎭</span> <span data-i18n="tab.sentiment"></span></div>
+      <div class="tab" data-tab="convert"><span>🎚</span> <span data-i18n="tab.convert"></span></div>
     </div>
 
     <!-- TTS -->
@@ -100,6 +101,59 @@
       </div>
       <div id="snResult"></div>
     </section>
+
+    <!-- AUDIO CONVERTER — open to signed-out visitors on purpose: it is useful on its own,
+         and it is the cheapest thing this server runs (one ffmpeg process, no model call).
+         The format list is fetched from the API and never written out here: the server owns
+         which codecs it can actually produce, and a dropdown that disagrees with it just
+         collects 400s. -->
+    <section class="panel" id="panel-convert">
+      <div class="card">
+        <h3 data-i18n="cv.heading"></h3>
+        <p class="lead" style="font-size:14px" data-i18n="cv.sub"></p>
+
+        <label data-i18n="cv.files"></label>
+        <div class="drop" id="cvDrop">
+          <input type="file" id="cvFiles" multiple accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
+          <div class="drop-title" data-i18n="cv.drop.title"></div>
+          <div class="drop-sub" data-i18n="cv.drop.sub"></div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <div>
+            <label for="cvFormat" data-i18n="cv.format"></label>
+            <select id="cvFormat"></select>
+            <div class="hint" id="cvFormatNote"></div>
+          </div>
+        </div>
+
+        <div id="cvList"></div>
+
+        <!-- Both phases of this bar have a real denominator: bytes that have left the
+             browser, then files the server says it has finished. Where neither exists —
+             uploaded, server not started yet — it goes indeterminate rather than inventing
+             a number, exactly like the rubric importer it borrows its markup from. -->
+        <div class="imp-prog hidden" id="cvProg">
+          <div class="imp-prog-head">
+            <span id="cvProgLabel" aria-live="polite"></span>
+            <span class="imp-prog-pct" id="cvProgPct" aria-hidden="true"></span>
+          </div>
+          <div class="sc-bar" id="cvProgBar" role="progressbar" aria-labelledby="cvProgLabel"
+               aria-valuemin="0" aria-valuemax="100"><span></span></div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="cvRun" data-i18n="cv.run" disabled></button>
+          <button class="ghost hidden" id="cvCancel" data-i18n="btn.cancel"></button>
+          <a class="btn-ghost hidden" id="cvDownload" download data-i18n="cv.download"></a>
+          <button class="ghost hidden" id="cvClear" data-i18n="cv.clear"></button>
+        </div>
+        <div class="msg" id="cvSummary"></div>
+        <div class="err" id="cvErr"></div>
+        <div class="hint" id="cvTtl"></div>
+        <div class="hint" id="cvLimits"></div>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -110,6 +164,24 @@
     const _navBack = sessionStorage.getItem('cq_admin_token') ? { i18n: 'nav.console', href: 'admin.html' }
                    : sessionStorage.getItem('cq_tenant_token') ? { i18n: 'nav.workspace', href: 'tenant.html' }
                    : { i18n: 'nav.signin', href: 'tenant.html' };
+    // …and the same session decides how much of this page exists. Signed out, the public
+    // surface is text-to-speech and the converter: the two things that cost us an ffmpeg
+    // process and a few ElevenLabs characters. Transcription and the sentiment read are
+    // what a workspace pays for, so their tabs are REMOVED from the document rather than
+    // hidden — a panel left in the DOM is one class away from visible and still reachable
+    // by anything that moves focus into it. The hero line goes with them: it advertised a
+    // transcript this visitor cannot get. Everything below guards on the panels being gone.
+    const SIGNED_IN = !!(sessionStorage.getItem('cq_admin_token') || sessionStorage.getItem('cq_tenant_token'));
+    if (!SIGNED_IN) {
+      ['stt', 'sentiment'].forEach(name => {
+        const tab = document.querySelector('.tab[data-tab="' + name + '"]');
+        if (tab) tab.remove();
+        const panel = document.getElementById('panel-' + name);
+        if (panel) panel.remove();
+      });
+      const sub = document.querySelector('[data-i18n="hero.sub"]');
+      if (sub) sub.setAttribute('data-i18n', 'hero.sub.public');
+    }
     CQ.mountHeader({ tag: 'Voice AI', nav: [_navBack],
       extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
     CQ.enhanceSelects();
@@ -118,17 +190,29 @@
       document.getElementById('statusDot').className = 'dot ' + (d.status === 'ok' ? 'ok' : 'bad');
     }).catch(() => { document.getElementById('statusDot').className = 'dot bad'; });
 
+    // The banner counts down only what this visitor can actually reach. Signed out the
+    // transcription tab is gone, so quoting a transcription allowance would be advertising
+    // a door that is not in the wall. `conversions` is absent on a server that predates the
+    // converter: an absent key means "claim nothing", not "zero".
+    let lastLimits = null;
     async function loadLimits() {
       try {
         const r = await fetch(`${API}/limits`); if (!r.ok) return;
-        const d = await r.json(); const el = document.getElementById('quota');
+        const d = await r.json(); lastLimits = d; cvPaintLimits();
+        const el = document.getElementById('quota');
         if (!d.anonymous) { el.className = 'quota'; el.innerHTML = ''; return; }
         if (!d.enabled) { el.className = 'quota warn show';
           el.innerHTML = `${t('quota.disabled')} <a href="tenant.html">${t('nav.signin')}</a>`; return; }
-        const ra = d.remaining.analyses, rt = d.remaining.tts;
-        const low = (ra != null && ra <= 0) || (rt != null && rt <= 0);
+        const rem = d.remaining || {};
+        const parts = [];
+        if (SIGNED_IN) parts.push([rem.analyses, t('quota.analyses')]);
+        parts.push([rem.tts, t('quota.clips')]);
+        if ('conversions' in rem) parts.push([rem.conversions, t('quota.conversions')]);
+        const low = parts.some(p => p[0] != null && p[0] <= 0);
+        const bits = parts.map(p => `<b>${p[0] == null ? '∞' : p[0]}</b> ${p[1]}`);
+        const body = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} &amp; ${bits[bits.length - 1]}` : bits[0];
         el.className = 'quota show' + (low ? ' warn' : '');
-        el.innerHTML = `${t('quota.using')} <b>${ra == null ? '∞' : ra}</b> ${t('quota.analyses')} &amp; <b>${rt == null ? '∞' : rt}</b> ${t('quota.clips')} ${t('quota.left')} `
+        el.innerHTML = `${t('quota.using')} ${body} ${t('quota.left')} `
           + `<a href="tenant.html">${t('nav.signin')}</a> ${t('quota.more')}`;
       } catch {}
     }
@@ -141,44 +225,49 @@
       [...sel.options].forEach(o => { const k = 'lang.' + o.value, tr = t(k); if (tr !== k) o.textContent = tr; });
       CQ.syncSelect(sel);
       if (langNoteRefresh) langNoteRefresh();
+      // Same story in the converter: its option text, its status pills and its allowance
+      // line are all painted from the DICT, so they have to be repainted by hand.
+      cvPaintFormats(); cvRender(); cvPaintResult();
     });
 
-    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
-      tb.classList.add('active'); document.getElementById('panel-' + tb.dataset.tab).classList.add('active');
-      if (tb.dataset.tab === 'tts') loadTts();
-    }));
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+      document.querySelectorAll('.panel').forEach(x => x.classList.toggle('active', x.id === 'panel-' + name));
+      if (name === 'tts') loadTts();
+    }
+    document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => showTab(tb.dataset.tab)));
 
-    // dropzone
-    const audioInput = document.getElementById('audioFile'), audioDrop = document.getElementById('audioDrop');
-    audioInput.addEventListener('change', () => { const f = audioInput.files[0];
-      document.getElementById('audioDropTitle').innerHTML = f ? `<span class="drop-file">${f.name}</span>` : t('drop.title'); });
-    ['dragover','dragenter'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.add('drag'); }));
-    ['dragleave','drop'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.remove('drag'); }));
-    audioDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
-
-    // mic recorder -> drops the recording into the file input, then Analyze works as usual
-    CQ.attachRecorder({ button: document.getElementById('recBtn'), status: document.getElementById('recStatus'), fileInput: audioInput });
-
-    // ---- Speech to text ----
+    // ---- Speech to text (signed-in only — the panel is not in the document otherwise) ----
     // The public site does transcription + sentiment only. The Claude analysis pass lives
     // behind a tenant login: it is the expensive half and it is what the product sells.
-    const sttBtn = document.getElementById('sttBtn');
-    sttBtn.addEventListener('click', async () => {
-      const f = document.getElementById('audioFile').files[0];
-      const err = document.getElementById('sttErr'), out = document.getElementById('sttResult');
-      err.textContent = ''; out.innerHTML = '';
-      if (!f) { err.textContent = t('stt.nofile'); return; }
-      sttBtn.disabled = true; sttBtn.innerHTML = '<span class="spinner"></span>' + t('btn.transcribe') + '…';
-      try {
-        const fd = new FormData(); fd.append('file', f);
-        const r = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
-        const d = await CQ.readResp(r);
-        out.innerHTML = renderTranscript(d); CQ.toast(t('stt.done'), 'ok');
-      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
-      finally { sttBtn.disabled = false; sttBtn.textContent = t('btn.transcribe'); loadLimits(); }
-    });
+    if (document.getElementById('panel-stt')) {
+      // dropzone
+      const audioInput = document.getElementById('audioFile'), audioDrop = document.getElementById('audioDrop');
+      audioInput.addEventListener('change', () => { const f = audioInput.files[0];
+        document.getElementById('audioDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => audioDrop.addEventListener(ev, e => { e.preventDefault(); audioDrop.classList.remove('drag'); }));
+      audioDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
+
+      // mic recorder -> drops the recording into the file input, then Analyze works as usual
+      CQ.attachRecorder({ button: document.getElementById('recBtn'), status: document.getElementById('recStatus'), fileInput: audioInput });
+
+      const sttBtn = document.getElementById('sttBtn');
+      sttBtn.addEventListener('click', async () => {
+        const f = audioInput.files[0];
+        const err = document.getElementById('sttErr'), out = document.getElementById('sttResult');
+        err.textContent = ''; out.innerHTML = '';
+        if (!f) { err.textContent = t('stt.nofile'); return; }
+        sttBtn.disabled = true; sttBtn.innerHTML = '<span class="spinner"></span>' + t('btn.transcribe') + '…';
+        try {
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
+          const d = await CQ.readResp(r);
+          out.innerHTML = renderTranscript(d); CQ.toast(t('stt.done'), 'ok');
+        } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+        finally { sttBtn.disabled = false; sttBtn.textContent = t('btn.transcribe'); loadLimits(); }
+      });
+    }
 
     function esc(s) { return (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -194,31 +283,33 @@
         </div>`;
     }
 
-    // ---- Sentiment (its own tab — see panel-sentiment above for why) ----
-    const snInput = document.getElementById('snFile'), snDrop = document.getElementById('snDrop');
-    snInput.addEventListener('change', () => { const f = snInput.files[0];
-      document.getElementById('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
-    ['dragover','dragenter'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.add('drag'); }));
-    ['dragleave','drop'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.remove('drag'); }));
-    snDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { snInput.files = e.dataTransfer.files; snInput.dispatchEvent(new Event('change')); } });
-    CQ.attachRecorder({ button: document.getElementById('snRecBtn'), status: document.getElementById('snRecStatus'), fileInput: snInput });
+    // ---- Sentiment (its own tab — see panel-sentiment above for why; signed-in only) ----
+    if (document.getElementById('panel-sentiment')) {
+      const snInput = document.getElementById('snFile'), snDrop = document.getElementById('snDrop');
+      snInput.addEventListener('change', () => { const f = snInput.files[0];
+        document.getElementById('snDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
+      ['dragover','dragenter'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => snDrop.addEventListener(ev, e => { e.preventDefault(); snDrop.classList.remove('drag'); }));
+      snDrop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { snInput.files = e.dataTransfer.files; snInput.dispatchEvent(new Event('change')); } });
+      CQ.attachRecorder({ button: document.getElementById('snRecBtn'), status: document.getElementById('snRecStatus'), fileInput: snInput });
 
-    const snBtn = document.getElementById('snBtn');
-    snBtn.addEventListener('click', async () => {
-      const f = snInput.files[0];
-      const err = document.getElementById('snErr'), out = document.getElementById('snResult');
-      err.textContent = ''; out.innerHTML = '';
-      if (!f) { err.textContent = t('stt.nofile'); return; }
-      snBtn.disabled = true; snBtn.innerHTML = '<span class="spinner"></span>' + t('sn.run') + '…';
-      try {
-        const fd = new FormData(); fd.append('file', f);
-        const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
-        const d = await CQ.readResp(r);
-        out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
-        CQ.toast(t('sn.done'), 'ok');
-      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
-      finally { snBtn.disabled = false; snBtn.textContent = t('sn.run'); loadLimits(); }
-    });
+      const snBtn = document.getElementById('snBtn');
+      snBtn.addEventListener('click', async () => {
+        const f = snInput.files[0];
+        const err = document.getElementById('snErr'), out = document.getElementById('snResult');
+        err.textContent = ''; out.innerHTML = '';
+        if (!f) { err.textContent = t('stt.nofile'); return; }
+        snBtn.disabled = true; snBtn.innerHTML = '<span class="spinner"></span>' + t('sn.run') + '…';
+        try {
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
+          const d = await CQ.readResp(r);
+          out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
+          CQ.toast(t('sn.done'), 'ok');
+        } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+        finally { snBtn.disabled = false; snBtn.textContent = t('sn.run'); loadLimits(); }
+      });
+    }
 
     // ---- TTS (single reusable player) ----
     let ttsLoaded = false, ttsPlayer = null, curSrc = null, langNoteRefresh = null;
@@ -231,12 +322,24 @@
         // otherwise the Georgian dropdown and its pronunciation note stay in English.
         const langs = await r.json(); const sel = document.getElementById('langSelect');
         const fallback = {};   // English text from the API, used only when we have no key
-        langs.forEach(l => {
+        (Array.isArray(langs) ? langs : []).forEach(l => {
           fallback[l.code] = l.note || '';
           const nameKey = 'lang.' + l.code, trName = t(nameKey);
           const o = document.createElement('option'); o.value = l.code;
           o.textContent = (trName === nameKey ? l.name : trName); sel.appendChild(o);
         });
+        // Georgian first, on the PUBLIC page. This is sold to Georgian call centres and
+        // Georgian is the thing the product is actually differentiated on — an English
+        // default made every visitor change the dropdown before hearing what we built. Only
+        // signed out, though: a workspace user arrives with their own habits and a language
+        // we picked for a first-time visitor is not one of them. A language the visitor
+        // picked themselves outranks both and survives a reload of this tab; the dropdown
+        // itself is untouched, so switching back costs one click.
+        const has = code => [...sel.options].some(o => o.value === code);
+        let want = ''; try { want = sessionStorage.getItem('cq_tts_lang') || ''; } catch {}
+        if (want && has(want)) sel.value = want; else if (!SIGNED_IN && has('ka')) sel.value = 'ka';
+        sel.addEventListener('change', () => { try { sessionStorage.setItem('cq_tts_lang', sel.value); } catch {} });
+        CQ.syncSelect(sel);
         // Resolved on every call, not cached at load: t() follows the CURRENT language, so a
         // cached map would keep repainting the note in whichever language happened to be
         // active when the page loaded.
@@ -295,6 +398,410 @@
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { ttsBtn.disabled = false; ttsBtn.textContent = t('btn.synth'); loadLimits(); }
     });
+
+    /* ---- Audio converter ------------------------------------------------------------
+       Bulk transcode to the Asterisk formats, server-side. One request per batch, over
+       XMLHttpRequest with `?stream=1` — the same shape as the tenant portal's rubric
+       import and for the same reason: the request has two long phases and the user has to
+       see both. Only `xhr.upload.onprogress` knows how many bytes have really left the
+       browser; only the SSE frames that follow know how many files the server has really
+       finished. fetch() reports neither, and EventSource is GET-only so it cannot carry
+       the upload. One request, both halves, no invented numbers in between.
+
+       The batch comes back as one ZIP: forty files otherwise means forty save dialogs, and
+       the archive is the only place a per-file name survives intact — a bare .alaw or .sln
+       handed to a browser gets renamed or reinterpreted on its way to disk. */
+    const cvState = { formats: [], limits: {}, def: '', xhr: null, dl: '', result: null };
+    let cvQueue = [];                     // [{ file, state, error, output, bytes }]
+    const $c = id => document.getElementById(id);
+
+    // The catalog says WHICH formats exist; the wording is ours, because "alaw" means
+    // nothing to the person choosing it. A format id we have no key for falls back to the
+    // server's own English, so a codec added server-side shows up rather than disappearing.
+    function cvLabel(f) { const k = 'cv.f.' + f.id, tr = t(k); return tr === k ? (f.label || f.id) : tr; }
+    function cvDesc(f) { const k = 'cv.f.' + f.id + '.d', tr = t(k); return tr === k ? (f.description || '') : tr; }
+    function cvFind(id) { return cvState.formats.filter(f => f.id === id)[0] || null; }
+
+    function cvPaintFormats() {
+      const sel = $c('cvFormat'); if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = '';
+      cvState.formats.forEach(f => {
+        const o = document.createElement('option'); o.value = f.id;
+        const d = cvDesc(f);
+        o.textContent = cvLabel(f) + (d ? ' — ' + d : '');
+        sel.appendChild(o);
+      });
+      const want = cvFind(keep) ? keep : (cvFind(cvState.def) ? cvState.def : (cvState.formats[0] || {}).id);
+      if (want) sel.value = want;
+      CQ.syncSelect(sel);
+      cvNote();
+    }
+    // What the dropdown line does not carry: the extension the file will get, and what it
+    // will be. Every telephony format is fixed-rate mono — that is the codec definition,
+    // not a preference of ours — so it is stated here rather than offered as a setting.
+    function cvNote() {
+      const el = $c('cvFormatNote'); if (!el) return;
+      const f = cvFind($c('cvFormat').value);
+      el.textContent = f ? [f.ext, f.rate ? f.rate + ' Hz' : '', t('cv.mono')].filter(Boolean).join(' · ') : '';
+    }
+
+    function cvHuman(bytes) {
+      const n = Number(bytes) || 0;
+      if (n >= 1048576) return (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB';
+      if (n >= 1024) return Math.round(n / 1024) + ' KB';
+      return n + ' B';
+    }
+
+    const CV_ST = { queued: ['cv.st.queued', 'pending'], converting: ['cv.st.converting', 'processing'],
+                    done: ['cv.st.done', 'done'], failed: ['cv.st.failed', 'error'] };
+    function cvRender() {
+      const box = $c('cvList'); if (!box) return;
+      const busy = !!cvState.xhr;
+      if (!cvQueue.length) { box.innerHTML = ''; cvButtons(); return; }
+      box.innerHTML = `<div class="table-wrap" style="margin-top:14px"><table>
+        <thead><tr><th>${t('th.file')}</th><th>${t('th.size')}</th><th>${t('th.status')}</th><th></th></tr></thead>
+        <tbody>${cvQueue.map((it, i) => {
+          const s = CV_ST[it.state] || CV_ST.queued;
+          // One row must be able to say WHY it failed while thirty-nine others say Done —
+          // that is the whole point of listing them instead of one aggregate verdict.
+          const detail = it.error ? `<div class="cv-why">${esc(it.error)}</div>`
+            : (it.state === 'done' && it.output)
+              ? `<div class="cv-out">→ ${esc(it.output)}${it.bytes == null ? '' : ' · ' + cvHuman(it.bytes)}</div>` : '';
+          return `<tr>
+            <td class="cv-file">${esc(it.file.name)}${detail}</td>
+            <td class="cv-size">${cvHuman(it.file.size)}</td>
+            <td><span class="pill ${s[1]}">${t(s[0])}</span></td>
+            <td class="inline">${busy ? '' : `<button class="act danger" data-rm="${i}">✕</button>`}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-rm]').forEach(b => {
+        b.title = t('btn.remove'); b.setAttribute('aria-label', t('btn.remove'));
+        b.addEventListener('click', () => { cvQueue.splice(+b.dataset.rm, 1); cvClearResult(); cvRender(); });
+      });
+      cvButtons();
+    }
+
+    function cvButtons() {
+      if (!$c('cvRun')) return;
+      const busy = !!cvState.xhr;
+      $c('cvRun').disabled = busy || !cvQueue.length || !cvState.formats.length;
+      $c('cvCancel').classList.toggle('hidden', !busy);
+      $c('cvClear').classList.toggle('hidden', busy || !cvQueue.length);
+      $c('cvDownload').classList.toggle('hidden', busy || !cvState.dl);
+    }
+    // Any change to the list invalidates the ZIP that was built from the previous one, so
+    // the download goes away with it rather than quietly handing over yesterday's archive.
+    function cvClearResult() {
+      if (!$c('cvDownload')) return;
+      cvState.dl = ''; $c('cvDownload').removeAttribute('href');
+      cvState.result = null; cvPaintResult();
+      cvQueue.forEach(it => { it.state = 'queued'; it.error = null; it.output = null; it.bytes = null; });
+    }
+
+    // The verdict and the expiry line are sentences built from the DICT, so what is REMEMBERED
+    // is the counts, not the finished sentence — otherwise switching language after a batch
+    // leaves the one line that says how it went stranded in the old one. `cvErr` is deliberately
+    // not repainted here: it carries the server's own words, which we cannot translate after
+    // the fact and must not silently drop either.
+    function cvPaintResult() {
+      const sum = $c('cvSummary'); if (!sum) return;
+      const r = cvState.result;
+      if (!r) { sum.textContent = ''; sum.className = 'msg'; $c('cvTtl').textContent = ''; return; }
+      sum.textContent = r.ok === 0 ? t('cv.done.none')
+        : r.fail === 0 ? t('cv.done.all').replace('{n}', r.ok)
+        : t('cv.done.some').replace('{ok}', r.ok).replace('{total}', r.total).replace('{fail}', r.fail);
+      sum.className = 'msg' + (r.ok === 0 ? ' err' : r.fail === 0 ? ' ok' : '');
+      const ttl = cvState.dl ? (Number(cvState.limits.download_ttl_seconds) || 0) : 0;
+      $c('cvTtl').textContent = ttl ? t('cv.ttl').replace('{n}', Math.max(1, Math.round(ttl / 3600))) : '';
+    }
+
+    function cvAdd(list) {
+      if (cvState.xhr) return;                  // indices are in flight — do not move them
+      const err = $c('cvErr'); err.textContent = '';
+      const maxFiles = Number(cvState.limits.max_files) || 0;
+      const maxOne = Number(cvState.limits.max_file_bytes) || 0;
+      let refused = '';
+      Array.prototype.slice.call(list || []).forEach(f => {
+        if (!f) return;
+        // A dropped FOLDER arrives as a zero-byte entry with no type, and so does an empty
+        // file. Neither has any audio in it; refusing both here beats an upload that dies
+        // halfway with a browser-specific read error.
+        if (!f.size && !f.type) return;
+        if (cvQueue.some(x => x.file.name === f.name && x.file.size === f.size && x.file.lastModified === f.lastModified)) return;
+        if (maxOne && f.size > maxOne) { refused = t('cv.toobig').replace('{name}', () => f.name).replace('{max}', cvHuman(maxOne)); return; }
+        if (maxFiles && cvQueue.length >= maxFiles) { refused = t('cv.toomany').replace('{max}', maxFiles); return; }
+        cvQueue.push({ file: f, state: 'queued', error: null, output: null, bytes: null });
+      });
+      cvClearResult();
+      if (refused) err.textContent = refused;
+      cvRender();
+    }
+
+    // Pull whole `event: x\ndata: {…}\n\n` frames out of a buffer that grows between ticks,
+    // keeping the partial tail for next time — a frame can arrive split across two progress
+    // events, and consuming only what is complete is what stops one being applied twice.
+    // (Deliberately the same parser as the rubric import in tenant.html; the two pages
+    // share brand.js but not each other, and this is small enough to say twice.)
+    function cvSseFrames(st, text) {
+      st.buf += text.replace(/\r\n/g, '\n');
+      const out = []; let i;
+      while ((i = st.buf.indexOf('\n\n')) >= 0) {
+        const raw = st.buf.slice(0, i); st.buf = st.buf.slice(i + 2);
+        let name = '', data = '';
+        raw.split('\n').forEach(line => {
+          if (!line || line[0] === ':') return;              // keep-alive comment, not an event
+          if (line.indexOf('event:') === 0) name = line.slice(6).trim();
+          else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.slice(5).trim();
+        });
+        if (!name) continue;
+        let payload; try { payload = data ? JSON.parse(data) : {}; } catch { continue; }
+        out.push([name, payload]);
+      }
+      return out;
+    }
+
+    function cvProg(label, pct) {
+      const bar = $c('cvProgBar'), fill = bar.firstElementChild;
+      $c('cvProg').classList.remove('hidden');
+      $c('cvProgLabel').textContent = label;
+      if (pct === null) {
+        bar.classList.add('indet'); fill.style.width = '';
+        bar.removeAttribute('aria-valuenow'); $c('cvProgPct').textContent = '';
+      } else {
+        const v = Math.max(0, Math.min(100, Math.round(pct)));
+        bar.classList.remove('indet'); fill.style.width = v + '%';
+        bar.setAttribute('aria-valuenow', String(v)); $c('cvProgPct').textContent = v + '%';
+      }
+    }
+
+    function cvApplyRow(d) {
+      const it = cvQueue[Number(d.index)];
+      if (!it) return;
+      it.state = d.ok ? 'done' : 'failed';
+      it.error = d.ok ? null : (d.error || t('cv.fail'));
+      it.output = d.output || null;
+      it.bytes = d.bytes == null ? null : d.bytes;
+    }
+    // The server is given the files in order and reports one frame per finished file, so
+    // the next still-queued row is the one being worked on. Nothing stronger is claimed:
+    // a row only reads Done or Failed once its own frame has arrived.
+    function cvMarkNext() {
+      for (let i = 0; i < cvQueue.length; i++) {
+        if (cvQueue[i].state === 'queued') { cvQueue[i].state = 'converting'; return; }
+      }
+    }
+
+    function cvApplyDone(d, detail) {
+      const files = (d && Array.isArray(d.files)) ? d.files : [];
+      files.forEach(cvApplyRow);
+      // A row the server never reported on was never converted. Queued, not done.
+      cvQueue.forEach(it => { if (it.state === 'converting') it.state = 'queued'; });
+
+      const total = Number(d && d.total) || cvQueue.length;
+      const okN = Number(d && d.converted) || 0;
+      const bad = (d && d.failed != null) ? Number(d.failed) : Math.max(0, total - okN);
+
+      // The download first, then the painting: the TTL line is only true when there is
+      // something to download, so `cvPaintResult` has to be able to see whether there is.
+      const path = d && d.download_path;
+      if (d && d.token && typeof path === 'string' && path.indexOf('/convert/') === 0) {
+        cvState.dl = API + path;
+        $c('cvDownload').href = cvState.dl;
+      }
+      cvState.result = { total: total, ok: okN, fail: bad };
+      cvPaintResult();
+      const sum = $c('cvSummary');
+      // A quota refusal is the server saying the daily allowance ran out part-way through.
+      // The files before it really did convert, so it is a note beside a real result — not
+      // a reason to throw the batch away.
+      const why = detail || (d && d.quota_refusal) || '';
+      if (why) $c('cvErr').textContent = why;
+      if (okN > 0) CQ.toast(sum.textContent, bad ? 'info' : 'ok');
+      loadLimits();
+    }
+
+    function cvApplySse(st, ev, ok, fail) {
+      if (st.done) return;
+      const name = ev[0], d = ev[1] || {};
+      if (name === 'stage') {
+        st.stage = d.stage || 'converting';
+        st.total = Number(d.total) || st.total;
+        cvMarkNext(); cvRender();
+        cvProg(t('cv.stage.converting').replace('{done}', 0).replace('{total}', st.total), 0);
+      } else if (name === 'progress') {
+        st.stage = st.stage || 'converting';
+        st.total = Number(d.total) || st.total;
+        cvApplyRow(d); st.fin++;
+        cvMarkNext(); cvRender();
+        cvProg(t('cv.stage.converting').replace('{done}', st.fin).replace('{total}', st.total),
+               st.total ? (st.fin / st.total) * 100 : null);
+      } else if (name === 'done') ok(d);
+      else if (name === 'error') {
+        // `error` with a body is a batch that ran and converted nothing — the per-file
+        // reasons in it are the useful part, so it is rendered, not swallowed.
+        if (d && Array.isArray(d.files)) ok(d, d.detail); else fail(d.detail);
+      }
+    }
+
+    function cvRun() {
+      const err = $c('cvErr'); err.textContent = '';
+      if (cvState.xhr) return;
+      if (!cvQueue.length) { err.textContent = t('cv.nofiles'); return; }
+      const lim = cvState.limits || {};
+      const bytes = cvQueue.reduce((a, x) => a + (x.file.size || 0), 0);
+      // Checked here as well as on the server: a visitor should learn that 200 MB is too
+      // much before spending ten minutes uploading it, not after.
+      if (lim.max_files && cvQueue.length > lim.max_files) {
+        err.textContent = t('cv.toomany').replace('{max}', lim.max_files); return; }
+      if (lim.max_batch_bytes && bytes > lim.max_batch_bytes) {
+        err.textContent = t('cv.batchtoobig').replace('{max}', cvHuman(lim.max_batch_bytes)); return; }
+
+      cvClearResult();
+      const st = { buf: '', seen: 0, done: false, streaming: null, stage: '', total: cvQueue.length, fin: 0 };
+      const xhr = new XMLHttpRequest(); cvState.xhr = xhr;
+
+      // One exit path for every ending: the bar goes away, the buttons come back.
+      const finish = () => {
+        if (cvState.xhr === xhr) cvState.xhr = null;
+        $c('cvProg').classList.add('hidden');
+        // Wind the bar back while it is display:none, so the next batch does not open with
+        // a 300ms animation of the last one draining away.
+        $c('cvProgBar').classList.remove('indet');
+        $c('cvProgBar').firstElementChild.style.width = '0%';
+        cvRender();
+      };
+      const fail = msg => {
+        if (st.done) return;
+        st.done = true; finish();
+        err.textContent = msg || t('cv.fail'); CQ.toast(msg || t('cv.fail'), 'err'); loadLimits();
+      };
+      const ok = (d, detail) => { if (st.done) return; st.done = true; cvApplyDone(d, detail); finish(); };
+
+      xhr.upload.addEventListener('progress', e => {
+        if (st.done || st.stage) return;                    // the server owns the bar from here
+        cvProg(t('cv.stage.upload'), e.lengthComputable && e.total ? (e.loaded / e.total) * 100 : null);
+      });
+      xhr.upload.addEventListener('load', () => {
+        if (!st.done && !st.stage) cvProg(t('cv.stage.queued'), null);
+      });
+      xhr.addEventListener('readystatechange', () => {
+        if (xhr.readyState !== 2 || st.streaming !== null) return;
+        // A server without `?stream=1` answers with the ordinary JSON body, and so do the
+        // refusals (400 unknown format, 413 too big, 503 no ffmpeg). The Content-Type is
+        // the tell: decide once on the headers, then read the whole body at the end rather
+        // than showing a bar that would never move.
+        st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (!st.streaming) cvProg(t('cv.stage.queued'), null);
+      });
+      xhr.addEventListener('progress', () => {
+        if (!st.streaming || st.done) return;
+        const chunk = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+        if (!chunk) return;
+        cvSseFrames(st, chunk).forEach(ev => cvApplySse(st, ev, ok, fail));
+      });
+      xhr.addEventListener('load', async () => {
+        if (st.done) return;
+        if (st.streaming === null)   // readyState 2 can be missed; the headers are still here
+          st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (st.streaming) {
+          // Drain what landed after the last tick — a terminal frame can share a chunk with
+          // EOF — then give up honestly rather than leaving a live bar on a dead stream.
+          const tail = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+          cvSseFrames(st, tail).forEach(ev => cvApplySse(st, ev, ok, fail));
+          if (!st.done) fail(t('cv.fail'));
+          return;
+        }
+        if (!xhr.status) { fail(t('sc.import.netfail')); return; }
+        try { ok(await CQ.readResp(new Response(xhr.responseText || '', { status: xhr.status }))); }
+        catch (e) { fail(e.message); }
+      });
+      xhr.addEventListener('error', () => { if (!st.done) fail(t('sc.import.netfail')); });
+      xhr.addEventListener('abort', () => {
+        if (st.done) return;
+        st.done = true;
+        // Whatever finished before the abort keeps its verdict; the one in flight goes back
+        // to queued, because we no longer have any idea what happened to it.
+        cvQueue.forEach(it => { if (it.state === 'converting') it.state = 'queued'; });
+        finish();
+        err.textContent = t('cv.cancelled'); loadLimits();
+      });
+
+      const fd = new FormData();
+      cvQueue.forEach(it => fd.append('files', it.file, it.file.name));
+      fd.append('format', $c('cvFormat').value || cvState.def);
+      xhr.open('POST', `${API}/convert?stream=1`, true);
+      cvProg(t('cv.stage.upload'), 0);
+      cvRender();                                          // repaint without the remove buttons
+      xhr.send(fd);                                        // no xhr.timeout: a big batch runs for minutes
+    }
+
+    // The guest allowance, stated next to the button that spends it, and counted per FILE
+    // rather than per batch — otherwise a visitor learns that detail from a refusal
+    // halfway through thirty files. Nothing is claimed when the server sends no cap: an
+    // absent number is neither zero nor infinity, it is unknown.
+    function cvPaintLimits() {
+      const el = $c('cvLimits'); if (!el) return;
+      const d = lastLimits;
+      const max = (d && d.anonymous) ? Number(d.max_conversions_per_day) : 0;
+      if (!max || max <= 0) { el.innerHTML = ''; return; }
+      const rem = d.remaining || {};
+      const left = rem.conversions == null ? max : rem.conversions;
+      el.innerHTML = `${t('cv.anon').replace('{max}', max).replace('{left}', left)} `
+        + `<a href="tenant.html">${t('nav.signin')}</a> ${t('cv.anon.more')}`;
+    }
+
+    function cvRemoveTab() {
+      const tab = document.querySelector('.tab[data-tab="convert"]');
+      if (tab) tab.remove();
+      const panel = $c('panel-convert');
+      if (panel) panel.remove();
+      if (!document.querySelector('.tab.active')) {
+        const first = document.querySelector('.tab');
+        if (first) showTab(first.dataset.tab);
+      }
+    }
+
+    async function cvLoadFormats() {
+      let r = null;
+      try { r = await fetch(`${API}/convert/formats`); }
+      catch { $c('cvErr').textContent = t('err.unavailable'); return; }
+      // A definite "not here" — a server that predates the converter, or one with no
+      // ffmpeg — takes the tab away, because a tab that only ever apologises teaches a
+      // visitor that the site is broken. A transient 5xx leaves it up with the error
+      // showing: the whole API is probably down and a reload is the fix.
+      if (r.status === 404) { cvRemoveTab(); return; }
+      if (!r.ok) { $c('cvErr').textContent = t('err.unavailable'); return; }
+      let d = null; try { d = await r.json(); } catch {}
+      if (!d || d.available === false || !Array.isArray(d.formats)) { cvRemoveTab(); return; }
+      cvState.formats = d.formats.filter(f => f && f.id);
+      if (!cvState.formats.length) { cvRemoveTab(); return; }
+      cvState.limits = d.limits || {};
+      cvState.def = d.default || '';
+      cvPaintFormats(); cvPaintLimits(); cvButtons();
+    }
+
+    if ($c('panel-convert')) {
+      const cvInput = $c('cvFiles'), cvDrop = $c('cvDrop');
+      cvInput.addEventListener('change', () => {
+        const picked = Array.prototype.slice.call(cvInput.files || []);
+        cvInput.value = '';                    // so picking the same file again still fires
+        cvAdd(picked);
+      });
+      ['dragover','dragenter'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.remove('drag'); }));
+      cvDrop.addEventListener('drop', e => { if (e.dataTransfer) cvAdd(e.dataTransfer.files); });
+      $c('cvFormat').addEventListener('change', cvNote);
+      $c('cvRun').addEventListener('click', cvRun);
+      $c('cvCancel').addEventListener('click', () => { if (cvState.xhr) cvState.xhr.abort(); });
+      $c('cvClear').addEventListener('click', () => {
+        cvQueue = []; cvClearResult(); $c('cvErr').textContent = ''; cvRender();
+      });
+      // Leaving the page: drop the request so the server sees the disconnect instead of
+      // finishing a ZIP nobody can claim any more.
+      window.addEventListener('pagehide', () => { if (cvState.xhr) cvState.xhr.abort(); });
+      cvLoadFormats();
+    }
   </script>
 </body>
 </html>

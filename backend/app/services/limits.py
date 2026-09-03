@@ -13,6 +13,12 @@ Two mechanisms live here, deliberately kept separate:
 credential (chat scopes only) is rejected outright, because "no branch matched" must never mean
 "allowed, unmetered".
 
+`check()` is `reserve()` with the counting taken out, for the one caller that cannot reserve
+first: `/convert` has to read a whole multipart batch into memory before it knows how many
+files it is being asked to pay for, and buffering 150 MB for someone whose allowance ran out
+hours ago is exactly the cost this meter exists to refuse. It is read-only and therefore racy
+by construction — the atomic statement in `reserve()` is still what decides.
+
 `reserve()` no longer no-ops for tenants: a tenant call is counted on `usage_counters` under
 `tenant:<client_id>`, and rejected only when that tenant has a cap configured in
 `clients.settings`. Counting unconditionally is the point — an uncapped tenant is still a
@@ -33,15 +39,73 @@ from .auth import Principal
 
 log = logging.getLogger("cq")
 
-# kind -> (usage column, per-day-limit key, feature flag key)
+# kind -> (usage column, per-day-limit key, feature flag key, built-in anonymous cap)
+#
+# The fourth element is the cap that applies when `settings_store.ANON_DEFAULTS` has no dial
+# for this kind yet. It exists because the alternative is worse than a wrong number: a kind
+# added here before the admin panel grows a field for it would read `cfg.get(...) -> None`
+# and come out UNCAPPED, which is the one state a public, unauthenticated meter must never
+# default to. `None` means "the settings blob always has this key", which is true of the two
+# original kinds.
+#
+# `conversions` counts FILES, not requests. It is the one CPU-expensive thing an unregistered
+# visitor can ask this box for — ffmpeg demuxing a video shares the machine with the TEI
+# encoder that serves live retrieval — so a thirty-file batch is thirty units, not one.
 _KIND = {
-    "analyses": ("analyses", "max_analyses_per_day", "analyze"),
-    "tts": ("tts", "max_tts_per_day", "tts"),
+    "analyses": ("analyses", "max_analyses_per_day", "analyze", None),
+    "tts": ("tts", "max_tts_per_day", "tts", None),
+    "conversions": ("conversions", "max_conversions_per_day", "convert", 60),
 }
 
 
+def _anon_limit(cfg: dict, max_key: str, default_max: int | None) -> int:
+    """The anonymous per-day cap for one kind: 0 means uncapped (still counted).
+
+    A key the operator has actually set wins, INCLUDING an explicit 0 — that is them saying
+    uncapped, and this must not second-guess it. Only an absent (or unparseable) key falls
+    back to the kind's built-in cap.
+    """
+    raw = cfg.get(max_key)
+    if raw in (None, ""):
+        return int(default_max or 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        log.warning("anonymous %s is not a number: %r; using the built-in %s",
+                    max_key, raw, default_max)
+        return int(default_max or 0)
+
+
+# The refusals `reserve()` and `check()` must phrase IDENTICALLY — a caller has to get the same
+# answer from the door as from the till, or the precheck becomes its own little policy that
+# drifts from the real one.
+def _integration_refused() -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail="This integration credential is not permitted to use this feature.")
+
+
+def _anon_gate(cfg: dict, feature: str) -> None:
+    """The anonymous refusals that are policy rather than counting."""
+    if not cfg.get("enabled", True):
+        raise HTTPException(status_code=403, detail="Anonymous access is disabled. Please sign in.")
+    if not (cfg.get("features") or {}).get(feature, True):
+        raise HTTPException(status_code=403,
+                            detail="This feature is disabled for anonymous users. Please sign in.")
+
+
+def _anon_exhausted(limit: int) -> HTTPException:
+    return HTTPException(status_code=429,
+                         detail=f"Daily anonymous limit reached ({limit}). Sign in to continue.")
+
+
+def _counter_exhausted(kind: str, limit: int, bucket: str) -> HTTPException:
+    return HTTPException(status_code=429,
+                         detail=f"Rate limit reached for {kind} ({limit} per {bucket}).")
+
+
 async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
-    col, max_key, feature = _KIND[kind]
+    col, max_key, feature, default_max = _KIND[kind]
     if principal.kind == "integration":
         # A chat integration credential holds `chat:*` scopes ONLY — never `analyses` or `tts`.
         # It used to fall through the bottom of this function to a bare `return`, which is the
@@ -50,9 +114,7 @@ async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
         # Anthropic and ElevenLabs money outside its scope and outside all metering. Rejecting
         # here (rather than in each route) means a new paid route inherits the refusal instead
         # of having to remember it.
-        raise HTTPException(
-            status_code=403,
-            detail="This integration credential is not permitted to use this feature.")
+        raise _integration_refused()
     if principal.kind == "tenant" and principal.client_id:
         await reserve_counter(f"tenant:{principal.client_id}", kind,
                               await _tenant_limit(principal.client_id, max_key))
@@ -60,25 +122,20 @@ async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
     if principal.kind != "anonymous":
         return
     cfg = await settings_store.get_anonymous_config()
-    if not cfg.get("enabled", True):
-        raise HTTPException(status_code=403, detail="Anonymous access is disabled. Please sign in.")
-    if not (cfg.get("features") or {}).get(feature, True):
-        raise HTTPException(status_code=403,
-                            detail="This feature is disabled for anonymous users. Please sign in.")
+    _anon_gate(cfg, feature)
     if kind == "analyses":
         mb = int(cfg.get("max_audio_mb") or 0)
         if mb and size_bytes > mb * 1024 * 1024:
             raise HTTPException(status_code=413,
                                 detail=f"Anonymous uploads are limited to {mb} MB. Sign in for more.")
-    limit = int(cfg.get(max_key) or 0)
+    limit = _anon_limit(cfg, max_key, default_max)
     today = dt.date.today()
     async with pool().acquire() as conn:
         used = await conn.fetchval(
             f"SELECT {col} FROM anon_usage WHERE anon_key = $1 AND day = $2",
             principal.anon_key, today) or 0
         if limit and used >= limit:
-            raise HTTPException(status_code=429,
-                                detail=f"Daily anonymous limit reached ({limit}). Sign in to continue.")
+            raise _anon_exhausted(limit)
         await conn.execute(
             f"""
             INSERT INTO anon_usage (anon_key, day, {col}) VALUES ($1, $2, 1)
@@ -154,8 +211,56 @@ async def reserve_counter(scope_key: str, kind: str, limit: int, bucket: str = "
             """, *args)
     if n is None:
         log.info("quota exhausted scope=%s kind=%s bucket=%s limit=%s", scope_key, kind, label, limit)
-        raise HTTPException(status_code=429,
-                            detail=f"Rate limit reached for {kind} ({limit} per {bucket}).")
+        raise _counter_exhausted(kind, limit, bucket)
+
+
+async def check(principal: Principal, kind: str) -> None:
+    """Refuse a caller who has nothing left — WITHOUT spending a unit.
+
+    The door in front of `reserve()`, for a route that cannot reserve first. `/convert` has to
+    read the whole multipart batch into memory before it knows how many files it is being asked
+    to pay for (the SSE generator outlives the `UploadFile` objects, so it cannot stream them),
+    and reserving after that read means an anonymous visitor whose allowance ran out hours ago
+    can still make this process hold 150 MB of their upload in RAM, once per request, as often
+    as they like. The meter exists to bound what an unauthenticated visitor can cost us; a meter
+    that only engages after the expensive part does not do that.
+
+    Read-only, so two concurrent callers can both pass it. That is fine and is not what it is
+    for: the single atomic statement in `reserve()`/`reserve_counter()` is still what decides,
+    and the worst a race here can do is let through a batch that reserve then truncates.
+
+    Refuses only on the states that are ALREADY true — disabled, out of scope, at the cap. It
+    never rejects a caller who has some allowance left but less than the batch needs: that is a
+    truncation, and truncation is `reserve()`'s job, per file, with the files already paid for
+    still converted.
+    """
+    col, max_key, feature, default_max = _KIND[kind]
+    if principal.kind == "integration":
+        raise _integration_refused()
+    if principal.kind == "tenant" and principal.client_id:
+        limit = await _tenant_limit(principal.client_id, max_key)
+        if limit <= 0:                      # uncapped: counted, never refused
+            return
+        async with pool().acquire() as conn:
+            used = await conn.fetchval(
+                "SELECT n FROM usage_counters WHERE scope_key = $1 AND bucket = $2 AND kind = $3",
+                f"tenant:{principal.client_id}", _bucket_label("day"), kind) or 0
+        if used >= limit:
+            raise _counter_exhausted(kind, limit, "day")
+        return
+    if principal.kind != "anonymous":
+        return
+    cfg = await settings_store.get_anonymous_config()
+    _anon_gate(cfg, feature)
+    limit = _anon_limit(cfg, max_key, default_max)
+    if not limit:
+        return
+    async with pool().acquire() as conn:
+        used = await conn.fetchval(
+            f"SELECT {col} FROM anon_usage WHERE anon_key = $1 AND day = $2",
+            principal.anon_key, dt.date.today()) or 0
+    if used >= limit:
+        raise _anon_exhausted(limit)
 
 
 async def snapshot(principal: Principal) -> dict:
@@ -166,22 +271,30 @@ async def snapshot(principal: Principal) -> dict:
     today = dt.date.today()
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT analyses, tts FROM anon_usage WHERE anon_key = $1 AND day = $2",
+            "SELECT analyses, tts, conversions FROM anon_usage "
+            "WHERE anon_key = $1 AND day = $2",
             principal.anon_key, today)
     ua = (row["analyses"] if row else 0) or 0
     ut = (row["tts"] if row else 0) or 0
-    ma = int(cfg.get("max_analyses_per_day") or 0)
-    mt = int(cfg.get("max_tts_per_day") or 0)
+    uc = (row["conversions"] if row else 0) or 0
+    ma = _anon_limit(cfg, "max_analyses_per_day", _KIND["analyses"][3])
+    mt = _anon_limit(cfg, "max_tts_per_day", _KIND["tts"][3])
+    mc = _anon_limit(cfg, "max_conversions_per_day", _KIND["conversions"][3])
+    # Additive only: `analyses` and `tts` keep the exact names, types and nesting the
+    # frontend already reads. `conversions` joins them in the same shape rather than in a
+    # parallel structure, so one renderer keeps covering all three.
     return {
         "anonymous": True,
         "enabled": cfg.get("enabled", True),
         "features": cfg.get("features") or {},
         "max_analyses_per_day": ma,
         "max_tts_per_day": mt,
+        "max_conversions_per_day": mc,
         "max_audio_mb": int(cfg.get("max_audio_mb") or 0),
-        "used": {"analyses": ua, "tts": ut},
+        "used": {"analyses": ua, "tts": ut, "conversions": uc},
         "remaining": {
             "analyses": max(ma - ua, 0) if ma else None,
             "tts": max(mt - ut, 0) if mt else None,
+            "conversions": max(mc - uc, 0) if mc else None,
         },
     }
