@@ -274,6 +274,18 @@
             </div>
             <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
           </div>
+          <!-- Import progress — mirrors the tenant editor. The caption says WHICH work is
+               running; the bar is only ever a real fraction (uploaded bytes, then output
+               tokens produced against what the document needs) and goes indeterminate where
+               no denominator exists. -->
+          <div class="imp-prog hidden" id="scProg">
+            <div class="imp-prog-head">
+              <span id="scProgLabel" aria-live="polite"></span>
+              <span class="imp-prog-pct" id="scProgPct" aria-hidden="true"></span>
+            </div>
+            <div class="sc-bar" id="scProgBar" role="progressbar" aria-labelledby="scProgLabel"
+                 aria-valuemin="0" aria-valuemax="100"><span></span></div>
+          </div>
           <hr class="sep" />
           <label data-i18n="sc.rubric"></label>
           <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
@@ -1172,24 +1184,163 @@
     $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({name:'',weight:0,description:'',guidance:''}); scRenderDims(); });
 
     // Rubric import from file (AI draft) — mirrors the tenant editor.
-    $('scImport').addEventListener('click', () => $('scImportFile').click());
-    $('scImportFile').addEventListener('change', async () => {
-      const fInp = $('scImportFile'); const file = fInp.files[0]; if (!file) return;
-      const m = $('scMsg'); m.className='msg'; m.textContent = t('sc.import.loading');
+    //
+    // WHY XMLHttpRequest and not fetch: this single request has two long phases — the upload
+    // and then minutes of model work — and the user has to see both. `xhr.upload.onprogress`
+    // reports real uploaded bytes; `xhr.onprogress` exposes the response body as it grows, so
+    // the server's SSE frames can be read while they arrive. fetch() cannot report upload
+    // progress at all, and EventSource is GET-only so it cannot carry the file. One request,
+    // both halves.
+    let scImpXhr = null;
+
+    // Every number on this bar has a real denominator behind it. `pct === null` means the
+    // stage has none (extraction is one opaque pypdf/openpyxl call), so it draws the
+    // indeterminate stripe and shows NO figure rather than a number we made up.
+    function scProgStage(labelKey, pct) {
+      const box = $('scProg'), bar = $('scProgBar'), fill = bar.firstElementChild;
+      box.classList.remove('hidden');
+      $('scProgLabel').textContent = t(labelKey);
+      if (pct === null) {
+        bar.classList.add('indet'); fill.style.width = '';
+        bar.removeAttribute('aria-valuenow'); $('scProgPct').textContent = '';
+      } else {
+        const v = Math.max(0, Math.min(100, Math.round(pct)));
+        bar.classList.remove('indet'); fill.style.width = v + '%';
+        bar.setAttribute('aria-valuenow', String(v)); $('scProgPct').textContent = v + '%';
+      }
+    }
+
+    // Pull whole `event: x\ndata: {...}\n\n` frames out of a buffer that grows between ticks,
+    // keeping the partial tail for next time — a frame can arrive split across two progress
+    // events, and consuming only what is complete is what stops an event being applied twice.
+    function scSseFrames(st, text) {
+      st.buf += text.replace(/\r\n/g, '\n');
+      const out = []; let i;
+      while ((i = st.buf.indexOf('\n\n')) >= 0) {
+        const raw = st.buf.slice(0, i); st.buf = st.buf.slice(i + 2);
+        let name = '', data = '';
+        raw.split('\n').forEach(line => {
+          if (!line || line[0] === ':') return;               // keep-alive comment, not an event
+          if (line.indexOf('event:') === 0) name = line.slice(6).trim();
+          else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.slice(5).trim();
+        });
+        if (!name) continue;
+        let payload; try { payload = data ? JSON.parse(data) : {}; } catch { continue; }
+        out.push([name, payload]);
+      }
+      return out;
+    }
+
+    function scImportRun(file) {
+      const m = $('scMsg'); m.className = 'msg'; m.textContent = t('sc.import.loading');
       const btn = $('scImport'); btn.disabled = true;
-      try {
-        const fd = new FormData(); fd.append('file', file);
-        const r = await fetch(`${API}/admin/scoring/${TID}/import`, { method:'POST', headers: H(), body: fd });
-        const d = await r.json(); if (!r.ok) throw new Error(d.detail || t('sc.import.fail'));
-        scDims = (d.dimensions || []).map(x => ({ name:x.name||'', weight:+x.weight||0,
-          description:x.description||'', guidance:x.guidance||'' }));
-        if (d.rubric) $('scRubric').value = d.rubric;
+      const st = { buf:'', seen:0, done:false, streaming:null, stage:'' };
+      const xhr = new XMLHttpRequest(); scImpXhr = xhr;
+
+      // One exit path for every ending: the bar goes away, the button comes back.
+      const finish = () => {
+        if (scImpXhr === xhr) scImpXhr = null;
+        $('scProg').classList.add('hidden'); btn.disabled = false;
+        // Wind the bar back while it is display:none, so the next import does not open
+        // with a 300ms animation of the last one's percentage draining away.
+        $('scProgBar').classList.remove('indet');
+        $('scProgBar').firstElementChild.style.width = '0%';
+      };
+      const fail = msg => { st.done = true; finish();
+        m.className = 'msg err'; m.textContent = msg || t('sc.import.fail');
+        CQ.toast(t('sc.import.fail'), 'err'); };
+      const ok = d => { st.done = true; finish();
+        const dims = (d && Array.isArray(d.dimensions)) ? d.dimensions : [];
+        scDims = dims.map(x => ({ name:(x||{}).name||'', weight:+(x||{}).weight||0,
+          description:(x||{}).description||'', guidance:(x||{}).guidance||'' }));
+        if (d && d.rubric) $('scRubric').value = d.rubric;
         scRenderDims();
-        m.className='msg ok'; m.textContent = t('sc.import.loaded');
-        CQ.toast(t('sc.import.loaded'), 'ok');
-      } catch(e) { m.className='msg err'; m.textContent = e.message || t('sc.import.fail'); CQ.toast(t('sc.import.fail'), 'err'); }
-      finally { btn.disabled = false; fInp.value=''; }
+        m.className = 'msg ok'; m.textContent = t('sc.import.loaded');
+        CQ.toast(t('sc.import.loaded'), 'ok'); };
+
+      xhr.upload.addEventListener('progress', e => {
+        if (st.done || st.stage) return;                     // the server owns the bar from here
+        scProgStage('sc.import.stage.upload', e.lengthComputable && e.total ? (e.loaded / e.total) * 100 : null);
+      });
+      xhr.upload.addEventListener('load', () => {
+        if (!st.done && !st.stage) scProgStage('sc.import.stage.queued', null);
+      });
+
+      xhr.addEventListener('readystatechange', () => {
+        if (xhr.readyState !== 2 || st.streaming !== null) return;
+        // An older build has no `?stream=1`: FastAPI ignores the unknown query param and
+        // answers with the ordinary JSON body. The Content-Type is the tell — decide once, on
+        // the headers, and read the whole body at the end instead of showing a bar that would
+        // never move. Auth/size failures (401/404/413) are JSON too and land here as well.
+        st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (!st.streaming) scProgStage('sc.import.stage.queued', null);
+      });
+
+      xhr.addEventListener('progress', () => {
+        if (!st.streaming || st.done) return;
+        const chunk = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+        if (!chunk) return;
+        scSseFrames(st, chunk).forEach(ev => scApplySse(st, ev, ok, fail));
+      });
+
+      xhr.addEventListener('load', async () => {
+        if (st.done) return;
+        if (st.streaming === null)   // readyState 2 can be missed; the headers are still here
+          st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (st.streaming) {
+          // Drain what landed after the last tick — a terminal frame can share a chunk with
+          // EOF — then give up honestly rather than leaving a live bar on a dead stream.
+          const tail = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+          scSseFrames(st, tail).forEach(ev => scApplySse(st, ev, ok, fail));
+          if (!st.done) fail(t('sc.import.fail'));
+          return;
+        }
+        if (!xhr.status) { fail(t('sc.import.netfail')); return; }
+        try { ok(await CQ.readResp(new Response(xhr.responseText || '', { status: xhr.status }))); }
+        catch (e) { fail(e.message); }
+      });
+
+      xhr.addEventListener('error', () => { if (!st.done) fail(t('sc.import.netfail')); });
+      xhr.addEventListener('abort', () => {
+        if (st.done) return;
+        st.done = true; finish();
+        m.className = 'msg'; m.textContent = t('sc.import.cancelled');
+      });
+
+      const fd = new FormData(); fd.append('file', file);
+      xhr.open('POST', `${API}/admin/scoring/${TID}/import?stream=1`, true);
+      const h = H(); Object.keys(h).forEach(k => xhr.setRequestHeader(k, h[k]));
+      scProgStage('sc.import.stage.upload', 0);
+      xhr.send(fd);                                          // no xhr.timeout: this runs for minutes
+    }
+
+    // `draft` and `error` are the terminal states — the percentage never is. A real Georgian
+    // scorecard finishes near 80% because the token estimate is deliberately conservative and
+    // the server clamps at 99, so the arriving draft is what says "done", not the number.
+    function scApplySse(st, ev, ok, fail) {
+      if (st.done) return;
+      const name = ev[0], d = ev[1] || {};
+      if (name === 'stage') {
+        st.stage = d.stage || '';
+        if (d.stage === 'analyzing') scProgStage('sc.import.stage.analyzing', 0);
+        else scProgStage('sc.import.stage.extracting', null);
+      } else if (name === 'progress') {
+        st.stage = 'analyzing'; scProgStage('sc.import.stage.analyzing', +d.pct || 0);
+      } else if (name === 'draft') ok(d);
+      else if (name === 'error') fail(d.detail);
+    }
+
+    $('scImport').addEventListener('click', () => $('scImportFile').click());
+    $('scImportFile').addEventListener('change', () => {
+      const fInp = $('scImportFile'); const file = fInp.files[0];
+      fInp.value = '';                                       // cleared up front: every exit path is covered
+      if (!file) return;
+      if (scImpXhr) scImpXhr.abort();                        // never two imports racing for one editor
+      scImportRun(file);
     });
+    // Leaving the page: drop the request so the server sees the disconnect on its next ping
+    // and cancels the model call, instead of paying for a draft nobody will read.
+    window.addEventListener('pagehide', () => { if (scImpXhr) scImpXhr.abort(); });
     // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
     $('scNormalize').addEventListener('click', () => {
       scReadDom(); const n = scDims.length; if (!n) return;

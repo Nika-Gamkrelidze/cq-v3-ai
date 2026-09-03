@@ -212,6 +212,27 @@ hr.sep { border:none; border-top:1px solid color-mix(in oklab,var(--hairline) 80
 .sc-bar { height:8px; border-radius:999px; margin-top:8px; background:color-mix(in oklab,var(--muted) 22%,transparent); overflow:hidden; }
 .sc-bar > span { display:block; height:100%; border-radius:999px; background:var(--beam); }
 .sc-bar.good > span { background:var(--ok); } .sc-bar.mid > span { background:var(--pending); } .sc-bar.bad > span { background:var(--alert); }
+
+/* Rubric-import progress — reuses .sc-bar as the track, because a progress bar and a score
+   bar are the same object drawn twice otherwise. What is added here is the caption row and
+   the INDETERMINATE state: text extraction is one opaque pypdf/openpyxl/python-docx call
+   with no progress signal, so it gets a moving stripe and NO number. A percentage invented
+   for that stage is exactly the lie this bar exists to remove — a bar that stalls at 90%
+   teaches the reader that their eyes are lying to them. */
+.imp-prog { margin-top:12px; }
+.imp-prog-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+  font-size:12.5px; color:var(--mist); }
+.imp-prog-pct { font-family:var(--font-display); font-weight:700; color:var(--paper);
+  font-variant-numeric:tabular-nums; }
+.imp-prog .sc-bar > span { transition:width .3s var(--ease); }
+.sc-bar.indet > span { width:35%; animation:impslide 1.2s var(--ease) infinite; }
+@keyframes impslide { from { transform:translateX(-115%); } to { transform:translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  /* The global reduced-motion rule freezes the stripe where it starts, and a stalled 35%
+     stub reads as "35% done". Fill the whole track at low opacity instead: working, but
+     deliberately not a measurement. */
+  .sc-bar.indet > span { width:100%; opacity:.45; }
+}
 .sc-evid { margin-top:8px; padding:8px 11px; border-radius:8px; border:1px solid var(--hairline);
   background:color-mix(in oklab,var(--surface-2) 40%,transparent); font-size:12.5px; color:var(--mist); }
 .sc-evid q { display:block; margin:2px 0; } .sc-evid q:before { content:'“'; } .sc-evid q:after { content:'”'; }

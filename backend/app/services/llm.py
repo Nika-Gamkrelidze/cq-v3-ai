@@ -21,7 +21,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import anthropic
 
@@ -48,6 +48,28 @@ RESTRUCTURE = dict(timeout=anthropic.Timeout(180.0, connect=2.0), max_retries=1)
 
 # How long a caller waits for an admission slot before being told to come back later.
 ADMIT_TIMEOUT_S = 1.0
+
+# Output sizing, in ONE place. Byte-level BPE splits scripts outside its merge vocabulary far
+# harder than Latin text: measured on cl100k, Georgian runs ~0.53 chars/token against ~6.2 for
+# English, a ~12x difference that no single chars-per-token constant can express.
+#
+# Two callers share it and they MUST share it: `scoring_import.estimate_output_tokens` sizes
+# the budget a document needs to come back verbatim, and `_stream_progress` below measures
+# what has actually come back. Those two numbers become the denominator and the numerator of
+# a progress bar — measure them with different yardsticks and the percentage is fiction, even
+# though both halves would look individually reasonable.
+WIDE_TOKENS_PER_CHAR = 2.0     # Georgian, Armenian, CJK...  (measured ~1.9, rounded up)
+NARROW_TOKENS_PER_CHAR = 0.25  # Latin, digits, punctuation  (measured ~0.16, rounded up)
+
+
+def estimate_tokens(text: str) -> float:
+    """Rough token count for `text`, counting the two script populations apart.
+
+    Float rather than int on purpose: a stream is measured chunk by chunk, and rounding every
+    one- or two-character fragment to a whole token would throw most of the count away.
+    """
+    wide = sum(1 for ch in text if ord(ch) > 0x02FF)
+    return wide * WIDE_TOKENS_PER_CHAR + (len(text) - wide) * NARROW_TOKENS_PER_CHAR
 
 
 class LLMError(RuntimeError):
@@ -161,6 +183,51 @@ async def _write_usage(row: tuple) -> None:
         log.warning("llm_usage write failed: %s", exc)
 
 
+async def _stream_progress(st, on_progress: Callable[[int], None]) -> None:
+    """Drain a message stream, reporting cumulative output tokens as they are produced.
+
+    WHICH EVENT, and why: a forced tool call writes its answer as `content_block_delta`
+    events carrying `input_json_delta.partial_json` — fragments of the tool input's JSON, a
+    few characters at a time. That is the only per-token signal this kind of call emits. The
+    API's exact figure lives in `message_delta.usage.output_tokens` (cumulative, per the
+    streaming docs), but the same docs promise only "one or more" `message_delta` events and
+    a plain tool call sends one, after the last content block — exact, and far too late to
+    move a progress bar with. So the fragments are measured with `estimate_tokens`, and the
+    exact figure is folded in if it does arrive early, taking whichever source has seen more
+    so the number can never run backwards.
+
+    Matching the RAW event types also avoids double counting: the Python SDK's stream yields
+    its own synthesized `text` / `input_json` events interleaved with the raw ones, and both
+    describe the same bytes.
+
+    `on_progress` is somebody's UI, not part of the call: it is only ever handed a growing
+    integer, and if it raises, it is dropped and the import carries on without a bar.
+    """
+    tokens = 0.0
+    sent = 0
+    async for event in st:
+        etype = getattr(event, "type", None)
+        if etype == "content_block_delta":
+            delta = getattr(event, "delta", None)
+            chunk = getattr(delta, "partial_json", None) or getattr(delta, "text", None)
+            if chunk:
+                tokens += estimate_tokens(chunk)
+        elif etype == "message_delta":
+            exact = getattr(getattr(event, "usage", None), "output_tokens", None)
+            if isinstance(exact, int) and exact > tokens:
+                tokens = float(exact)
+        else:
+            continue
+        count = int(tokens)
+        if count > sent:
+            sent = count
+            try:
+                on_progress(count)
+            except Exception as exc:  # noqa: BLE001 — a broken bar must not fail the call
+                log.warning("call_tool on_progress failed; progress dropped: %s", exc)
+                return  # get_final_message() drains whatever is left
+
+
 def _wrap(exc: anthropic.APIError) -> LLMError:
     # Same message shape the call sites already produced, so their error text is unchanged.
     return LLMError(getattr(exc, "message", None) or str(exc))
@@ -171,7 +238,8 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
                     max_tokens: int = 4096, cache_system: bool = False,
                     integration_id: str | None = None,
                     admit_timeout_s: float = ADMIT_TIMEOUT_S,
-                    stream: bool = False) -> dict:
+                    stream: bool = False,
+                    on_progress: Callable[[int], None] | None = None) -> dict:
     """The house forced-tool-use pattern: one tool, tool_choice pinned to it, strict schema.
 
     Returns the tool_use block's input as a plain dict. Raises LLMError if the model answered
@@ -184,6 +252,11 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
     ("Request timed out or interrupted... long-requests"): a big model writing thousands of
     tokens of dense Georgian guidance takes minutes, which only a stream survives. Callers
     whose outputs can be big (restructure, rubric import) must pass it.
+
+    `on_progress(cumulative_output_tokens)` turns that same stream into a progress signal
+    (`stream=True` only — a blocking call has nothing to say until it is over). Without it
+    the deltas are consumed by the SDK and discarded, which is what every other caller here
+    still does: when it is None this function runs the code path it has always run.
     """
     cl = client(api_key, **opts)
     started = time.monotonic()
@@ -199,6 +272,8 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
         try:
             if stream:
                 async with cl.messages.stream(**kwargs) as st:
+                    if on_progress is not None:
+                        await _stream_progress(st, on_progress)
                     message = await st.get_final_message()
             else:
                 message = await cl.messages.create(**kwargs)

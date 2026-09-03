@@ -15,6 +15,7 @@ criteria, adjusts weights, and presses save; that keeps the existing versioning/
 (`scoring_store.save_config`) as the only write path.
 """
 import logging
+from collections.abc import Callable
 
 from . import llm, settings_store
 from .scoring import MAX_DIMENSIONS
@@ -26,7 +27,9 @@ log = logging.getLogger("cq")
 # therefore be done in OUTPUT tokens, and it is script-dependent. Byte-level BPE splits
 # scripts outside its merge vocabulary far harder than Latin text — measured on cl100k,
 # Georgian runs ~0.53 chars/token against ~6.2 for English, a ~12x difference that no
-# single chars-per-token constant can express.
+# single chars-per-token constant can express. The per-script rates themselves live in
+# `llm`, because the import's progress bar divides the tokens that have actually streamed
+# back by the prediction below: one yardstick, or the percentage means nothing.
 #
 # The old pairing — 40k input characters against an 8,192-token output budget — was
 # unsatisfiable for any Georgian document longer than ~4k characters. A routine 92-row
@@ -35,8 +38,8 @@ log = logging.getLogger("cq")
 # possibly help because the file was never too big. kb_restructure avoids this by
 # segmenting to 6k characters per call, but a rubric cannot be segmented that way without
 # cutting sections in half, so the budget must hold the whole standard in one answer.
-WIDE_TOKENS_PER_CHAR = 2.0     # Georgian, Armenian, CJK...  (measured ~1.9, rounded up)
-NARROW_TOKENS_PER_CHAR = 0.25  # Latin, digits, punctuation  (measured ~0.16, rounded up)
+WIDE_TOKENS_PER_CHAR = llm.WIDE_TOKENS_PER_CHAR    # Georgian, Armenian, CJK...
+NARROW_TOKENS_PER_CHAR = llm.NARROW_TOKENS_PER_CHAR  # Latin, digits, punctuation
 # Descriptions, general_instructions and the JSON envelope, on top of the verbatim criteria.
 OUTPUT_OVERHEAD = 1.25
 MAX_OUTPUT_TOKENS = 32_000
@@ -52,11 +55,12 @@ def estimate_output_tokens(text: str) -> int:
     Counting the two populations apart is what lets a 30k-character English scorecard
     through while correctly rejecting a Georgian one a third that size — the failure the
     single 40k-character limit could not see.
+
+    Doubles as the denominator of the import's progress bar, which is the whole reason a
+    bar is possible at all: "how many tokens must come back" is a number this can answer
+    before the first one does.
     """
-    wide = sum(1 for ch in text if ord(ch) > 0x02FF)
-    narrow = len(text) - wide
-    return int((wide * WIDE_TOKENS_PER_CHAR + narrow * NARROW_TOKENS_PER_CHAR)
-               * OUTPUT_OVERHEAD)
+    return int(llm.estimate_tokens(text) * OUTPUT_OVERHEAD)
 
 
 def oversize_message(text: str, needed: int) -> str:
@@ -194,12 +198,25 @@ def _normalize(raw: dict) -> tuple[list[dict], str]:
     return dims, rubric
 
 
-async def rubric_from_text(text: str, *, client_id: str | None) -> dict:
+async def rubric_from_text(text: str, *, client_id: str | None,
+                           on_progress: Callable[[dict], None] | None = None) -> dict:
     """Extracted document text -> {"dimensions": [...], "rubric": str} DRAFT (not saved).
 
     Dimension shape matches the editor/save contract: key-less (save derives keys),
     name/description/guidance strings, weight as a percentage. Raises RubricImportError
     with an uploader-actionable message on any failure.
+
+    `on_progress` receives stage dicts, not bare numbers —
+    `{"stage": "analyzing", "tokens": int, "expected": int, "pct": int}` — so a transport can
+    render them without re-deriving what they mean. `expected` is the same estimate the
+    oversize guard is computed from: the tokens this document needs in order to come back
+    with its criteria verbatim. That is what makes the percentage honest rather than a
+    timer dressed up as one.
+
+    `pct` never decreases and is clamped to 99 until the draft is actually in hand. The
+    estimate is deliberately conservative, so a normal run finishes in the eighties — which
+    is the right way round: a bar that reaches 100% and then keeps spinning teaches the user
+    that the bar lies, and after that no bar helps them.
     """
     if not text.strip():
         raise RubricImportError("The file contains no text to read a scoring standard from.")
@@ -215,12 +232,31 @@ async def rubric_from_text(text: str, *, client_id: str | None) -> dict:
 
     user = ("Extract the scoring standard from this document text as rubric dimensions:"
             f"\n\n<document>\n{text}\n</document>")
+
+    reported = {"tokens": 0, "pct": 0}
+
+    def _report(tokens: int) -> None:
+        """Called from the SDK's stream loop: clamp, remember, hand over. Nothing else."""
+        tokens = max(int(tokens), reported["tokens"])
+        pct = min(99, int(tokens * 100 / needed)) if needed > 0 else 0
+        pct = max(pct, reported["pct"])
+        reported["tokens"], reported["pct"] = tokens, pct
+        on_progress({"stage": "analyzing", "tokens": tokens,
+                     "expected": needed, "pct": pct})
+
+    if on_progress is not None:
+        # Before the request, not after the first token: a Georgian scorecard can be quiet
+        # for a few seconds while the model reads it, and an unlabelled wait is the thing
+        # this whole feature exists to remove.
+        on_progress({"stage": "analyzing", "tokens": 0, "expected": needed, "pct": 0})
+
     try:
         raw = await llm.call_tool(
             feature="scoring_import", client_id=client_id, api_key=api_key,
             model=cfg.get("llm_model"), system=SYSTEM, user=user, tool=RUBRIC_TOOL,
             opts=llm.RESTRUCTURE, max_tokens=MAX_OUTPUT_TOKENS,
-            admit_timeout_s=ADMIT_PATIENCE_S, stream=True)
+            admit_timeout_s=ADMIT_PATIENCE_S, stream=True,
+            on_progress=_report if on_progress is not None else None)
     except llm.LLMTruncatedError:
         raise RubricImportError(
             f"The model ran out of output budget ({MAX_OUTPUT_TOKENS:,} tokens) while "
