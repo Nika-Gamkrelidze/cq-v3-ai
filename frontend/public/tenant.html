@@ -73,7 +73,6 @@
       </div>
       <div class="actions"><button type="submit" class="primary" id="loginBtn" data-i18n="btn.signin"></button></div>
       <div class="msg err" id="gateMsg" aria-live="polite"></div>
-      <div class="hint" data-i18n="login.hint"></div>
     </form>
 
     <div id="app" class="hidden">
@@ -164,11 +163,10 @@
             <label data-i18n="kba.doc.meta"></label><input id="i_meta" placeholder='{"region":"ge"}' />
             <div id="imp-file"><label data-i18n="kb.filelabel"></label><input type="file" id="i_file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md" multiple /><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
             <span class="tpl-links"></span></div>
-            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span></label>
-            <div class="hint" style="margin-top:6px" data-i18n="kb.restr.hint"></div></div>
+            <label class="inline" style="gap:8px; margin-top:12px"><input type="checkbox" id="i_restr" style="width:auto" /> <span data-i18n="kb.restr"></span><button class="tip" data-tip-i18n="kb.restr.hint"></button></label></div>
             <div id="imp-text" class="hidden"><label data-i18n="f.text"></label><textarea id="i_text"></textarea></div>
-            <div id="imp-csv" class="hidden"><label data-i18n="kb.csvlabel"></label><input type="file" id="i_csv" accept=".csv" multiple />
-            <div class="hint" data-i18n="kb.csvhint"></div><div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
+            <div id="imp-csv" class="hidden"><label><span data-i18n="kb.csvlabel"></span><button class="tip" data-tip-i18n="kb.csvhint"></button></label><input type="file" id="i_csv" accept=".csv" multiple />
+            <div class="hint" style="margin-top:8px"><span data-i18n="kb.templates"></span>
             <span class="tpl-links"></span></div></div>
             <div class="actions"><button class="primary" id="importBtn" data-i18n="btn.import"></button></div>
             <div class="msg" id="importMsg"></div>
@@ -179,10 +177,9 @@
         <div class="kbsec hidden" id="kbsec-chunks">
           <div class="card">
             <div class="row" style="align-items:flex-end">
-              <div style="flex:2"><label data-i18n="tkb.chunks.pick"></label><select id="kChunkDoc"><option value="">—</option></select></div>
+              <div style="flex:2"><label><span data-i18n="tkb.chunks.pick"></span><button class="tip" data-tip-i18n="tkb.chunks.hint"></button></label><select id="kChunkDoc"><option value="">—</option></select></div>
               <div style="flex:0"><button class="ghost" id="kReloadChunks" data-i18n="btn.refresh"></button></div>
             </div>
-            <p class="hint" data-i18n="tkb.chunks.hint"></p>
             <div id="kChunkList" style="margin-top:10px"></div>
           </div>
         </div>
@@ -191,7 +188,6 @@
         <div class="kbsec hidden" id="kbsec-retrieval">
           <div class="card">
             <h3 data-i18n="tkb.pg.heading"></h3>
-            <p class="hint" data-i18n="tkb.pg.hint"></p>
             <label data-i18n="kba.pg.query"></label><input id="kPgQuery" />
             <div class="row" style="margin-top:10px">
               <div class="w-num"><label data-i18n="kba.pg.topk"></label><input id="kPgTopk" type="number" value="8" /></div>
@@ -216,8 +212,7 @@
               <h3 style="margin:0" data-i18n="kba.tab.duplicates"></h3>
               <button class="ghost" id="kScanDup" data-i18n="btn.refresh"></button>
             </div>
-            <p class="hint" data-i18n="tkb.dup.hint"></p>
-            <div id="kDupBox" style="margin-top:10px"></div>
+            <div id="kDupBox" style="margin-top:14px"></div>
           </div>
         </div>
 
@@ -243,8 +238,7 @@
             </div>
           </div>
           <div class="card">
-            <h3 data-i18n="tkb.reembed.heading"></h3>
-            <p class="hint" data-i18n="tkb.reembed.desc"></p>
+            <h3><span data-i18n="tkb.reembed.heading"></span><button class="tip" data-tip-i18n="tkb.reembed.desc"></button></h3>
             <div class="actions" style="justify-content:space-between; align-items:center">
               <button class="ghost" id="kReembedAll" data-i18n="tkb.reembed.start"></button>
               <button class="ghost" id="kReloadReembed" data-i18n="btn.refresh"></button>
@@ -279,7 +273,6 @@
       <section class="panel" id="panel-playground">
         <div class="card">
           <h3 data-i18n="pg.heading"></h3>
-          <p class="hint" data-i18n="pg.hint"></p>
           <div class="subtabs" id="pgTabs">
             <div class="subtab active" data-pg="text" data-i18n="pg.mode.text"></div>
             <div class="subtab" data-pg="audio" data-i18n="pg.mode.audio"></div>
@@ -306,7 +299,6 @@
                 <b style="color:var(--mist)" data-i18n="sn.config"></b>
                 <span class="hint" id="snCfgMsg"></span>
               </div>
-              <p class="hint" data-i18n="sn.config.desc"></p>
               <p class="hint hidden" id="snReadonly" data-i18n="sn.readonly" style="color:var(--pending)"></p>
               <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
               <label data-i18n="sn.guidance"></label>
@@ -332,14 +324,13 @@
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">
               <h3 style="margin:0" data-i18n="cur.heading"></h3>
-              <p class="hint" style="margin:6px 0 0" data-i18n="cur.desc"></p>
             </div>
             <div style="flex:0"><button class="ghost" id="reloadCur" data-i18n="btn.refresh"></button></div>
           </div>
           <div class="selbar hidden" id="curSelBar">
             <span><b id="curSelCount">0</b> <span data-i18n="kba.selected"></span></span>
             <button class="primary" id="curBulkAccept" data-i18n="cur.bulk.accept"></button>
-            <span class="hint" data-i18n="cur.bulk.note"></span>
+            <button class="tip" data-tip-i18n="cur.bulk.note"></button>
           </div>
           <div id="curList" style="margin-top:12px"></div>
         </div>
@@ -351,7 +342,6 @@
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">
               <h3 style="margin:0" data-i18n="bot.heading"></h3>
-              <p class="hint" style="margin:6px 0 0" data-i18n="bot.desc"></p>
             </div>
             <div class="inline" style="flex:0; gap:8px">
               <span class="pill" id="botState">—</span>
@@ -373,8 +363,7 @@
         <div id="botForm" class="hidden">
           <!-- Autopilot: the one switch that points a model at the public internet. -->
           <div class="card">
-            <label class="inline" style="gap:8px"><input type="checkbox" id="b_autopilot" style="width:auto" /> <span data-i18n="bot.autopilot"></span></label>
-            <div class="hint" style="margin-top:6px" data-i18n="bot.autopilot.hint"></div>
+            <label class="inline" style="gap:8px"><input type="checkbox" id="b_autopilot" style="width:auto" /> <span data-i18n="bot.autopilot"></span><button class="tip" data-tip-i18n="bot.autopilot.hint"></button></label>
             <div class="msg err hidden" id="botKilled" data-i18n="bot.killed.note"></div>
             <!-- Filled on a 409 from the server: WHY it cannot be enabled, plus the way out. -->
             <div class="msg err hidden" id="botNeedPublic"></div>
@@ -402,8 +391,7 @@
             </div>
           </div>
           <div class="card">
-            <h3 data-i18n="bot.refusal"></h3>
-            <p class="hint" data-i18n="bot.refusal.hint"></p>
+            <h3><span data-i18n="bot.refusal"></span><button class="tip" data-tip-i18n="bot.refusal.hint"></button></h3>
             <div class="row stack-md">
               <div><label data-i18n="bot.lang.en"></label><textarea id="b_ref_en"></textarea></div>
               <div><label data-i18n="bot.lang.ka"></label><textarea id="b_ref_ka"></textarea></div>
@@ -412,11 +400,9 @@
           </div>
 
           <div class="card">
-            <h3 data-i18n="bot.escalation"></h3>
+            <h3><span data-i18n="bot.escalation"></span><button class="tip" data-tip-i18n="bot.escalation.hint"></button></h3>
             <input id="b_escalation" data-i18n-ph="bot.escalation.ph" />
-            <div class="hint" data-i18n="bot.escalation.hint"></div>
             <h4 data-i18n="bot.retrieval"></h4>
-            <div class="hint" data-i18n="bot.limits.hint"></div>
             <div class="row">
               <div><label data-i18n="bot.minscore"></label><input id="b_minscore" type="number" step="0.01" min="0" max="1" /></div>
               <div><label data-i18n="bot.minhits"></label><input id="b_minhits" type="number" min="0" /></div>
@@ -433,10 +419,8 @@
 
           <!-- The refusal-vs-general-knowledge choice, stated as the risk it is. Off by default. -->
           <div class="card">
-            <label class="inline" style="gap:8px"><input type="checkbox" id="b_general" style="width:auto" /> <span data-i18n="bot.general"></span></label>
-            <div class="hint" style="margin-top:6px" data-i18n="bot.general.risk"></div>
-            <label class="inline" style="gap:8px; margin-top:14px"><input type="checkbox" id="b_handoff" style="width:auto" /> <span data-i18n="bot.handoff"></span></label>
-            <div class="hint" style="margin-top:6px" data-i18n="bot.handoff.hint"></div>
+            <label class="inline" style="gap:8px"><input type="checkbox" id="b_general" style="width:auto" /> <span data-i18n="bot.general"></span><button class="tip" data-tip-i18n="bot.general.risk"></button></label>
+            <label class="inline" style="gap:8px; margin-top:14px"><input type="checkbox" id="b_handoff" style="width:auto" /> <span data-i18n="bot.handoff"></span><button class="tip" data-tip-i18n="bot.handoff.hint"></button></label>
           </div>
 
           <div class="card">
@@ -450,11 +434,10 @@
       <!-- SCORING (self-serve rubric config; same editor as the KB-admin console) -->
       <section class="panel" id="panel-scoring">
         <div class="card">
-          <div class="inline" style="justify-content:space-between; align-items:baseline">
+          <div class="inline" style="justify-content:space-between; align-items:baseline; margin-bottom:14px">
             <h3 style="margin:0" data-i18n="sc.heading"></h3>
             <span class="hint" id="scVersion"></span>
           </div>
-          <p class="hint" data-i18n="sc.desc"></p>
           <p class="hint hidden" id="scReadonly" data-i18n="sc.readonly" style="color:var(--pending)"></p>
           <div id="scDims"></div>
           <div class="actions" style="justify-content:space-between; align-items:center">

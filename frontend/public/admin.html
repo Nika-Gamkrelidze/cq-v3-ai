@@ -51,7 +51,10 @@
           <div class="row">
             <div><label data-i18n="f.provider"></label>
               <select id="e_provider"><option value="tei">tei (self-hosted BGE-M3)</option><option value="openai">openai</option></select></div>
-            <div><label data-i18n="f.dimension"></label><input id="e_dim" type="number" /></div>
+            <!-- The label text sits in its own span: applyI18n rewrites a [data-i18n]
+                 element's whole textContent, so an ⓘ appended to the label itself would
+                 vanish on the first language switch. Same shape everywhere below. -->
+            <div><label><span data-i18n="f.dimension"></span><button class="tip" data-tip-i18n="adm.embnote"></button></label><input id="e_dim" type="number" /></div>
           </div>
           <label data-i18n="f.model"></label><input id="e_model" placeholder="BAAI/bge-m3" />
           <label data-i18n="f.baseurl"></label><input id="e_base_url" placeholder="http://embeddings:80" />
@@ -61,7 +64,6 @@
             <button class="primary" id="saveEmb" data-i18n="btn.save"></button>
             <button class="ghost" id="testEmb" data-i18n="btn.test"></button>
           </div>
-          <div class="hint" data-i18n="adm.embnote"></div>
           <div id="embTest"></div><div class="msg" id="embMsg"></div>
         </div>
       </section>
@@ -75,9 +77,8 @@
             <div><label data-i18n="adm.maxanalyses"></label><input id="a_analyses" type="number" /></div>
             <div><label data-i18n="adm.maxmb"></label><input id="a_mb" type="number" /></div>
             <div><label data-i18n="adm.maxtts"></label><input id="a_tts" type="number" /></div>
-            <div><label data-i18n="adm.retention"></label><input id="a_retention" type="number" min="0" /></div>
+            <div><label><span data-i18n="adm.retention"></span><button class="tip" data-tip-i18n="adm.retention.hint"></button></label><input id="a_retention" type="number" min="0" /></div>
           </div>
-          <div class="hint" data-i18n="adm.retention.hint"></div>
           <h4 data-i18n="adm.features"></h4>
           <div class="inline" style="gap:18px">
             <label class="inline" style="gap:6px"><input type="checkbox" id="f_analyze" /> <span data-i18n="feat.analyze"></span></label>
@@ -88,7 +89,6 @@
         </div>
         <div class="card">
           <h3 data-i18n="adm.sentiment.heading"></h3>
-          <p class="hint" data-i18n="adm.sentiment.desc"></p>
           <label class="inline" style="gap:8px"><input type="checkbox" id="sn_enabled" /> <span data-i18n="sn.enabled"></span></label>
           <label data-i18n="sn.guidance"></label>
           <textarea id="sn_guidance" data-i18n-ph="sn.guidance.ph" style="min-height:80px"></textarea>
@@ -124,8 +124,10 @@
         <div class="card">
           <h3 data-i18n="adm.instructions"></h3>
           <textarea id="analysis_instructions"></textarea>
-          <div class="actions"><button class="primary" id="saveInt" data-i18n="btn.savesettings"></button><button class="ghost" id="testInt" data-i18n="btn.testconn"></button><button class="ghost" id="testDeep" data-i18n="btn.testdeep"></button></div>
-          <div class="hint" data-i18n="adm.testnote"></div>
+          <!-- The ⓘ rides in the actions row rather than on a label: what it warns about
+               (every click really transcribes and really synthesises, so it costs
+               ElevenLabs credit) belongs to the two Test buttons, not to a field. -->
+          <div class="actions"><button class="primary" id="saveInt" data-i18n="btn.savesettings"></button><button class="ghost" id="testInt" data-i18n="btn.testconn"></button><button class="ghost" id="testDeep" data-i18n="btn.testdeep"></button><button class="tip" data-tip-i18n="adm.testnote" data-tip-for="testInt testDeep" style="align-self:center"></button></div>
           <div class="msg" id="intMsg"></div><div id="intTest"></div>
         </div>
       </section>
@@ -134,8 +136,10 @@
       <section class="panel" id="panel-voices">
         <div class="card">
           <h3 data-i18n="adm.voicevis"></h3>
-          <label class="inline" style="gap:8px"><input type="checkbox" id="v_restrict" /><span data-i18n="f.restrictvoices"></span></label>
-          <div class="hint" style="margin-top:6px" data-i18n="v.hint"></div>
+          <!-- margin-left:0 so the ⓘ sits on the row's own 8px gap instead of adding its
+               default 6px to it. A <button> inside a <label> does not activate the label,
+               so this cannot toggle the checkbox by accident. -->
+          <label class="inline" style="gap:8px"><input type="checkbox" id="v_restrict" /><span data-i18n="f.restrictvoices"></span><button class="tip" data-tip-i18n="v.hint" style="margin-left:0"></button></label>
           <div class="row" style="margin-top:10px">
             <div style="flex:2"><input id="v_search" data-i18n-ph="v.search" /></div>
             <div style="flex:0; align-self:center" class="hint"><b id="v_count">0</b> <span data-i18n="v.selected"></span></div>
@@ -161,8 +165,7 @@
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">
-              <h3 style="margin:0" data-i18n="kill.heading"></h3>
-              <p class="hint" style="margin:6px 0 0" data-i18n="kill.desc"></p>
+              <h3 style="margin:0"><span data-i18n="kill.heading"></span><button class="tip" data-tip-i18n="kill.desc"></button></h3>
             </div>
             <div class="inline" style="flex:0; gap:8px">
               <span class="pill" id="killGlobalPill">—</span>

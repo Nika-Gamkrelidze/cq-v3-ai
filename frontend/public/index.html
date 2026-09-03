@@ -20,7 +20,6 @@
     <div style="margin-bottom:22px">
       <span class="eyebrow" data-i18n="hero.eyebrow"></span>
       <h1 style="margin:0; font-size:clamp(24px,4vw,32px);" data-i18n="hero.title"></h1>
-      <p class="lead" data-i18n="hero.sub"></p>
     </div>
     <div class="tabs">
       <div class="tab active" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
@@ -39,14 +38,16 @@
             <select id="langSelect"></select>
           </div>
           <div>
-            <label for="voiceSelect" data-i18n="f.voice"></label>
+            <!-- The label text lives in its own span because applyI18n rewrites a
+                 [data-i18n] element's whole textContent — an ⓘ appended to the label
+                 itself would be wiped on the first language switch. -->
+            <label for="voiceSelect" id="voiceLabel"><span data-i18n="f.voice"></span></label>
             <div class="inline">
               <div style="flex:1"><select id="voiceSelect"><option value="" data-i18n="f.defaultvoice"></option></select></div>
               <button class="ghost" id="previewBtn" data-i18n-title="tts.previewtitle" aria-label="Preview voice">▶</button>
             </div>
           </div>
         </div>
-        <div class="hint" id="langNote" style="margin-top:8px"></div>
         <div style="margin-top:14px">
           <label for="ttsText" data-i18n="f.text"></label>
           <textarea id="ttsText" data-i18n-ph="tts.text_ph"></textarea>
@@ -61,7 +62,6 @@
     <section class="panel" id="panel-stt">
       <div class="card">
         <h3 data-i18n="stt.heading"></h3>
-        <p class="lead" style="font-size:14px" data-i18n="stt.sub"></p>
         <label data-i18n="f.audiofile"></label>
         <div class="drop" id="audioDrop">
           <input type="file" id="audioFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
@@ -84,7 +84,6 @@
     <section class="panel" id="panel-sentiment">
       <div class="card">
         <h3 data-i18n="sn.heading"></h3>
-        <p class="lead" style="font-size:14px" data-i18n="sn.sub"></p>
         <label data-i18n="f.audiofile"></label>
         <div class="drop" id="snDrop">
           <input type="file" id="snFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
@@ -110,7 +109,6 @@
     <section class="panel" id="panel-convert">
       <div class="card">
         <h3 data-i18n="cv.heading"></h3>
-        <p class="lead" style="font-size:14px" data-i18n="cv.sub"></p>
 
         <label data-i18n="cv.files"></label>
         <div class="drop" id="cvDrop">
@@ -121,9 +119,11 @@
 
         <div class="row" style="margin-top:14px">
           <div>
-            <label for="cvFormat" data-i18n="cv.format"></label>
+            <!-- Empty data-tip on purpose: mountTips wires the ⓘ at page load and keeps it
+                 hidden until cvNote() has a format to describe, so it never appears as a
+                 dead circle while /convert/formats is still in flight. -->
+            <label for="cvFormat"><span data-i18n="cv.format"></span><button class="tip" data-tip=""></button></label>
             <select id="cvFormat"></select>
-            <div class="hint" id="cvFormatNote"></div>
           </div>
         </div>
 
@@ -169,8 +169,10 @@
     // process and a few ElevenLabs characters. Transcription and the sentiment read are
     // what a workspace pays for, so their tabs are REMOVED from the document rather than
     // hidden — a panel left in the DOM is one class away from visible and still reachable
-    // by anything that moves focus into it. The hero line goes with them: it advertised a
-    // transcript this visitor cannot get. Everything below guards on the panels being gone.
+    // by anything that moves focus into it. Everything below guards on the panels being
+    // gone. (The hero used to carry a second line that had to be swapped here because it
+    // advertised a transcript this visitor cannot get; the page no longer states its own
+    // feature list in prose, so the tabs are the only claim and they are already correct.)
     const SIGNED_IN = !!(sessionStorage.getItem('cq_admin_token') || sessionStorage.getItem('cq_tenant_token'));
     if (!SIGNED_IN) {
       ['stt', 'sentiment'].forEach(name => {
@@ -179,8 +181,6 @@
         const panel = document.getElementById('panel-' + name);
         if (panel) panel.remove();
       });
-      const sub = document.querySelector('[data-i18n="hero.sub"]');
-      if (sub) sub.setAttribute('data-i18n', 'hero.sub.public');
     }
     CQ.mountHeader({ tag: 'Voice AI', nav: [_navBack],
       extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
@@ -343,9 +343,17 @@
         // Resolved on every call, not cached at load: t() follows the CURRENT language, so a
         // cached map would keep repainting the note in whichever language happened to be
         // active when the page loaded.
+        //
+        // It hangs off the Voice label rather than standing under the row, because it is a
+        // warning about the voice: on Georgian, moving off the default voice is what
+        // produces English-accented fake Georgian, and that is the worst output this app
+        // can hand a visitor. It only exists for languages that have a note, so an empty
+        // string hides the ⓘ entirely rather than leaving a circle that opens nothing.
         const showNote = () => {
+          const label = document.getElementById('voiceLabel'); if (!label) return;
           const key = 'lang.note.' + sel.value, tr = t(key);
-          document.getElementById('langNote').textContent = (tr === key ? (fallback[sel.value] || '') : tr);
+          if (tr !== key) CQ.tip(label, tr, { i18n: key });   // ours: follows the language switch
+          else CQ.tip(label, fallback[sel.value] || '');      // the API's English, or nothing
         };
         sel.addEventListener('change', showNote); showNote();
         langNoteRefresh = showNote;
@@ -426,10 +434,13 @@
       const sel = $c('cvFormat'); if (!sel) return;
       const keep = sel.value;
       sel.innerHTML = '';
+      // Just the codec and its rate. The sentence explaining what the codec IS used to be
+      // glued onto every option, so the list read as eight paragraphs when it is really
+      // eight names; it now lives on the label's ⓘ, where the one person who is unsure can
+      // ask for it.
       cvState.formats.forEach(f => {
         const o = document.createElement('option'); o.value = f.id;
-        const d = cvDesc(f);
-        o.textContent = cvLabel(f) + (d ? ' — ' + d : '');
+        o.textContent = cvLabel(f);
         sel.appendChild(o);
       });
       const want = cvFind(keep) ? keep : (cvFind(cvState.def) ? cvState.def : (cvState.formats[0] || {}).id);
@@ -437,13 +448,14 @@
       CQ.syncSelect(sel);
       cvNote();
     }
-    // What the dropdown line does not carry: the extension the file will get, and what it
-    // will be. Every telephony format is fixed-rate mono — that is the codec definition,
-    // not a preference of ours — so it is stated here rather than offered as a setting.
+    // The selected codec's description, on the label's ⓘ. Painted with a resolved string
+    // rather than an i18n key because a format the server added and we have no wording for
+    // falls back to the server's own English; cvPaintFormats is re-run on cq:lang, so the
+    // sentence still follows the language switch.
     function cvNote() {
-      const el = $c('cvFormatNote'); if (!el) return;
+      const label = document.querySelector('label[for="cvFormat"]'); if (!label) return;
       const f = cvFind($c('cvFormat').value);
-      el.textContent = f ? [f.ext, f.rate ? f.rate + ' Hz' : '', t('cv.mono')].filter(Boolean).join(' · ') : '';
+      CQ.tip(label, f ? cvDesc(f) : '');
     }
 
     function cvHuman(bytes) {
