@@ -66,13 +66,13 @@ async def test_rubric_failures_are_actionable(monkeypatch):
 
     with pytest.raises(si.RubricImportError, match="no text"):
         await si.rubric_from_text("   ", client_id="c1")
-    with pytest.raises(si.RubricImportError, match="too large"):
+    with pytest.raises(si.RubricImportError, match="too long"):
         await si.rubric_from_text("x" * (si.MAX_INPUT_CHARS + 1), client_id="c1")
 
     async def truncated(**kw):
         raise si.llm.LLMTruncatedError("budget")
     monkeypatch.setattr(si.llm, "call_tool", truncated)
-    with pytest.raises(si.RubricImportError, match="too long"):
+    with pytest.raises(si.RubricImportError, match="output budget"):
         await si.rubric_from_text("standard", client_id="c1")
 
     async def empty(**kw):
@@ -87,3 +87,57 @@ async def test_rubric_failures_are_actionable(monkeypatch):
     with pytest.raises(si.RubricImportError, match="Try again") as e:
         await si.rubric_from_text("standard", client_id="c1")
     assert "secret upstream text" not in str(e.value)
+
+
+# --- output-budget sizing -----------------------------------------------------------
+# A real Georgian call-centre scorecard (92 rows, 10.3k characters) failed to import: the
+# schema makes guidance reproduce every criterion VERBATIM, so output ⊇ input, and Georgian
+# costs ~2 tokens per character against ~0.16 for English. It needed ~20k output tokens
+# against a budget of 8,192, hit stop_reason=max_tokens, and told the uploader to split a
+# file that was never too big. These pin the sizing so that cannot come back.
+
+GEORGIAN_ROW = ("A1 (1/-3): თანამშრომელმა უპასუხა ზარს სტანდარტული ფრაზით და მიესალმა "
+                "მომხმარებელს, დაუდასტურა დახმარებისთვის მზადყოფნა.\n")
+
+
+def test_a_real_georgian_scorecard_fits_the_output_budget():
+    """The exact failure reported: ~10k characters of mostly-Georgian criteria."""
+    text = GEORGIAN_ROW * 92
+    assert 9_000 < len(text) < 13_000, "fixture should match the reported file's size"
+    needed = si.estimate_output_tokens(text)
+    assert needed > 8_192, "if this fails the fixture stopped reproducing the bug"
+    assert needed <= si.MAX_OUTPUT_TOKENS, (
+        "a routine Georgian scorecard must import in one piece; needed %d, budget %d"
+        % (needed, si.MAX_OUTPUT_TOKENS))
+
+
+def test_english_is_not_charged_the_georgian_rate():
+    """The old flat character limit could not tell these apart, so it had to be wrong for
+    one of them. Same length, ~12x cheaper — English must stay comfortably inside."""
+    english = ("A1 (1/-3): The employee answered the call with the standard phrase and "
+               "greeted the customer, confirming readiness to help.\n") * 92
+    assert si.estimate_output_tokens(english) < si.estimate_output_tokens(GEORGIAN_ROW * 92) / 4
+    assert si.estimate_output_tokens(english) <= si.MAX_OUTPUT_TOKENS
+
+
+def test_the_guard_predicts_truncation_instead_of_paying_for_it():
+    """Genuinely oversized input is refused before the call, not after a multi-minute
+    stream ends in stop_reason=max_tokens."""
+    huge = GEORGIAN_ROW * 92 * 4
+    needed = si.estimate_output_tokens(huge)
+    assert needed > si.MAX_OUTPUT_TOKENS
+    msg = si.oversize_message(huge, needed)
+    assert str(si.MAX_OUTPUT_TOKENS // 1000) in msg.replace(",", "")[:200] or "32,000" in msg
+    assert "too long" in msg
+
+
+def test_input_and_output_limits_are_mutually_satisfiable():
+    """The regression in one line: output ⊇ input, so the character cap must not admit a
+    document whose verbatim reproduction cannot fit the token budget. The old pair
+    (40,000 chars / 8,192 tokens) failed this for every Georgian document over ~4k."""
+    worst_case_at_cap = si.MAX_INPUT_CHARS * si.WIDE_TOKENS_PER_CHAR * si.OUTPUT_OVERHEAD
+    assert worst_case_at_cap > si.MAX_OUTPUT_TOKENS, (
+        "MAX_INPUT_CHARS is a backstop; the token estimate must be the binding guard")
+    # and the estimator must actually bind before the character backstop does
+    georgian_at_budget = si.MAX_OUTPUT_TOKENS / (si.WIDE_TOKENS_PER_CHAR * si.OUTPUT_OVERHEAD)
+    assert georgian_at_budget < si.MAX_INPUT_CHARS

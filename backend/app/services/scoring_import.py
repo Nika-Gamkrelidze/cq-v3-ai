@@ -21,13 +21,51 @@ from .scoring import MAX_DIMENSIONS
 
 log = logging.getLogger("cq")
 
-# A rubric is a bounded document; anything bigger than this is not a scoring standard.
-MAX_INPUT_CHARS = 40_000
-MAX_OUTPUT_TOKENS = 8_192
+# The tool schema requires each dimension's guidance to carry its section's criteria
+# VERBATIM, so the answer is a SUPERSET of the document: output ⊇ input. Sizing must
+# therefore be done in OUTPUT tokens, and it is script-dependent. Byte-level BPE splits
+# scripts outside its merge vocabulary far harder than Latin text — measured on cl100k,
+# Georgian runs ~0.53 chars/token against ~6.2 for English, a ~12x difference that no
+# single chars-per-token constant can express.
+#
+# The old pairing — 40k input characters against an 8,192-token output budget — was
+# unsatisfiable for any Georgian document longer than ~4k characters. A routine 92-row
+# Georgian call-centre scorecard of 10.3k characters needs ~14k output tokens: it hit
+# stop_reason=max_tokens and told the uploader to "split the file", advice that could not
+# possibly help because the file was never too big. kb_restructure avoids this by
+# segmenting to 6k characters per call, but a rubric cannot be segmented that way without
+# cutting sections in half, so the budget must hold the whole standard in one answer.
+WIDE_TOKENS_PER_CHAR = 2.0     # Georgian, Armenian, CJK...  (measured ~1.9, rounded up)
+NARROW_TOKENS_PER_CHAR = 0.25  # Latin, digits, punctuation  (measured ~0.16, rounded up)
+# Descriptions, general_instructions and the JSON envelope, on top of the verbatim criteria.
+OUTPUT_OVERHEAD = 1.25
+MAX_OUTPUT_TOKENS = 32_000
+# Backstop for pathological input only. The load-bearing guard is estimate_output_tokens(),
+# because character count alone says nothing about whether the answer can fit.
+MAX_INPUT_CHARS = 200_000
 ADMIT_PATIENCE_S = 30.0
 
-OVERSIZE_MESSAGE = (f"The file is too large for rubric import (over {MAX_INPUT_CHARS // 1000}k "
-                    "characters of text). Import the part that defines the scoring standard.")
+
+def estimate_output_tokens(text: str) -> int:
+    """Tokens needed to reproduce `text` verbatim, counting scripts separately.
+
+    Counting the two populations apart is what lets a 30k-character English scorecard
+    through while correctly rejecting a Georgian one a third that size — the failure the
+    single 40k-character limit could not see.
+    """
+    wide = sum(1 for ch in text if ord(ch) > 0x02FF)
+    narrow = len(text) - wide
+    return int((wide * WIDE_TOKENS_PER_CHAR + narrow * NARROW_TOKENS_PER_CHAR)
+               * OUTPUT_OVERHEAD)
+
+
+def oversize_message(text: str, needed: int) -> str:
+    """Say what actually overflowed, in the uploader's terms."""
+    return (f"This scoring standard is too long to import in one piece: reproducing its "
+            f"criteria needs about {needed:,} tokens of output and the limit is "
+            f"{MAX_OUTPUT_TOKENS:,}. Import the sheet or section that defines the standard "
+            f"on its own, or delete rows that are not part of it (filled-in example scores, "
+            f"comment rows), then try again.")
 
 
 class RubricImportError(RuntimeError):
@@ -103,6 +141,11 @@ SYSTEM = (
     "being measured and how, not one call's results.\n"
     "- Preserve wording, codes and point values exactly; skip formula debris (#REF!, "
     "#DIV/0!) and empty layout rows.\n"
+    "- max_points is the section's maximum under the STANDARD: add up its criteria's own "
+    "point values. A totals block may show 0 for a section simply because the sampled "
+    "call never reached that situation (no transfer, no delay, no conflict) — that is a "
+    "fact about one call, not about the standard. Never take 0 from a totals row for a "
+    "section that has scored criteria, or that section would carry no weight at all.\n"
     "- Write everything in the document's own language.\n"
     f"- At most {MAX_DIMENSIONS} dimensions."
 )
@@ -160,8 +203,9 @@ async def rubric_from_text(text: str, *, client_id: str | None) -> dict:
     """
     if not text.strip():
         raise RubricImportError("The file contains no text to read a scoring standard from.")
-    if len(text) > MAX_INPUT_CHARS:
-        raise RubricImportError(OVERSIZE_MESSAGE)
+    needed = estimate_output_tokens(text)
+    if len(text) > MAX_INPUT_CHARS or needed > MAX_OUTPUT_TOKENS:
+        raise RubricImportError(oversize_message(text, needed))
 
     cfg = await settings_store.get_effective()
     api_key = cfg.get("anthropic_api_key")
@@ -179,8 +223,9 @@ async def rubric_from_text(text: str, *, client_id: str | None) -> dict:
             admit_timeout_s=ADMIT_PATIENCE_S, stream=True)
     except llm.LLMTruncatedError:
         raise RubricImportError(
-            "The scoring standard is too long to import in one piece — split the file, or "
-            "remove content that is not part of the standard, and try again.") from None
+            f"The model ran out of output budget ({MAX_OUTPUT_TOKENS:,} tokens) while "
+            "writing the criteria back. Import the section that defines the standard on "
+            "its own, or remove rows that are not part of it, and try again.") from None
     except llm.LLMError as exc:
         log.error("scoring_import call failed (client=%s): %s", client_id, exc)
         raise RubricImportError(
