@@ -1735,6 +1735,9 @@
       box.querySelectorAll('.sc-del').forEach(b => b.addEventListener('click', () => { scReadDom(); scDims.splice(+b.dataset.i,1); scRenderDims(); }));
       box.querySelectorAll('.sc-weight').forEach(inp => inp.addEventListener('input', scSum));
       scSum();
+      // Guidance can arrive from AI import as a section's whole criteria list;
+      // size each box to its text so it is readable without scrolling a 54px window.
+      CQ.autogrowBind(box, '.sc-guide');
     }
     function scSum() {
       let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value)||0);

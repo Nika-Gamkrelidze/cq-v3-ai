@@ -1131,7 +1131,37 @@ const CQ = (() => {
     label();
   }
 
+
+  // ---- Auto-growing textareas -------------------------------------------------------
+  // A scoring dimension's guidance is the text the model actually reads when scoring, and
+  // AI rubric import fills it with that section's complete criteria verbatim — thousands
+  // of characters for a real call-centre standard. A fixed 54px box showed two lines of
+  // it, so the field people most need to READ was the one they could see least of.
+  //
+  // Capped rather than unbounded: seven dimensions each grown to full height would push
+  // Save several screens down, so past the cap the textarea scrolls internally instead.
+  function autogrow(el, cap) {
+    if (!el) return;
+    cap = cap || Math.max(240, Math.round(window.innerHeight * 0.45));
+    // Inside a hidden panel a textarea measures scrollHeight 0 — sizing it there would
+    // collapse it to nothing. Leave it; it gets sized when its tab is shown.
+    if (!el.offsetHeight && !el.getClientRects().length) return;
+    el.style.height = 'auto';
+    const natural = el.scrollHeight;          // read BEFORE clamping, or the cap hides it
+    el.style.height = Math.min(natural, cap) + 'px';
+    el.style.overflowY = natural > cap ? 'auto' : 'hidden';
+  }
+
+  // Size every match now and keep each in step as it is typed into.
+  function autogrowBind(root, sel, cap) {
+    (root || document).querySelectorAll(sel).forEach(el => {
+      autogrow(el, cap);
+      el.addEventListener('input', () => autogrow(el, cap));
+    });
+  }
+
   return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, select, enhanceSelects, syncSelect, player, attachRecorder,
-           analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp };
+           analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp,
+           autogrow, autogrowBind };
 })();
