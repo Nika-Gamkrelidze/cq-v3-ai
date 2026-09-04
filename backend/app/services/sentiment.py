@@ -22,6 +22,7 @@ tenant their transcript.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 import httpx
@@ -35,6 +36,10 @@ log = logging.getLogger("cq")
 # the failure is DNS/connect, and without its own budget that cost lands on EVERY analysis.
 _TIMEOUT = httpx.Timeout(30.0, connect=3.0)
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+# Per-segment prosody classifies every turn of a whole call (up to 30 min of decoded audio,
+# batched through the model) rather than one window — the same connect budget, four times
+# the read budget.
+_SEGMENTS_TIMEOUT = httpx.Timeout(120.0, connect=3.0)
 
 # Discrete labels the sidecar may return, mapped to the coarse polarity the UI colours by.
 _POLARITY = {
@@ -239,3 +244,92 @@ async def analyse(audio: bytes | None, analysis: dict | None, *, filename: str |
     """Full sentiment record for one job. Safe to call unconditionally."""
     pros = await prosody(audio, filename, content_type) if audio else None
     return combine(_text_part(analysis), pros)
+
+
+# --------------------------------------------------------------------------- #
+# Per-segment prosody, for the semantic analyser (services/semantic.py)
+# --------------------------------------------------------------------------- #
+def _num(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def _ranges(segments) -> list[dict]:
+    """`[{"i", "start", "end"}]` for every segment that carries a real, non-empty time range —
+    the only ones the sidecar can slice. Text-mode rows (times None) are simply left out."""
+    out = []
+    for seg in (segments or []):
+        if not isinstance(seg, dict) or isinstance(seg.get("i"), bool):
+            continue
+        start, end = _num(seg.get("start")), _num(seg.get("end"))
+        try:
+            i = int(seg.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if start is None or end is None or end <= start:
+            continue
+        out.append({"i": i, "start": start, "end": end})
+    return out
+
+
+async def prosody_segments(audio: bytes, segments, filename: str | None = None,
+                           content_type: str | None = None) -> list | None:
+    """Acoustic emotion per segment from the sidecar's `POST /prosody/segments`, or None.
+
+    Returns `[{"i", "label", "polarity", "confidence", "arousal", "valence"}]` — one entry
+    per range the sidecar answered for (a slice too short to classify comes back "unknown").
+    Never raises: the same failure modes as `prosody()` resolve to None, and the caller
+    reports the voice half as unavailable instead of losing the text half.
+
+    Unlike `prosody()` the upload is NOT truncated: cutting the tail off a compressed file
+    would shift or lose every later range, which is worse than no answer. The body is already
+    bounded by the API's own upload limit for the principal that stored the recording.
+    """
+    cfg = await settings_store.get_effective()
+    url = (cfg.get("sentiment_url") or "").strip()
+    ranges = _ranges(segments)
+    if not url or not audio or not ranges:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=_SEGMENTS_TIMEOUT) as client:
+            resp = await client.post(
+                url.rstrip("/") + "/prosody/segments",
+                files={"file": (filename or "audio", audio, content_type or "application/octet-stream")},
+                data={"segments": json.dumps(ranges)},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.HTTPError, ValueError, asyncio.TimeoutError) as exc:
+        log.warning("per-segment prosody unavailable: %s", exc)
+        return None
+    except Exception:  # noqa: BLE001 — a tone model must never break the analysis
+        log.exception("per-segment prosody failed")
+        return None
+
+    items = data.get("segments") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+    out = []
+    for item in items:
+        if not isinstance(item, dict) or isinstance(item.get("i"), bool):
+            continue
+        try:
+            i = int(item.get("i"))
+        except (TypeError, ValueError):
+            continue
+        label = str(item.get("label") or "unknown").lower()
+        out.append({
+            "i": i,
+            "label": label,
+            "polarity": _POLARITY.get(label, "neutral"),
+            "confidence": _clamp01(item.get("confidence")),
+            "arousal": _clamp01(item.get("arousal")),
+            "valence": _clamp01(item.get("valence")),
+        })
+    return out

@@ -1,12 +1,17 @@
 """Scoring-rubric config endpoints + the answer-scoring playground.
 
-Surfaces, all tenant-isolated:
+Surfaces, all owner-isolated (a tenant by client_id, a registered user by user_id):
   • Superadmin, tenant-parameterized:  GET/PUT /admin/scoring/{tenant_id}/config
                                        POST   /admin/scoring/{tenant_id}/import[?stream=1]
                                        POST   /admin/scoring/{tenant_id}/score-text
                                        POST   /admin/analyze/{tenant_id} (audio; see below)
-  • Tenant self-serve (owner):          GET/PUT /scoring/config   (scoped to the caller)
-                                        POST    /scoring/import[?stream=1]
+  • Superadmin, global:                 GET/PUT /admin/default-rubric (what owners without a
+                                       rubric of their own score against)
+  • Self-serve (tenant | user):         GET/PUT /scoring/config   (scoped to the caller; the
+                                       GET answers with the default when they have none)
+                                        POST    /scoring/reset    (copy the default in — the
+                                       caller re-enters their own password)
+  • Tenant self-serve (owner):          POST    /scoring/import[?stream=1]
 
 The AI rubric import carries two transports over one body — blocking JSON, or SSE under
 `?stream=1` — for the reason spelled out above `_ImportFailed`.
@@ -23,7 +28,8 @@ from pydantic import BaseModel
 from ..db import pool
 from ..services import (analysis, factcheck, kb_ingest, scoring, scoring_import,
                         scoring_store, settings_store)
-from ..services.auth import Principal, client_ip, resolve_principal
+from ..services.auth import (Principal, client_ip, resolve_principal,
+                             verify_password)
 from .chat import _sse, _sse_response
 
 router = APIRouter(tags=["scoring"])
@@ -51,7 +57,15 @@ def _dump(dims: list[Dimension]) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Superadmin, tenant-parameterized
 # --------------------------------------------------------------------------- #
+def _superadmin(principal: Principal = Depends(resolve_principal)) -> Principal:
+    if not principal.is_superadmin:
+        raise HTTPException(status_code=401, detail="Superadmin required")
+    return principal
+
+
 async def _scope(tenant_id: str, principal: Principal = Depends(resolve_principal)) -> str:
+    # The check stays inline (not via `_superadmin`): `_scope` is also called directly by
+    # tests as one function, and it must reject before it looks at the tenant id.
     if not principal.is_superadmin:
         raise HTTPException(status_code=401, detail="Superadmin required")
     try:
@@ -74,6 +88,22 @@ async def admin_get(tid: str = Depends(_scope)):
 async def admin_put(body: ConfigBody, tid: str = Depends(_scope)):
     try:
         return await scoring_store.save_config(tid, _dump(body.dimensions), body.rubric or "", "superadmin")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/admin/default-rubric", dependencies=[Depends(_superadmin)])
+async def admin_get_default_rubric():
+    """The rubric every owner WITHOUT one of their own scores against. `source` tells the
+    panel whether it is showing the stored blob, the demo tenant's rubric it is seeded from,
+    or the built-in fallback."""
+    return await scoring_store.get_default_rubric()
+
+
+@router.put("/admin/default-rubric", dependencies=[Depends(_superadmin)])
+async def admin_put_default_rubric(body: ConfigBody):
+    try:
+        return await scoring_store.set_default_rubric(_dump(body.dimensions), body.rubric or "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -324,8 +354,13 @@ async def admin_analyze_audio(request: Request, file: UploadFile = File(...),
 
 
 # --------------------------------------------------------------------------- #
-# Tenant self-serve — scoped to the authenticated tenant
+# Self-serve — scoped to the authenticated owner (tenant by client_id, user by user_id)
 # --------------------------------------------------------------------------- #
+def _is_user(principal: Principal) -> bool:
+    # `kind`/`user_id` read directly: `Principal.is_user` is being added concurrently.
+    return principal.kind == "user" and bool(principal.user_id)
+
+
 def _tenant(principal: Principal = Depends(resolve_principal)) -> str:
     if not principal.is_tenant:
         raise HTTPException(status_code=401, detail="Tenant login or API key required")
@@ -341,16 +376,99 @@ def _tenant_owner(principal: Principal = Depends(resolve_principal)) -> str:
     return principal.client_id
 
 
+def _rubric_reader(principal: Principal = Depends(resolve_principal)) -> Principal:
+    """Anyone who owns (or inherits) a rubric may read it: any tenant credential, or a user."""
+    if principal.is_tenant or _is_user(principal):
+        return principal
+    raise HTTPException(status_code=401, detail="Tenant login, API key or user login required")
+
+
+def _rubric_editor(principal: Principal = Depends(resolve_principal)) -> Principal:
+    """A user edits their own rubric; a tenant keeps the owner|apikey rule of `_tenant_owner`."""
+    if _is_user(principal):
+        return principal
+    if not principal.is_tenant:
+        raise HTTPException(status_code=401, detail="Tenant login, API key or user login required")
+    if principal.role not in ("owner", "apikey"):
+        raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
+    return principal
+
+
+def _rubric_resetter(principal: Principal = Depends(resolve_principal)) -> Principal:
+    """Reset is guarded by re-entering one's OWN password, so it needs a principal that has
+    one: a tenant owner login or a user. An API key has no password to verify (403, not 401 —
+    the credential is valid, this action is just not available to it)."""
+    if _is_user(principal):
+        return principal
+    if not principal.is_tenant:
+        raise HTTPException(status_code=401, detail="Tenant login or user login required")
+    if principal.role == "apikey" or not principal.user_id:
+        raise HTTPException(status_code=403,
+                            detail="An API key has no password to verify; reset from an owner login")
+    if principal.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner role required to reset the scoring rubric")
+    return principal
+
+
+def _updated_by(principal: Principal) -> str:
+    return "user" if _is_user(principal) else "tenant"
+
+
+async def _password_matches(principal: Principal, password: str) -> bool:
+    """Check `password` against the CALLER'S OWN stored hash — never anyone else's.
+
+    A tenant login is looked up by its user id AND client_id, so a token can only ever verify
+    against a user of the tenant it was issued for; a registered user by app_users.id. An
+    inactive account fails the check like a wrong password."""
+    async with pool().acquire() as conn:
+        if principal.is_tenant:
+            row = await conn.fetchrow(
+                "SELECT password_hash, is_active FROM tenant_users WHERE id = $1 AND client_id = $2",
+                principal.user_id, principal.client_id)
+        else:
+            row = await conn.fetchrow(
+                "SELECT password_hash, is_active FROM app_users WHERE id = $1", principal.user_id)
+    if not row or not row["is_active"]:
+        return False
+    # PBKDF2 (200k rounds) in a thread: this process is one uvicorn worker, and a blocking
+    # ~40 ms hash inside an async handler stalls every other coroutine in it — including the
+    # SSE keepalives a long transcription depends on. Same rule as routers/auth.py.
+    return await asyncio.to_thread(verify_password, password, row["password_hash"])
+
+
 @router.get("/scoring/config")
-async def tenant_get(client_id: str = Depends(_tenant)):
-    return await scoring_store.get_active_config(client_id) or {"version": None, "dimensions": [],
-                                                                "weights": {}, "rubric": "", "is_active": False}
+async def tenant_get(principal: Principal = Depends(_rubric_reader)):
+    """The caller's active rubric, or the default (`is_default` true) when they have none."""
+    return await scoring_store.get_active_config_for(principal)
 
 
 @router.put("/scoring/config")
-async def tenant_put(body: ConfigBody, client_id: str = Depends(_tenant_owner)):
+async def tenant_put(body: ConfigBody, principal: Principal = Depends(_rubric_editor)):
     try:
-        return await scoring_store.save_config(client_id, _dump(body.dimensions), body.rubric or "", "tenant")
+        return await scoring_store.save_config_for(
+            principal, _dump(body.dimensions), body.rubric or "", _updated_by(principal))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+class ResetBody(BaseModel):
+    password: str
+
+
+@router.post("/scoring/reset")
+async def tenant_reset(body: ResetBody, principal: Principal = Depends(_rubric_resetter)):
+    """Replace the caller's rubric with a COPY of the default, as a new version — so the
+    reset is undoable by the same history every other save leaves, and a later change to
+    the default does not silently follow them. The caller re-enters their own password
+    because this throws away a rubric someone may have spent an afternoon tuning."""
+    if not body.password:
+        raise HTTPException(status_code=400, detail="password is required")
+    if not await _password_matches(principal, body.password):
+        raise HTTPException(status_code=403, detail="Password does not match")
+    default = await scoring_store.get_default_rubric()
+    try:
+        return await scoring_store.save_config_for(
+            principal, default["dimensions"], default["rubric"], "reset")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

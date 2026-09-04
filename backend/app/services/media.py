@@ -1,8 +1,9 @@
-"""Retained media for anonymous (unregistered) submissions.
+"""Retained media: uploaded recordings and TTS clips, for every principal.
 
-Everything an unregistered visitor sends us — the uploaded recording, the text they asked us
-to speak, the clip we spoke back — is kept for a bounded window so abuse can be investigated
-and a bad result can be reproduced. Two rules shape this module:
+Anonymous submissions are kept for a bounded window so abuse can be investigated and a bad
+result reproduced; tenants' and registered users' recordings are kept so History can replay
+a call with its highlights on a player. One deadline (the Storage setting's retention_days)
+applies to all of it. Two rules shape this module:
 
   * **Bytes on a volume, metadata in Postgres.** Recordings are megabytes; putting them in a
     bytea column would drag every one of them through every pg_dump forever. The row keeps the

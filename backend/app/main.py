@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .routers import (admin, analyze, auth, calls, chat, convert, curation, kb,
-                     kb_admin, partner, scoring, sentiment, tenants, tts)
+                     kb_admin, partner, recordings, scoring, sentiment, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
 
@@ -22,8 +22,10 @@ async def lifespan(app: FastAPI):
     await db.connect()
     for line in await run_startup_migrations():
         log.info("startup migration: %s", line)
-    # Fail any analysis job left mid-flight by a previous crash/restart (audio isn't
-    # persisted, so they can't be auto-retried — the partner resubmits).
+    # Fail any analysis job left mid-flight by a previous crash/restart. The audio IS stored
+    # now (every principal, under the Storage retention), but nothing re-drives a half-run
+    # pipeline from a stored file — the caller resubmits. Workbench rows parked in `ready`
+    # are a resting state, not mid-flight, and the sweep leaves them alone.
     swept = await analysis.sweep_stuck_jobs()
     if swept:
         log.info("startup: failed %s stuck analysis job(s)", swept)
@@ -67,6 +69,9 @@ app.include_router(kb_admin.router)
 app.include_router(scoring.router)
 app.include_router(sentiment.router)
 app.include_router(tenants.router)
+# Call Workbench: /recordings + /summaries. Root only, never under /v1 — it admits registered
+# users and anonymous visitors, neither of which belongs on the partner surface.
+app.include_router(recordings.router)
 
 # ---- B2B partner API (versioned) -------------------------------------------
 # New partner-facing endpoints (account, transcriptions, async + bulk analysis, jobs,

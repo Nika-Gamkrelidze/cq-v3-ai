@@ -16,6 +16,18 @@ router = APIRouter(tags=["analyze"])
 MAX_BYTES = 100 * 1024 * 1024
 
 
+def _user_id(principal: Principal) -> str | None:
+    """The registered-user owner to WRITE on a row — only for kind 'user'.
+
+    A tenant login also carries a `user_id` (its `tenant_users` row), and that must never land
+    in the column a registered user's history is scoped by. Without this the row would be
+    written `principal_type='user', user_id NULL`: the caller pays a quota unit for an upload
+    that `_scope` can never match again, and `retention.purge_expired` keeps its transcript
+    under the signed-in rule with no account able to see or delete it.
+    """
+    return principal.user_id if principal.kind == "user" else None
+
+
 @router.get("/limits")
 async def get_limits(principal: Principal = Depends(resolve_principal)):
     """Remaining anonymous quota for the caller (or unlimited for tenants/superadmin)."""
@@ -38,7 +50,8 @@ async def analyze_audio(request: Request, file: UploadFile = File(...),
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
-        status="transcribing", client_ip=client_ip(request), audio=audio)
+        status="transcribing", client_ip=client_ip(request), audio=audio,
+        user_id=_user_id(principal))
     result = await analysis.run_pipeline(
         job_id, audio, file.filename, file.content_type, principal.client_id, principal.is_tenant)
     if result.get("status") == "error":
@@ -71,7 +84,8 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
-        status="transcribing", client_ip=client_ip(request), audio=audio)
+        status="transcribing", client_ip=client_ip(request), audio=audio,
+        user_id=_user_id(principal))
 
     try:
         stt = await elevenlabs.transcribe(
@@ -106,11 +120,17 @@ def _scope(principal: Principal, first: int = 1):
     It read as safe only by accident (its anon_key is None and `anon_key = NULL` matches no row),
     which is a property of the data, not a decision — and the next principal kind added would
     inherit the same silent default.
+
+    A registered user is matched on `user_id` WITH the `principal_type` discriminator: a tenant
+    login also carries a `user_id` (its tenant_users row), and only the discriminator keeps a
+    coincidence of ids from reading as ownership.
     """
     if principal.is_superadmin:
         return "TRUE", []
     if principal.is_tenant:
         return f"client_id = ${first}", [principal.client_id]
+    if principal.kind == "user" and principal.user_id:
+        return f"user_id = ${first} AND principal_type = 'user'", [principal.user_id]
     if principal.kind == "integration":
         raise HTTPException(status_code=403,
                             detail="This integration credential cannot read audio jobs.")

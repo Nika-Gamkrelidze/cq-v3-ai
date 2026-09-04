@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""i18n parity lint for frontend/public/brand.js.
+"""i18n parity lint for the frontend's dictionaries.
 
-WHY this exists: every user-facing string in the three UIs comes from the `DICT`
-object in `brand.js`, which carries `en` / `ka` / `ru` side by side and is edited
-BY HAND. `CQ.t()` silently falls back to English when a key is missing, so a
-half-translated feature looks fine to the developer (who runs the UI in English)
-and ships English text into a Georgian tenant's console. There is no build step
-and no framework to catch it. This script is the lint.
+WHY this exists: every user-facing string in the UIs comes from the `DICT` object in
+`frontend/public/brand.js` — plus, since the call workbench, the module-local blocks each
+feature file registers with `CQ.extendDict({...})` — and all of it carries `en` / `ka` / `ru`
+side by side, edited BY HAND. `CQ.t()` silently falls back to English when a key is missing,
+so a half-translated feature looks fine to the developer (who runs the UI in English) and
+ships English text into a Georgian tenant's console. There is no build step and no framework
+to catch it. This script is the lint.
 
-It fails (exit 1) on:
-  * a key present in one language and missing from another;
-  * a key defined twice inside one language block (the second literal silently
-    wins, so the first translation is dead code and the two drift apart).
+It scans `brand.js`'s `const DICT = {` literal and EVERY `CQ.extendDict({` literal in every
+`frontend/public/*.js` file, then fails (exit 1) on:
+  * a key present in one language and missing from another (across all sources);
+  * a key defined twice inside one language, in the same file or across files (the later
+    registration silently wins, so the first translation is dead code and the two drift apart).
 
-Usage:  python3 scripts/check_i18n.py [path/to/brand.js]
+Usage:  python3 scripts/check_i18n.py [path/to/frontend/public]     (a brand.js path also works)
 
-Implementation note: brand.js is not JSON — values contain apostrophes, braces
-and colons — so this walks the DICT text as a character stream tracking string
-state and brace depth, rather than regexing keys out of it.
+Implementation note: the sources are not JSON — values contain apostrophes, braces and colons —
+so this walks each literal as a character stream tracking string state and brace depth, rather
+than regexing keys out of it.
 """
 
 from __future__ import annotations
@@ -25,18 +27,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-DEFAULT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "brand.js"
+DEFAULT_DIR = Path(__file__).resolve().parent.parent / "frontend" / "public"
+DICT_MARKER = "const DICT = {"
+EXT_MARKER = "CQ.extendDict("
 
 
-def parse_dict(src: str) -> dict[str, list[str]]:
-    """Return {lang: [keys in source order]} for the DICT literal in `src`."""
-    start = src.find("const DICT = {")
-    if start < 0:
-        raise SystemExit("check_i18n: could not find `const DICT = {` in brand.js")
-    i = src.index("{", start)
+def parse_object(src: str, i: int) -> dict[str, list[str]]:
+    """Parse the {lang: {key: value, ...}, ...} literal whose opening brace is at src[i].
+
+    Returns {lang: [keys in source order]}."""
+    if src[i] != "{":
+        raise SystemExit(f"check_i18n: expected '{{' at offset {i}")
 
     langs: dict[str, list[str]] = {}
-    depth = 0          # 0 = outside DICT, 1 = inside DICT, 2 = inside a language block
+    depth = 0          # 0 = outside, 1 = inside the literal, 2 = inside a language block
     lang: str | None = None
     pending = ""       # identifier being accumulated at depth 1
     last_ident = ""    # the label immediately before a language block opens ("en", "ka", "ru")
@@ -103,31 +107,74 @@ def parse_dict(src: str) -> dict[str, list[str]]:
     return langs
 
 
+def parse_dict(src: str) -> dict[str, list[str]]:
+    """The main DICT literal of brand.js (kept for callers of the old single-file API)."""
+    start = src.find(DICT_MARKER)
+    if start < 0:
+        raise SystemExit("check_i18n: could not find `const DICT = {` in brand.js")
+    return parse_object(src, src.index("{", start))
+
+
+def parse_extensions(src: str) -> list[dict[str, list[str]]]:
+    """Every `CQ.extendDict({...})` literal in a file, in source order."""
+    out, pos = [], 0
+    while True:
+        start = src.find(EXT_MARKER, pos)
+        if start < 0:
+            return out
+        brace = src.find("{", start + len(EXT_MARKER))
+        # Only a literal counts; `CQ.extendDict(someVariable)` cannot be linted and is not allowed.
+        between = src[start + len(EXT_MARKER):brace].strip() if brace >= 0 else "x"
+        if brace < 0 or between:
+            raise SystemExit("check_i18n: CQ.extendDict must be called with an object literal, "
+                             f"found `{src[start:start + 40]!r}`")
+        out.append(parse_object(src, brace))
+        pos = brace + 1
+
+
+def collect(public_dir: Path) -> dict[str, list[tuple[str, str]]]:
+    """{lang: [(key, source label), ...]} across brand.js's DICT and every extension block."""
+    found: dict[str, list[tuple[str, str]]] = {}
+    brand = public_dir / "brand.js"
+    if not brand.exists():
+        raise SystemExit(f"check_i18n: no brand.js in {public_dir}")
+    for lang, keys in parse_dict(brand.read_text(encoding="utf-8")).items():
+        found.setdefault(lang, []).extend((k, "brand.js DICT") for k in keys)
+    for js in sorted(public_dir.glob("*.js")):
+        for n, block in enumerate(parse_extensions(js.read_text(encoding="utf-8"))):
+            label = f"{js.name} extendDict#{n + 1}"
+            for lang, keys in block.items():
+                found.setdefault(lang, []).extend((k, label) for k in keys)
+    return found
+
+
 def main(argv: list[str]) -> int:
-    path = Path(argv[1]) if len(argv) > 1 else DEFAULT
-    if not path.exists():
-        print(f"check_i18n: no such file: {path}", file=sys.stderr)
+    arg = Path(argv[1]) if len(argv) > 1 else DEFAULT_DIR
+    public_dir = arg.parent if arg.is_file() else arg
+    if not public_dir.is_dir():
+        print(f"check_i18n: no such directory: {public_dir}", file=sys.stderr)
         return 2
 
-    langs = parse_dict(path.read_text(encoding="utf-8"))
+    langs = collect(public_dir)
     if len(langs) < 2:
         print(f"check_i18n: expected at least two language blocks, found {list(langs)}", file=sys.stderr)
         return 2
 
     failures = 0
 
-    # duplicates within a language
-    for lang, keys in langs.items():
-        seen: set[str] = set()
-        dupes: set[str] = set()
-        for k in keys:
-            (dupes if k in seen else seen).add(k)
-        for k in sorted(dupes):
-            print(f"DUPLICATE  {lang}: '{k}' is defined more than once (the later one silently wins)")
-            failures += 1
+    # duplicates within a language (same file or across files)
+    for lang, entries in langs.items():
+        first: dict[str, str] = {}
+        for k, where in entries:
+            if k in first:
+                print(f"DUPLICATE  {lang}: '{k}' defined in {first[k]} and again in {where} "
+                      "(the later one silently wins)")
+                failures += 1
+            else:
+                first[k] = where
 
     # cross-language parity
-    sets = {lang: set(keys) for lang, keys in langs.items()}
+    sets = {lang: {k for k, _ in entries} for lang, entries in langs.items()}
     union = set().union(*sets.values())
     for key in sorted(union):
         missing = sorted(lang for lang, ks in sets.items() if key not in ks)
@@ -137,12 +184,15 @@ def main(argv: list[str]) -> int:
             failures += 1
 
     counts = ", ".join(f"{lang}={len(ks)}" for lang, ks in sets.items())
+    sources = 1 + sum(1 for js in public_dir.glob("*.js")
+                      for _ in parse_extensions(js.read_text(encoding="utf-8")))
     if failures:
-        print(f"\ncheck_i18n: FAIL — {failures} problem(s). Keys: {counts}", file=sys.stderr)
+        print(f"check_i18n: FAILED — {failures} problem(s) ({counts}; {sources} source block(s)).")
         return 1
-    print(f"check_i18n: OK — {len(union)} keys × {len(sets)} languages in sync ({counts}).")
+    print(f"check_i18n: OK — {len(union)} keys × {len(sets)} languages in sync ({counts}; "
+          f"{sources} source block(s)).")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    sys.exit(main(sys.argv))

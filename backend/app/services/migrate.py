@@ -4,17 +4,23 @@ Applies the analyzer + KB SQL, reconciles the pgvector embedding dimension to th
 configured provider, and seeds a demo tenant API key. Safe on already-provisioned
 volumes where the initdb scripts have already run.
 """
+import logging
 import secrets
 from pathlib import Path
 
 from ..db import pool
 from .settings_store import get_embedding_config
 
+log = logging.getLogger("cq")
+
 _DB_DIR = Path(__file__).resolve().parent.parent.parent / "db"
 
 
 async def _apply(conn, filename: str) -> None:
     await conn.execute((_DB_DIR / filename).read_text())
+    # One line per file, so "is my new db/*.sql actually in the list?" is answered by the
+    # boot log rather than by a missing column at request time.
+    log.info("startup migration: applied %s", filename)
 
 
 async def _current_embedding_dim(conn) -> int | None:
@@ -90,6 +96,10 @@ async def run_startup_migrations() -> list[str]:
         # convert.sql: the anonymous meter column for the Asterisk audio converter. Its only
         # statement ALTERs anon_usage, which kb.sql created above.
         await _apply(conn, "convert.sql")
+        # workbench.sql: Call Workbench v2 (segments, registered users, conversion history,
+        # summaries, personal rubrics). Last: it ALTERs audio_jobs, tts_requests and
+        # scoring_configs, all created above.
+        await _apply(conn, "workbench.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

@@ -27,8 +27,16 @@ Superadmin stays exempt: it is the operator, not a customer.
 
 The anonymous path is intentionally NOT migrated onto `usage_counters` in this phase — that is
 a data migration plus a frontend contract change, and it is not what the chat work needs.
+
+Registered users (`principal.kind == "user"`) are the third tier: counted on `usage_counters`
+under `user:<user_id>` (per-day buckets, like tenants), capped by the admin-configured
+'registered' blob with a per-user override in `app_users.limits` winning when it names the key.
+The tier's `enabled` switch closes SIGN-UPS only; an existing account is refused solely through
+`app_users.is_active`, which is re-read on every `reserve()` because session tokens are
+stateless and would otherwise outlive a deactivation for up to token_ttl_hours.
 """
 import datetime as dt
+import json
 import logging
 
 from fastapi import HTTPException
@@ -104,6 +112,93 @@ def _counter_exhausted(kind: str, limit: int, bucket: str) -> HTTPException:
                          detail=f"Rate limit reached for {kind} ({limit} per {bucket}).")
 
 
+# ---- registered users -------------------------------------------------------
+def _registered_gate(cfg: dict, feature: str) -> None:
+    """The registered refusals that are policy rather than counting. Note what is NOT here:
+    `cfg["enabled"]` — that switch closes sign-ups, it does not lock existing accounts out."""
+    if not (cfg.get("features") or {}).get(feature, True):
+        raise HTTPException(status_code=403,
+                            detail="This feature is disabled for registered users.")
+
+
+def _user_cap(overrides: dict, cfg: dict, key: str) -> int:
+    """One registered cap: the per-user override when present and numeric, else the tier's.
+    0 = uncapped (still counted).
+
+    An override is a commercial exception for one account, so it wins outright — including an
+    explicit 0 meaning "no cap for this person". Anything that is not a number (a bool, a word,
+    an empty string) is ignored rather than treated as 0, because a typo in an override must not
+    silently hand out unlimited usage.
+    """
+    for source, raw in (("override", overrides.get(key)), ("registered tier", cfg.get(key))):
+        if raw in (None, "") or isinstance(raw, bool):
+            continue
+        try:
+            return max(int(raw), 0)
+        except (TypeError, ValueError):
+            log.warning("%s %s is not a number: %r; ignoring it", source, key, raw)
+    return 0
+
+
+def _overrides_of(row) -> dict:
+    """`app_users.limits` as a dict (asyncpg hands jsonb back as a str unless a codec is set)."""
+    raw = row["limits"] if row else None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    return raw if isinstance(raw, dict) else {}
+
+
+async def _user_row(user_id: str):
+    async with pool().acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT is_active, limits FROM app_users WHERE id = $1", user_id)
+
+
+async def _user_account(user_id: str) -> dict:
+    """The per-user overrides of an ACTIVE account; 403 for one that is disabled or deleted.
+    One primary-key SELECT per reserve — the price of a stateless token honouring a
+    deactivation immediately instead of at expiry."""
+    row = await _user_row(user_id)
+    if not row or not row["is_active"]:
+        raise HTTPException(status_code=403, detail="Account disabled")
+    return _overrides_of(row)
+
+
+async def usage_today(scope_keys: list[str]) -> dict[str, dict[str, int]]:
+    """`{scope_key: {kind: n}}` for today's day bucket — one query for any number of scopes,
+    so a console listing N users does not issue N counter reads. Scopes with no row today are
+    simply absent."""
+    if not scope_keys:
+        return {}
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT scope_key, kind, n FROM usage_counters "
+            "WHERE bucket = $1 AND scope_key = ANY($2::text[])",
+            _bucket_label("day"), list(scope_keys))
+    out: dict[str, dict[str, int]] = {}
+    for r in rows:
+        out.setdefault(r["scope_key"], {})[r["kind"]] = int(r["n"] or 0)
+    return out
+
+
+async def require_feature(principal: Principal, feature: str) -> None:
+    """403 when a feature switch is off for the caller's tier; a no-op for everyone else.
+
+    The switches that are not paid-unit kinds (`score`, `semantic`, `summarise` on the
+    registered tier, `kb` on the anonymous one) have no `reserve()` call to hang off, so a
+    route that gates on one calls this instead. Same refusal wording as the metered path, and
+    the same `is_active` check for users, so the two doors can never disagree.
+    """
+    if principal.kind == "user" and principal.user_id:
+        await _user_account(principal.user_id)
+        _registered_gate(await settings_store.get_registered_config(), feature)
+    elif principal.kind == "anonymous":
+        _anon_gate(await settings_store.get_anonymous_config(), feature)
+
+
 async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
     col, max_key, feature, default_max = _KIND[kind]
     if principal.kind == "integration":
@@ -118,6 +213,18 @@ async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
     if principal.kind == "tenant" and principal.client_id:
         await reserve_counter(f"tenant:{principal.client_id}", kind,
                               await _tenant_limit(principal.client_id, max_key))
+        return
+    if principal.kind == "user" and principal.user_id:
+        overrides = await _user_account(principal.user_id)
+        cfg = await settings_store.get_registered_config()
+        _registered_gate(cfg, feature)
+        if kind == "analyses":
+            mb = _user_cap(overrides, cfg, "max_audio_mb")
+            if mb and size_bytes > mb * 1024 * 1024:
+                raise HTTPException(status_code=413,
+                                    detail=f"Uploads are limited to {mb} MB for your account.")
+        await reserve_counter(f"user:{principal.user_id}", kind,
+                              _user_cap(overrides, cfg, max_key))
         return
     if principal.kind != "anonymous":
         return
@@ -248,6 +355,18 @@ async def check(principal: Principal, kind: str) -> None:
         if used >= limit:
             raise _counter_exhausted(kind, limit, "day")
         return
+    if principal.kind == "user" and principal.user_id:
+        overrides = await _user_account(principal.user_id)
+        cfg = await settings_store.get_registered_config()
+        _registered_gate(cfg, feature)
+        limit = _user_cap(overrides, cfg, max_key)
+        if limit <= 0:                      # uncapped: counted, never refused
+            return
+        scope = f"user:{principal.user_id}"
+        used = (await usage_today([scope])).get(scope, {}).get(kind, 0)
+        if used >= limit:
+            raise _counter_exhausted(kind, limit, "day")
+        return
     if principal.kind != "anonymous":
         return
     cfg = await settings_store.get_anonymous_config()
@@ -263,7 +382,45 @@ async def check(principal: Principal, kind: str) -> None:
         raise _anon_exhausted(limit)
 
 
+async def _user_snapshot(user_id: str) -> dict:
+    """Today's usage vs caps for one registered account, in the anonymous snapshot's shape.
+
+    Deliberately does not 403 a disabled or deleted account the way `reserve()` does: this is
+    what the account page renders on load, and a banner is a better place to learn you are
+    switched off than a broken page. `active` carries that state instead.
+    """
+    row = await _user_row(user_id)
+    overrides = _overrides_of(row)
+    cfg = await settings_store.get_registered_config()
+    scope = f"user:{user_id}"
+    used = (await usage_today([scope])).get(scope, {})
+    ua, ut, uc = used.get("analyses", 0), used.get("tts", 0), used.get("conversions", 0)
+    ma = _user_cap(overrides, cfg, "max_analyses_per_day")
+    mt = _user_cap(overrides, cfg, "max_tts_per_day")
+    mc = _user_cap(overrides, cfg, "max_conversions_per_day")
+    return {
+        "anonymous": False,
+        "registered": True,
+        "kind": "user",
+        "user_id": user_id,
+        "active": bool(row and row["is_active"]),
+        "features": cfg.get("features") or {},
+        "max_analyses_per_day": ma,
+        "max_tts_per_day": mt,
+        "max_conversions_per_day": mc,
+        "max_audio_mb": _user_cap(overrides, cfg, "max_audio_mb"),
+        "used": {"analyses": ua, "tts": ut, "conversions": uc},
+        "remaining": {
+            "analyses": max(ma - ua, 0) if ma else None,
+            "tts": max(mt - ut, 0) if mt else None,
+            "conversions": max(mc - uc, 0) if mc else None,
+        },
+    }
+
+
 async def snapshot(principal: Principal) -> dict:
+    if principal.kind == "user" and principal.user_id:
+        return await _user_snapshot(principal.user_id)
     if principal.kind != "anonymous":
         return {"anonymous": False, "unlimited": True, "kind": principal.kind,
                 "client_id": principal.client_id}

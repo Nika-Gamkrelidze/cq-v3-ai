@@ -1,4 +1,5 @@
 """Superadmin tenant management: clients, tenant users, API keys."""
+import asyncio
 import re
 import secrets
 
@@ -154,7 +155,10 @@ async def create_user(tenant_id: str, body: UserCreate):
             """
             INSERT INTO tenant_users (client_id, username, password_hash, role)
             VALUES ($1, $2, $3, $4) RETURNING id
-            """, tenant_id, body.username, auth.hash_password(body.password), body.role)
+            """, tenant_id, body.username,
+            # PBKDF2 in a thread: ~40 ms of blocking hashing on the one event loop this
+            # process has is 40 ms nobody else's request is served. Same rule as auth.py.
+            await asyncio.to_thread(auth.hash_password, body.password), body.role)
     return {"id": str(uid), "username": body.username, "role": body.role}
 
 
@@ -166,7 +170,8 @@ async def update_user(tenant_id: str, user_id: str, body: UserUpdate):
     if body.password is not None:
         if len(body.password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-        vals.append(auth.hash_password(body.password)); fields.append(f"password_hash = ${len(vals)+2}")
+        vals.append(await asyncio.to_thread(auth.hash_password, body.password))
+        fields.append(f"password_hash = ${len(vals)+2}")
     if body.role is not None:
         if body.role not in VALID_ROLES:
             raise HTTPException(status_code=400, detail="Role must be member or owner")

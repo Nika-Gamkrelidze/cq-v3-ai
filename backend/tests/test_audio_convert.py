@@ -224,8 +224,14 @@ def anon_ip(api):
 
     yield _mint
     if minted:
+        # Both tables a converted batch writes: the quota counter AND the history row
+        # `_record_batch` inserts for every kind. Nothing else ever collects the latter
+        # (no purge, no sweep), so leaving them accumulates test residue in a shared dev DB —
+        # visible to a superadmin in GET /convert/history.
         sql(lambda c: c.execute(
             "DELETE FROM anon_usage WHERE anon_key = ANY($1::text[])", minted))
+        sql(lambda c: c.execute(
+            "DELETE FROM convert_batches WHERE anon_key = ANY($1::text[])", minted))
 
 
 @pytest.fixture

@@ -1,10 +1,13 @@
 """Authentication & principal resolution.
 
-Five principal kinds:
+Six principal kinds:
   * superadmin     — X-Admin-Token == settings.admin_token (or a superadmin login token)
   * integration    — X-CQ-Key + X-CQ-Tenant, verified against the grant table (chat_credentials)
   * tenant (user)  — Authorization: Bearer <signed token> from POST /auth/login
   * tenant (apikey)— X-API-Key matches clients.api_key
+  * user           — a self-service registered account (app_users): Bearer token whose payload
+                     carries {"kind": "user"}. No client_id, ever — a registered user owns
+                     their own rows (user_id) and never sees a tenant's knowledge base.
   * anonymous      — no credentials; identified by client IP for rate limiting
 
 Two rules govern how those combine, and both exist because the alternative is a *silent* tenant
@@ -71,6 +74,14 @@ def make_token(payload: dict, ttl_hours: int | None = None) -> str:
     return f"{raw}.{sig}"
 
 
+def make_user_token(user_id) -> str:
+    """The ONE place a registered user's token is minted, so the payload discriminator the
+    resolver keys on (`kind: user`) cannot drift between /auth/register and /auth/login.
+    Tenant payloads deliberately carry no `kind`: their absence is what keeps every token
+    issued before this field existed valid and tenant-shaped."""
+    return make_token({"kind": "user", "user_id": str(user_id)})
+
+
 def verify_token(token: str) -> dict | None:
     try:
         raw, sig = token.split(".")
@@ -94,7 +105,7 @@ def _now() -> int:
 # ---- principal -------------------------------------------------------------
 @dataclass
 class Principal:
-    kind: str                    # superadmin | integration | tenant | anonymous
+    kind: str                    # superadmin | integration | tenant | user | anonymous
     client_id: str | None = None
     user_id: str | None = None
     role: str | None = None
@@ -115,6 +126,12 @@ class Principal:
         # Every existing tenant route gates on this, and a chat credential must not become a
         # skeleton key for /kb, /analyze or /scoring just by being added to the resolver.
         return self.kind == "tenant" and self.client_id is not None
+
+    @property
+    def is_user(self) -> bool:
+        # A registered account. `client_id` is None by construction, so a tenant route that
+        # gates on `is_tenant` stays closed to it and a user-scoped query keys on `user_id`.
+        return self.kind == "user" and self.user_id is not None
 
     @property
     def is_superadmin(self) -> bool:
@@ -181,6 +198,15 @@ async def resolve_principal(
             raise HTTPException(status_code=401, detail="Invalid or expired session token")
         if payload.get("role") == "superadmin":
             return Principal(kind="superadmin", role="superadmin", via="token")
+        if payload.get("kind") == "user":
+            # A registered-user token never carries a client_id, and must not be allowed to
+            # become a tenant principal by falling through to the branch below. A user token
+            # without its user_id is malformed (only make_user_token mints them) — hard 401,
+            # same rule as an expired one.
+            if not payload.get("user_id"):
+                raise HTTPException(status_code=401, detail="Invalid or expired session token")
+            return Principal(kind="user", user_id=str(payload["user_id"]), role="user",
+                             via="token")
         return Principal(kind="tenant", client_id=payload.get("client_id"),
                          user_id=payload.get("user_id"), role=payload.get("role", "member"),
                          via="token")

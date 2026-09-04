@@ -23,6 +23,9 @@ from pydantic import BaseModel, Field
 from ..db import pool
 from ..services import analysis, elevenlabs, limits, sentiment, sentiment_config, settings_store
 from ..services.auth import Principal, client_ip, resolve_principal
+# The one "who owns this row" rule (see its docstring): a registered user calling this public
+# route must get their own id on the job, not NULL.
+from .analyze import _user_id
 
 router = APIRouter(tags=["sentiment"])
 
@@ -149,7 +152,8 @@ async def standalone_sentiment(request: Request, file: UploadFile = File(...),
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
-        status="transcribing", client_ip=client_ip(request), audio=audio)
+        status="transcribing", client_ip=client_ip(request), audio=audio,
+        user_id=_user_id(principal))
 
     try:
         stt = await elevenlabs.transcribe(

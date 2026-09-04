@@ -1,6 +1,7 @@
 """Convert uploaded audio or video into Asterisk playback formats, in bulk, as one ZIP.
 
-Three surfaces, all open to signed-out visitors within the anonymous quota:
+Three surfaces open to signed-out visitors within the anonymous quota, and one for callers
+who are signed in:
 
   * `GET  /convert/formats`          — the catalog + the batch limits, so the browser's
                                        dropdown and its client-side checks are built from
@@ -8,6 +9,12 @@ Three surfaces, all open to signed-out visitors within the anonymous quota:
   * `POST /convert[?stream=1]`       — one or many files; blocking JSON, or the same work
                                        narrated over SSE.
   * `GET  /convert/{token}/download` — the batch as a ZIP.
+  * `GET  /convert/history`          — a tenant's or registered user's past batches, with
+                                       the download link only while the ZIP still exists.
+
+Every batch that produced a download is also recorded in `convert_batches` (who, what, how
+big, when it expires). That row is what History lists; the bytes and their deadline stay on
+the volume beside the manifest (`services/audio_convert`), and the row never outranks them.
 
 Two transports over one handler, mirroring `scoring.py`'s rubric import and for the same
 reason: a batch of thirty recordings is minutes of ffmpeg, and a static spinner for that long
@@ -24,6 +31,7 @@ browser and one content type; it is the only place the per-file names survive; a
 recognises, which is exactly when a download gets renamed or "helpfully" reinterpreted.
 """
 import asyncio
+import datetime as dt
 import logging
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query,
@@ -35,7 +43,8 @@ from fastapi.routing import APIRoute
 # would quietly miss it — which is exactly what happened the first time this was written.
 from starlette.exceptions import HTTPException as AnyHTTPException
 
-from ..services import audio_convert, limits
+from ..db import pool
+from ..services import audio_convert, limits, settings_store
 from ..services.audio_convert import ConvertError
 from ..services.auth import Principal, resolve_principal
 from .chat import _sse, _sse_response
@@ -89,6 +98,96 @@ router = APIRouter(tags=["convert"], route_class=_UploadRoute)
 # Keepalive cadence and progress throttle, both matching scoring.py — one long-running SSE
 # route in this codebase should not feel different from another.
 PING_S = 15.0
+
+# A signed-in caller's batch outlives the anonymous two hours — a tenant or registered user
+# comes back to History days later — but never a week: a batch is re-creatable from the source
+# recording, so it does not deserve the full retention window a recording gets. The Storage
+# setting's `retention_days` still wins when it is SHORTER, and its `0` ("keep recordings
+# forever") reads as the cap here, because scratch bytes are never kept forever.
+SIGNED_IN_TTL_CAP_DAYS = 7
+
+
+def _signed_in(principal: Principal) -> bool:
+    """A tenant (login or API key) or a registered user — the callers who have a History.
+    Written against `kind`/`user_id` directly rather than an `is_user` property so this module
+    does not depend on the resolver's newer surface to be importable."""
+    return principal.is_tenant or (principal.kind == "user" and bool(principal.user_id))
+
+
+def _owner(principal: Principal) -> str:
+    """The batch owner string, built in ONE place from every principal field it keys on.
+
+    A second call site that forgot `user_id` would key every registered user to the
+    `anon:unknown` fallback — and to each other's downloads.
+    """
+    return audio_convert.owner_key(principal.kind, principal.client_id, principal.anon_key,
+                                   principal.integration_id, principal.user_id)
+
+
+async def _batch_ttl_seconds(principal: Principal) -> int:
+    """How long this caller's batch stays downloadable: the anonymous default, or for a
+    signed-in caller `min(retention_days, SIGNED_IN_TTL_CAP_DAYS)` days."""
+    if not _signed_in(principal):
+        return audio_convert.TTL_SECONDS
+    days = int((await settings_store.get_storage_config())["retention_days"])
+    if days <= 0 or days > SIGNED_IN_TTL_CAP_DAYS:
+        days = SIGNED_IN_TTL_CAP_DAYS
+    return days * 86400
+
+
+def _history_scope(principal: Principal, first: int = 1) -> tuple[str, list]:
+    """(where_sql, args) restricting `convert_batches` to what this principal may list.
+
+    Mirrors `routers/analyze.py::_scope`: the superadmin sees everything (it is the operator,
+    not a customer), a tenant its own rows, a registered user their own — each with the
+    `principal_type` discriminator riding along so a row can never match through the wrong
+    column. There is NO anonymous branch on purpose: anonymous batches are keyed on an IP, and
+    an IP is shared by everyone behind the same NAT, so "your history" would be your office's.
+    """
+    if principal.is_superadmin:
+        return "TRUE", []
+    if principal.is_tenant:
+        return f"client_id = ${first} AND principal_type = 'tenant'", [principal.client_id]
+    if principal.kind == "user" and principal.user_id:
+        return f"user_id = ${first} AND principal_type = 'user'", [principal.user_id]
+    if principal.kind == "integration":
+        raise HTTPException(status_code=403,
+                            detail="This integration credential cannot read conversion history.")
+    raise HTTPException(status_code=401, detail="Sign in to see your conversion history.")
+
+
+async def _record_batch(principal: Principal, summary: dict) -> None:
+    """One `convert_batches` row per batch that produced a download — the caller's History.
+
+    Written AFTER the manifest, so a row never points at a batch that does not exist, and it
+    never raises: the ZIP is already on disk and the caller is owed it whether or not the
+    bookkeeping landed. The row copies the manifest's deadline so History can say "expired"
+    without reading the volume. Owner columns are written by KIND — a tenant login's
+    `user_id` is a tenant_users row and must not land in the column a registered user's
+    history is scoped by.
+    """
+    if not summary.get("token"):
+        return
+    try:
+        files = summary.get("files") or []
+        async with pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO convert_batches
+                    (token, principal_type, client_id, user_id, anon_key, format,
+                     file_count, total_bytes, expires_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                ON CONFLICT (token) DO NOTHING
+                """,
+                summary["token"], principal.kind,
+                principal.client_id if principal.is_tenant else None,
+                principal.user_id if principal.kind == "user" else None,
+                principal.anon_key if principal.kind == "anonymous" else None,
+                summary["format"], int(summary["converted"]),
+                sum(int(f.get("bytes") or 0) for f in files if f.get("ok")),
+                dt.datetime.fromisoformat(summary["expires_at"]))
+    except Exception:  # noqa: BLE001 — bookkeeping must never cost the caller their ZIP
+        log.exception("convert: could not record batch %s", summary.get("token"))
 
 
 @router.get("/convert/formats")
@@ -237,12 +336,13 @@ async def _run_batch(uploads: list[tuple[str, bytes]], fmt: str, granted: int,
             "total": total}
 
 
-def _finish(batch: audio_convert.Batch, result: dict, refusal: str | None) -> dict:
+def _finish(batch: audio_convert.Batch, result: dict, refusal: str | None,
+            ttl_seconds: int = audio_convert.TTL_SECONDS) -> dict:
     """Close the batch and shape the answer both transports send.
 
     A batch where nothing converted is DISCARDED rather than left as an empty ZIP: there is
     no download, so there must be no token — a token that resolves to nothing is a worse
-    answer than no token.
+    answer than no token. `ttl_seconds` is the caller's deadline (`_batch_ttl_seconds`).
     """
     if not result["converted"]:
         batch.discard()
@@ -250,7 +350,7 @@ def _finish(batch: audio_convert.Batch, result: dict, refusal: str | None) -> di
                 "format": batch.fmt, "total": result["total"], "converted": 0,
                 "failed": result["failed"], "files": result["entries"],
                 "quota_refusal": refusal}
-    manifest = batch.close(result["entries"])
+    manifest = batch.close(result["entries"], ttl_seconds=ttl_seconds)
     return {
         "token": batch.token,
         # API-relative on purpose: the browser is served through nginx's `/api/` prefix and
@@ -268,7 +368,8 @@ def _finish(batch: audio_convert.Batch, result: dict, refusal: str | None) -> di
 
 
 async def _convert_stream(uploads: list[tuple[str, bytes]], fmt: str, granted: int,
-                          refusal: str | None, batch: audio_convert.Batch, request: Request):
+                          refusal: str | None, batch: audio_convert.Batch, request: Request,
+                          principal: Principal, ttl_seconds: int):
     """The SSE transport: `stage` -> `progress` per file -> `done`, or `error`.
 
     The work runs as its own task feeding a queue rather than being awaited here, for the
@@ -284,8 +385,11 @@ async def _convert_stream(uploads: list[tuple[str, bytes]], fmt: str, granted: i
     async def work() -> None:
         try:
             result = await _run_batch(uploads, fmt, granted, refusal, batch, emit=emit)
-            summary = _finish(batch, result, refusal)
+            summary = _finish(batch, result, refusal, ttl_seconds=ttl_seconds)
             if summary["converted"]:
+                # Recorded before `done` is sent, so a client that lists History on that
+                # event sees the batch it was just handed.
+                await _record_batch(principal, summary)
                 queue.put_nowait(("done", summary))
             else:
                 # Nothing came out, so there is nothing to download. Still send the per-file
@@ -362,33 +466,69 @@ async def convert_audio(request: Request,
 
     uploads = await _read_uploads(files)
     granted, refusal = await _reserve_batch(principal, len(uploads))
+    # Decided before the batch opens, not at close: the deadline counts from the upload, and
+    # a settings read must not sit between the last ffmpeg run and the manifest write.
+    ttl_seconds = await _batch_ttl_seconds(principal)
 
-    batch = audio_convert.Batch(
-        audio_convert.new_token(), fmt,
-        audio_convert.owner_key(principal.kind, principal.client_id, principal.anon_key,
-                                principal.integration_id))
+    batch = audio_convert.Batch(audio_convert.new_token(), fmt, _owner(principal))
     try:
         batch.open()
     except ConvertError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if as_stream:
-        return _sse_response(_convert_stream(uploads, fmt, granted, refusal, batch, request))
+        return _sse_response(_convert_stream(uploads, fmt, granted, refusal, batch, request,
+                                             principal, ttl_seconds))
 
     try:
         result = await _run_batch(uploads, fmt, granted, refusal, batch)
-        summary = _finish(batch, result, refusal)
+        summary = _finish(batch, result, refusal, ttl_seconds=ttl_seconds)
     except ConvertError as exc:
         batch.discard()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception:
         batch.discard()
         raise
+    await _record_batch(principal, summary)
     # A batch that converted nothing still answers 200 with the per-file reasons: the caller
     # asked about a batch, and "which files failed and why" IS the answer. Only refusals
     # about the REQUEST (bad format, too many files, quota) are HTTP statuses, and those were
     # all raised above.
     return summary
+
+
+@router.get("/convert/history")
+async def convert_history(limit: int = 20, principal: Principal = Depends(resolve_principal)):
+    """A signed-in caller's past batches, newest first, with `download_path` only while the
+    ZIP is still there.
+
+    `download_path` goes null at the deadline rather than being left for the download route
+    to 404 on: a History row that offers a link to nothing is worse than one that says it
+    expired. The judge is the database's clock against the row's copy of the manifest's
+    deadline — the same instant `locate()` reads — so this list and the download route agree
+    without this route touching the volume.
+    """
+    limit = max(1, min(limit, 100))
+    where, args = _history_scope(principal)
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT token, format, file_count, total_bytes, created_at, expires_at,
+                   (expires_at IS NULL OR expires_at > now()) AS live
+              FROM convert_batches
+             WHERE {where}
+             ORDER BY created_at DESC
+             LIMIT ${len(args) + 1}
+            """, *args, limit)
+    return [{
+        "token": r["token"],
+        "format": r["format"],
+        "file_count": r["file_count"],
+        "total_bytes": r["total_bytes"],
+        "created_at": r["created_at"].isoformat(),
+        "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None,
+        "download_path": f"/convert/{r['token']}/download" if r["live"] else None,
+    } for r in rows]
 
 
 @router.get("/convert/{token}/download")
@@ -399,9 +539,7 @@ async def download_batch(token: str, principal: Principal = Depends(resolve_prin
     to someone else must be indistinguishable from one that never existed, or the endpoint
     tells an enumerator when they have guessed right.
     """
-    owner = audio_convert.owner_key(principal.kind, principal.client_id, principal.anon_key,
-                                    principal.integration_id)
-    found = audio_convert.locate(token, owner)
+    found = audio_convert.locate(token, _owner(principal))
     if found is None:
         raise HTTPException(status_code=404,
                             detail="This download has expired or is no longer available.")

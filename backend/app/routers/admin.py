@@ -5,6 +5,7 @@ the admin token. That token then authorizes every other admin endpoint via the
 X-Admin-Token header.
 """
 import asyncio
+import json
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
-from ..services import chat_credentials, chat_store, claude, elevenlabs, settings_store
+from ..services import chat_credentials, chat_store, claude, elevenlabs, limits, settings_store
 from .kb import count_public_documents
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -213,7 +214,10 @@ async def _probe_scoring(cfg: dict) -> dict:
     out = await scoring.run_scoring(
         "Speaker 1: Hello. Speaker 2: Acknowledged.", demo,
         cfg["anthropic_api_key"], cfg["llm_model"])
-    return {"level": "ok", "detail": f"scoring tool responded (total {(out or {}).get('total')})"}
+    # `weighted_total` is the key build_result has always returned; `total` never existed, so
+    # this line reported "total None" on every successful probe.
+    return {"level": "ok",
+            "detail": f"scoring tool responded (total {(out or {}).get('weighted_total')})"}
 
 
 async def _capture(coro) -> dict:
@@ -305,6 +309,12 @@ class AnonPatch(BaseModel):
     # Days to keep an unregistered visitor's IP, audio and text. 0 means keep indefinitely,
     # which is a deliberate operator choice — set_anonymous_config drops None, not 0, so
     # "0" really is storable rather than silently ignored.
+    #
+    # Retention is now ONE number for every stored recording (PUT /admin/storage). This field
+    # stays because older admin pages and operator scripts still send it, but it is forwarded
+    # to the storage blob rather than left to rot: `get_storage_config` only consults the
+    # anonymous blob until the storage key exists, so a write that landed here alone would be
+    # accepted, echoed back, and then silently do nothing to any deadline.
     retention_days: int | None = Field(default=None, ge=0, le=3650)
 
 
@@ -316,7 +326,180 @@ async def get_anon_limits():
 @router.put("/anonymous-limits", dependencies=[Depends(require_admin)])
 async def put_anon_limits(patch: AnonPatch):
     await settings_store.set_anonymous_config(patch.model_dump(exclude_none=True))
+    if patch.retention_days is not None:
+        # One number, two doors: forwarded so the old field keeps meaning what its label says
+        # instead of becoming an inert 200 the moment /admin/storage has been used once.
+        await settings_store.set_storage_config({"retention_days": patch.retention_days})
     return await settings_store.get_anonymous_config()
+
+
+# ---- Storage retention (every stored recording / TTS clip, whoever submitted it) ------
+class StoragePatch(BaseModel):
+    # 0 = keep forever, a deliberate operator choice (see settings_store.STORAGE_DEFAULTS).
+    retention_days: int = Field(ge=0, le=3650)
+
+
+@router.get("/storage", dependencies=[Depends(require_admin)])
+async def get_storage():
+    return await settings_store.get_storage_config()
+
+
+@router.put("/storage", dependencies=[Depends(require_admin)])
+async def put_storage(patch: StoragePatch):
+    try:
+        return await settings_store.set_storage_config(patch.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---- Registered-user tier: daily limits + feature switches ---------------------------
+class RegisteredPatch(BaseModel):
+    enabled: bool | None = None                  # sign-ups open — never locks existing users out
+    max_analyses_per_day: int | None = Field(default=None, ge=0)
+    max_audio_mb: int | None = Field(default=None, ge=0)
+    max_tts_per_day: int | None = Field(default=None, ge=0)
+    max_conversions_per_day: int | None = Field(default=None, ge=0)
+    # Sign-ups allowed per IP per day (0 = uncapped, still counted). Not one of the tier's
+    # per-account caps: it bounds how many accounts one visitor can mint, which is what stops
+    # an open form from being an unlimited-quota dispenser. Absent from REGISTERED_DEFAULTS, so
+    # `routers/auth.py::REGISTRATIONS_PER_DAY` is what applies until an operator sets it.
+    max_registrations_per_day: int | None = Field(default=None, ge=0)
+    features: dict[str, bool] | None = None
+
+
+@router.get("/registered-limits", dependencies=[Depends(require_admin)])
+async def get_registered_limits():
+    return await settings_store.get_registered_config()
+
+
+@router.put("/registered-limits", dependencies=[Depends(require_admin)])
+async def put_registered_limits(patch: RegisteredPatch):
+    return await settings_store.set_registered_config(patch.model_dump(exclude_none=True))
+
+
+# ---------------------------------------------------------------------------
+# Registered users (app_users)
+#
+# The console's view of self-service accounts. There is no mail provider, so the reset route
+# below is the ONLY password-recovery path a registered user has — the new password is
+# generated here and shown to the operator exactly once, never stored in the clear.
+#
+# `limits` is the per-user override blob `services/limits.py` consults before the registered
+# tier: only the four cap keys are accepted, and a PUT REPLACES the blob (null drops a key) so
+# the console's modal can send the whole form without a separate "clear" action.
+# ---------------------------------------------------------------------------
+USER_LIMIT_KEYS = ("max_analyses_per_day", "max_tts_per_day", "max_conversions_per_day",
+                   "max_audio_mb")
+_USER_COLS = "id, email, display_name, is_active, created_at, last_login_at, limits"
+RESET_PASSWORD_BYTES = 9        # token_urlsafe(9) is 12 characters
+
+
+class UserPatch(BaseModel):
+    is_active: bool | None = None
+    display_name: str | None = None
+    limits: dict | None = None
+
+
+def _user_overrides(limits_in: dict) -> dict:
+    """Validate an override blob: known keys only, non-negative whole numbers; null drops the
+    key. Refused loudly rather than stored as-is because `limits._user_cap` IGNORES a value it
+    cannot parse — which would leave the operator believing a cap they never got."""
+    out = {}
+    for key, value in (limits_in or {}).items():
+        if key not in USER_LIMIT_KEYS:
+            raise HTTPException(status_code=400,
+                                detail=f"Unknown limit '{key}'. Allowed: {', '.join(USER_LIMIT_KEYS)}")
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(status_code=400,
+                                detail=f"{key} must be a non-negative whole number")
+        out[key] = value
+    return out
+
+
+def _user_out(row, used: dict | None = None) -> dict:
+    raw = row["limits"]
+    lim = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    return {"id": str(row["id"]), "email": row["email"], "display_name": row["display_name"],
+            "is_active": row["is_active"], "created_at": row["created_at"],
+            "last_login_at": row["last_login_at"], "limits": lim if isinstance(lim, dict) else {},
+            "used": {"analyses": (used or {}).get("analyses", 0),
+                     "tts": (used or {}).get("tts", 0),
+                     "conversions": (used or {}).get("conversions", 0)}}
+
+
+@router.get("/users", dependencies=[Depends(require_admin)])
+async def list_users(q: str = "", limit: int = 50):
+    """Newest first, with today's usage. `q` matches email or display name, case-insensitively."""
+    limit = max(1, min(int(limit), 500))
+    needle = (q or "").strip()
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT {_USER_COLS} FROM app_users
+            WHERE $1 = '' OR email ILIKE $2 OR coalesce(display_name, '') ILIKE $2
+            ORDER BY created_at DESC
+            LIMIT $3
+            """, needle, f"%{needle}%", limit)
+    used = await limits.usage_today([f"user:{r['id']}" for r in rows])
+    return {"users": [_user_out(r, used.get(f"user:{r['id']}")) for r in rows]}
+
+
+@router.put("/users/{user_id}", dependencies=[Depends(require_admin)])
+async def update_user(user_id: str, body: UserPatch):
+    sets, vals = [], []
+    if body.is_active is not None:
+        vals.append(body.is_active)
+        sets.append(f"is_active = ${len(vals)}")
+    if body.display_name is not None:
+        vals.append(body.display_name.strip()[:120] or None)
+        sets.append(f"display_name = ${len(vals)}")
+    if body.limits is not None:
+        vals.append(json.dumps(_user_overrides(body.limits)))
+        sets.append(f"limits = ${len(vals)}::jsonb")
+    if not sets:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    vals.append(user_id)
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE app_users SET {', '.join(sets)} WHERE id = ${len(vals)} RETURNING {_USER_COLS}",
+            *vals)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    used = await limits.usage_today([f"user:{row['id']}"])
+    return _user_out(row, used.get(f"user:{row['id']}"))
+
+
+@router.post("/users/{user_id}/reset-password", dependencies=[Depends(require_admin)])
+async def reset_user_password(user_id: str):
+    """Set a fresh random password and return it ONCE. Only the hash is stored, so an operator
+    who loses this response resets again rather than recovering it."""
+    from ..services import auth
+    password = secrets.token_urlsafe(RESET_PASSWORD_BYTES)
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE app_users SET password_hash = $2 WHERE id = $1 RETURNING id, email",
+            user_id, await asyncio.to_thread(auth.hash_password, password))
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"id": str(row["id"]), "email": row["email"], "password": password,
+            "warning": "Shown once — pass it to the user now; it cannot be recovered."}
+
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
+async def delete_user(user_id: str):
+    """Remove the account row ONLY. `user_id` columns carry no foreign key on purpose (see
+    db/workbench.sql): recordings, summaries, TTS clips and usage counters stay, and the
+    retention purge is what removes their files on its normal schedule."""
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "DELETE FROM app_users WHERE id = $1 RETURNING id, email", user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"id": str(row["id"]), "email": row["email"], "deleted": True,
+            "note": "Account removed. Their recordings, summaries and TTS clips are kept until "
+                    "the retention purge removes the stored files on its normal schedule."}
 
 
 # ---------------------------------------------------------------------------

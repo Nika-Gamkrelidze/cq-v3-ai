@@ -134,9 +134,12 @@ async def analyze_sync(file: UploadFile = File(...), p: Principal = Depends(requ
         raise HTTPException(status_code=400, detail="Empty upload")
     if len(audio) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="Audio file exceeds 100 MB limit")
+    # `audio=` so an API-ingested call is stored like every other tenant upload (§9): History
+    # shows a player for it, and it lives under the one Storage deadline instead of nowhere.
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
-        client_id=p.client_id, principal_kind=p.kind, anon_key=None, status="transcribing")
+        client_id=p.client_id, principal_kind=p.kind, anon_key=None, status="transcribing",
+        audio=audio)
     result = await analysis.run_pipeline(
         job_id, audio, file.filename, file.content_type, p.client_id, True)
     if result.get("status") == "error":
@@ -168,7 +171,8 @@ async def analyze_async(bg: BackgroundTasks, file: UploadFile = File(...),
     else:
         job_id = await analysis.create_job(
             filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
-            client_id=p.client_id, principal_kind=p.kind, anon_key=None, external_ref=ref)
+            client_id=p.client_id, principal_kind=p.kind, anon_key=None, external_ref=ref,
+            audio=audio)
     bg.add_task(analysis.run_background, job_id, audio, file.filename, file.content_type,
                 p.client_id, True)
     return {"id": job_id, "status": "queued", "external_ref": ref}
@@ -210,7 +214,7 @@ async def analyze_batch(bg: BackgroundTasks, files: list[UploadFile] = File(...)
             job_id = await analysis.create_job(
                 filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
                 client_id=p.client_id, principal_kind=p.kind, anon_key=None,
-                batch_id=batch_id, external_ref=ref)
+                batch_id=batch_id, external_ref=ref, audio=audio)
         jobs.append({"id": job_id, "external_ref": ref, "status": "queued"})
         tasks.append((job_id, audio, file.filename, file.content_type))
     for job_id, audio, fname, ctype in tasks:

@@ -15,11 +15,15 @@ could expose as a knob: it is how the telephony codecs are defined, and Asterisk
 codec from the FILE EXTENSION, so the extension is part of the format, not decoration.
 
 Storage: a finished batch is one ZIP plus one JSON manifest in a directory named by an
-unguessable token, on the same `media` volume the retention work uses. Deliberately NOT a
-Postgres table, unlike `media.py`'s recordings — those are durable business data that a
-retention or abuse question is asked of months later, whereas a conversion batch is scratch
-with a two-hour life. Keeping the manifest beside the bytes means "delete the directory"
-deletes every trace of the batch, with no second half to fall out of step with the first.
+unguessable token, on the same `media` volume the retention work uses. The BYTES are
+deliberately NOT in a Postgres table, unlike `media.py`'s recordings — those are durable
+business data that a retention or abuse question is asked of months later, whereas a
+conversion batch is scratch: two hours for a visitor, up to a week for a signed-in caller
+(the router decides; `Batch.close` takes the TTL). Keeping the manifest beside the bytes means
+"delete the directory" deletes every trace of the bytes, with no second half to fall out of
+step with the first. The router keeps a small `convert_batches` row per batch for a signed-in
+caller's History; that row is a record of the batch, never the authority on the bytes, which
+is why `locate()` reads the manifest and nothing else.
 """
 from __future__ import annotations
 
@@ -155,9 +159,12 @@ TIMEOUT_S = 180
 # this is the ceiling on how many batches can be in ffmpeg simultaneously.
 _SLOTS = asyncio.Semaphore(2)
 
-# How long a finished batch stays downloadable. Long enough that someone who converts thirty
-# files, gets distracted and comes back still gets their ZIP; short enough that a public,
-# unauthenticated endpoint cannot be used as free file hosting.
+# How long a finished batch stays downloadable BY DEFAULT — the anonymous TTL. Long enough that
+# someone who converts thirty files, gets distracted and comes back still gets their ZIP; short
+# enough that a public, unauthenticated endpoint cannot be used as free file hosting. A
+# signed-in caller's batch gets a longer deadline from the router (`Batch.close(ttl_seconds=)`);
+# this constant also remains the mtime rule the sweep applies to a directory with no readable
+# manifest, whatever its owner would have been granted.
 TTL_SECONDS = 2 * 3600
 
 CONVERT_ROOT = Path(os.getenv("CONVERT_ROOT", str(media.MEDIA_ROOT / "convert")))
@@ -367,17 +374,23 @@ def new_token() -> str:
 
 
 def owner_key(kind: str, client_id: str | None, anon_key: str | None,
-              integration_id: str | None = None) -> str:
+              integration_id: str | None = None, user_id: str | None = None) -> str:
     """The identity a batch belongs to, as one comparable string.
 
     An anonymous batch is keyed to its anon key (the caller's IP, by `services.auth`'s rule),
     which is weak on its own — hence the unguessable token. The two together mean guessing a
     token is not enough, and having the same IP as someone is not enough either.
+
+    A registered user is keyed on `user_id` and NOT on the anon fallback: a user's token carries
+    no client_id and no anon_key, so without its own branch every registered user would share
+    the single `anon:unknown` owner — and each other's downloads.
     """
     if kind == "superadmin":
         return "superadmin"
     if kind == "tenant" and client_id:
         return f"tenant:{client_id}"
+    if kind == "user" and user_id:
+        return f"user:{user_id}"
     if kind == "integration" and integration_id:
         return f"integration:{integration_id}"
     return f"anon:{anon_key or 'unknown'}"
@@ -417,12 +430,19 @@ class Batch:
             raise ConvertError("Conversion storage is unavailable on this server.")
         await asyncio.to_thread(self._zip.writestr, name, payload)
 
-    def close(self, entries: list[dict]) -> dict:
-        """Finish the ZIP and write the manifest. Returns the manifest."""
+    def close(self, entries: list[dict], ttl_seconds: int = TTL_SECONDS) -> dict:
+        """Finish the ZIP and write the manifest. Returns the manifest.
+
+        `ttl_seconds` is how long the batch stays downloadable, from when it was OPENED (not
+        closed — a thirty-file batch can take minutes, and the caller's clock started at the
+        upload). The default is the anonymous TTL; the router passes a longer one for a
+        signed-in caller. The deadline is written into the manifest so that `locate()` and the
+        sweep read the same number and neither has to know who the owner was.
+        """
         if self._zip is not None:
             self._zip.close()
             self._zip = None
-        expires = self.created + dt.timedelta(seconds=TTL_SECONDS)
+        expires = self.created + dt.timedelta(seconds=max(int(ttl_seconds), 1))
         manifest = {
             "token": self.token,
             "owner": self.owner,
@@ -491,14 +511,31 @@ def locate(token: str, owner: str) -> dict | None:
     return {"manifest": manifest, "path": zip_path}
 
 
-def _sweep() -> int:
-    """Delete every batch directory past its TTL. Filesystem-only and self-healing.
+def _past_deadline(d: Path) -> bool:
+    """Whether one batch directory is due for collection.
 
-    Judged on the directory's mtime rather than the manifest, because the directories that
-    most need collecting are exactly the ones with no readable manifest: a batch whose
-    process was killed mid-conversion (this stack redeploys on every push to main).
+    The manifest's own `expires_at` decides when there is one to read: since a signed-in
+    caller's batch can live for days, the sweep must apply the SAME deadline `locate()` does,
+    or a week-long download would be collected at the two-hour mark and History would list a
+    batch whose bytes are gone. A directory with no readable manifest — a batch whose process
+    was killed mid-conversion (this stack redeploys on every push to main) — has no deadline of
+    its own and is judged on its mtime against the default TTL; that is the case the sweep
+    most exists for, and the one no manifest could describe.
     """
-    cutoff = time.time() - TTL_SECONDS
+    try:
+        manifest = json.loads((d / _MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = None
+    if isinstance(manifest, dict):
+        return _expired(manifest, d)
+    try:
+        return time.time() - d.stat().st_mtime > TTL_SECONDS
+    except OSError:
+        return False
+
+
+def _sweep() -> int:
+    """Delete every batch directory past its deadline. Filesystem-only and self-healing."""
     removed = 0
     try:
         entries = list(CONVERT_ROOT.iterdir())
@@ -510,12 +547,7 @@ def _sweep() -> int:
     for d in entries:
         # Only ever the directories we made: a sweep that deletes what it does not recognise
         # is one shared-volume mistake away from deleting somebody's recordings.
-        if not TOKEN_RE.match(d.name) or not d.is_dir():
-            continue
-        try:
-            if d.stat().st_mtime > cutoff:
-                continue
-        except OSError:
+        if not TOKEN_RE.match(d.name) or not d.is_dir() or not _past_deadline(d):
             continue
         shutil.rmtree(d, ignore_errors=True)
         removed += 1

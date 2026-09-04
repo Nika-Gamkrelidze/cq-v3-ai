@@ -54,6 +54,44 @@ async def _save_key(key: str, value: dict) -> None:
         )
 
 
+def _merge_patch(stored: dict, patch: dict) -> dict:
+    """Apply `patch` to a stored settings blob in place, one nested level deep for dicts.
+
+    Top-level keys REPLACE (a None means "not sent", so it is skipped), but a nested dict —
+    in practice `features` — merges key by key. A blanket replace turns a form that sends only
+    the switch it changed into a switch that silently re-enables everything it left out: the
+    reader fills every missing feature with its default True, so `PUT {"features":
+    {"semantic": false}}` followed by `PUT {"features": {"score": false}}` would leave semantic
+    on again. That is not a hypothetical for the registered tier, whose six switches gate real
+    analysers through `limits.require_feature`.
+    """
+    for k, v in patch.items():
+        if v is None:
+            continue
+        if isinstance(v, dict) and isinstance(stored.get(k), dict):
+            stored[k] = {**stored[k], **v}
+        else:
+            stored[k] = v
+    return stored
+
+
+async def get_blob(key: str) -> dict:
+    """The raw stored object under `key` ({} when never saved) — for features whose blob
+    has no defaults to merge here (e.g. the default rubric), so they need not reach into
+    the private helpers."""
+    return await _load_key(key)
+
+
+async def set_blob(key: str, value: dict) -> None:
+    """Replace the object under `key`. Objects only: the admin panel and every reader here
+    assume a JSON object, and a bare array would silently break `dict(row)` on read."""
+    if not isinstance(key, str) or not key:
+        raise ValueError("app_settings key must be a non-empty string")
+    if not isinstance(value, dict):
+        raise TypeError("app_settings values must be JSON objects")
+    await _save_key(key, value)
+
+
 async def _load_overrides() -> dict:
     return await _load_key(SETTINGS_KEY)
 
@@ -187,8 +225,103 @@ async def get_anonymous_config() -> dict:
 
 async def set_anonymous_config(patch: dict) -> None:
     ov = await _load_key(ANON_KEY)
-    ov.update({k: v for k, v in patch.items() if v is not None})
+    _merge_patch(ov, patch)
     await _save_key(ANON_KEY, ov)
+
+
+# ---------------------------------------------------------------------------
+# Storage retention (app_settings 'storage') — ONE number of days for every stored
+# recording and TTS clip, whoever submitted it.
+#
+# Retention used to be a field of the anonymous blob because anonymous audio was the only
+# audio kept. Tenant and registered-user audio is stored now too (History replays a call with
+# its highlights), and a deadline that differs by who uploaded would be two purge rules to
+# explain and audit. So the number moved to its own blob — and until a superadmin saves that
+# blob once, it READS the anonymous blob's value, so an existing deployment keeps the number
+# its operator already chose rather than snapping back to the default.
+# ---------------------------------------------------------------------------
+STORAGE_KEY = "storage"
+STORAGE_DEFAULTS = {"retention_days": 30}   # 0 = keep forever (see ANON_DEFAULTS)
+
+
+def _retention_days(value) -> int:
+    """A non-negative whole number of days. Raises ValueError for anything else, so a bad
+    admin input is refused at the door instead of becoming a deadline the purge misreads."""
+    if isinstance(value, bool):
+        raise ValueError("retention_days must be a number of days")
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("retention_days must be a number of days") from None
+    if days < 0:
+        raise ValueError("retention_days cannot be negative")
+    return days
+
+
+async def get_storage_config() -> dict:
+    """`{retention_days: int}` — the stored blob, else the anonymous blob's number, else 30.
+    Never raises: a corrupt stored value falls back the same way."""
+    ov = await _load_key(STORAGE_KEY)
+    if "retention_days" not in ov:
+        ov = {"retention_days": (await get_anonymous_config()).get("retention_days")}
+    cfg = dict(STORAGE_DEFAULTS)
+    try:
+        cfg["retention_days"] = _retention_days(ov["retention_days"])
+    except ValueError:
+        log.warning("storage.retention_days is not a valid number (%r); using default",
+                    ov.get("retention_days"))
+    return cfg
+
+
+async def set_storage_config(patch: dict) -> dict:
+    """Merge `patch` into the storage blob and return the effective config.
+    `retention_days` is validated (ValueError on garbage); None values are ignored."""
+    ov = await _load_key(STORAGE_KEY)
+    for key, value in patch.items():
+        if value is None:
+            continue
+        ov[key] = _retention_days(value) if key == "retention_days" else value
+    await _save_key(STORAGE_KEY, ov)
+    return await get_storage_config()
+
+
+# ---------------------------------------------------------------------------
+# Registered-user tier (app_settings 'registered') — the daily limits and feature switches
+# for self-service email+password accounts, counted PER USER (services/limits.py).
+#
+# Same shape and merge rules as the anonymous pair above so the admin panel can reuse its
+# form. `enabled` means "sign-ups are open" — NOT "existing users may log in": an existing
+# account is switched off through app_users.is_active, one user at a time.
+# ---------------------------------------------------------------------------
+REGISTERED_KEY = "registered"
+REGISTERED_DEFAULTS = {
+    "enabled": True,
+    "max_analyses_per_day": 20,
+    "max_audio_mb": 50,
+    "max_tts_per_day": 50,
+    "max_conversions_per_day": 100,
+    "features": {"analyze": True, "tts": True, "convert": True,
+                 "summarise": True, "score": True, "semantic": True},
+}
+
+
+async def get_registered_config() -> dict:
+    ov = await _load_key(REGISTERED_KEY)
+    cfg = dict(REGISTERED_DEFAULTS)
+    cfg.update(ov or {})
+    # ensure features dict is complete
+    feats = dict(REGISTERED_DEFAULTS["features"])
+    feats.update(cfg.get("features") or {})
+    cfg["features"] = feats
+    return cfg
+
+
+async def set_registered_config(patch: dict) -> dict:
+    """Merge `patch` into the registered blob and return the effective config."""
+    ov = await _load_key(REGISTERED_KEY)
+    _merge_patch(ov, patch)
+    await _save_key(REGISTERED_KEY, ov)
+    return await get_registered_config()
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,7 @@ const CQ = (() => {
       'tip.label':'More information',
       'err.toolarge':'That file is too large to upload. Please use a shorter or smaller recording.','err.timeout':'The analysis took too long and timed out. Try a shorter recording.','err.unavailable':'The service is temporarily unavailable. Please try again in a moment.','err.http':'Something went wrong on our side. Please try again in a moment — if it keeps happening, contact support. (Code {status})','err.badresp':'The server returned an unexpected response. Please try again.',
       'quota.using':"You're using CommuniQ anonymously —",'quota.analyses':'transcriptions','quota.clips':'speech clips','quota.left':'left today.','quota.more':'for a knowledge base and higher limits.','quota.disabled':'Anonymous access is disabled.',
-      'fc.title':'Knowledge base fact-check','fc.accuracy':'accuracy','fc.supported':'supported','fc.contradicted':'contradicted','fc.notinkb':'not in KB','fc.misinfo':'Possible misinformation','fc.nochecked':'No verifiable claims were found.',
+      'fc.title':'Knowledge base fact-check','fc.accuracy':'accuracy','fc.supported':'supported','fc.contradicted':'contradicted','fc.notinkb':'not in KB','fc.partial':'partly correct','fc.misinfo':'Possible misinformation','fc.nochecked':'No verifiable claims were found.',
       'adm.voices':'Voices','adm.voicevis':'Customer-visible voices','f.restrictvoices':'Show only the ticked voices to customers','f.defaultvoice':'Default voice','v.hint':'Unticked voices are hidden from the customer voice list and rejected by the TTS API. Leave the box unticked to show every voice. System defaults (incl. the Georgian voice) are always on.','v.search':'Search voices…','v.selected':'selected','v.system':'System default','v.nopreview':'No preview','v.unavailable':'Not in this ElevenLabs account','v.pickone':'Select at least one voice, or untick the restriction.','v.loadfail':'Could not load voices from ElevenLabs. Check the API key in Integrations.','msg.voicegone':'That voice is no longer available. The list has been refreshed.',
       'fc.allclaims':'All claims','pg.tab.retrieval':'Test search','pg.tab.score':'Answer scoring','pg.tab.sentiment':'Sentiment','pg.ans.label':'Operator answer (any language)','pg.ans.ph':'Paste or type what the operator said or replied — it will be scored against this tenant’s rubric…','pg.ans.run':'Score answer','pg.ans.norubric':'No active rubric — define one in the Scoring tab first.','pg.ans.empty':'Enter an answer to score.','pg.ans.usingv':'rubric version',
       'tab.playground':'Score a Call','pg.heading':'Score a call or answer','pg.mode.text':'Text','pg.mode.audio':'Audio / Video','pg.mode.sentiment':'Sentiment','pg.audiolabel':'Call recording (audio or video)','pg.run':'Score','pg.audioempty':'Choose an audio or video file.',
@@ -352,7 +352,7 @@ const CQ = (() => {
       'tip.label':'დამატებითი ინფორმაცია',
       'err.toolarge':'ფაილი ძალიან დიდია ასატვირთად. გამოიყენეთ უფრო მოკლე ან პატარა ჩანაწერი.','err.timeout':'ანალიზმა დიდი დრო წაიღო და ვადა ამოიწურა. სცადეთ უფრო მოკლე ჩანაწერი.','err.unavailable':'სერვისი დროებით მიუწვდომელია. გთხოვთ სცადოთ ცოტა ხანში.','err.http':'შეცდომა მოხდა ჩვენს მხარეს. სცადეთ ცოტა ხანში — თუ განმეორდება, მიმართეთ მხარდაჭერას. (კოდი {status})','err.badresp':'სერვერმა მოულოდნელი პასუხი დააბრუნა. გთხოვთ სცადოთ თავიდან.',
       'quota.using':'თქვენ იყენებთ CommuniQ-ს ანონიმურად —','quota.analyses':'ტრანსკრიფცია','quota.clips':'აუდიო კლიპი','quota.left':'დარჩა დღეს.','quota.more':'ცოდნის ბაზისა და გაზრდილი ლიმიტებისთვის.','quota.disabled':'ანონიმური წვდომა გათიშულია.',
-      'fc.title':'ფაქტების შემოწმება ცოდნის ბაზასთან','fc.accuracy':'სიზუსტე','fc.supported':'დადასტურებული','fc.contradicted':'უარყოფილი','fc.notinkb':'ბაზაში არ არის','fc.misinfo':'შესაძლო მცდარი ინფორმაცია','fc.nochecked':'შესამოწმებელი მტკიცება ვერ მოიძებნა.',
+      'fc.title':'ფაქტების შემოწმება ცოდნის ბაზასთან','fc.accuracy':'სიზუსტე','fc.supported':'დადასტურებული','fc.contradicted':'უარყოფილი','fc.notinkb':'ბაზაში არ არის','fc.partial':'ნაწილობრივ სწორი','fc.misinfo':'შესაძლო მცდარი ინფორმაცია','fc.nochecked':'შესამოწმებელი მტკიცება ვერ მოიძებნა.',
       'adm.voices':'ხმები','adm.voicevis':'მომხმარებლისთვის ხილული ხმები','f.restrictvoices':'მომხმარებლისთვის მხოლოდ მონიშნული ხმების ჩვენება','f.defaultvoice':'ნაგულისხმევი ხმა','v.hint':'მოუნიშნავი ხმები იმალება მომხმარებლის სიიდან და TTS API მათ უარყოფს. თუ ველი მოუნიშნავია, ყველა ხმა ჩანს. სისტემური ნაგულისხმევი ხმები (მათ შორის ქართული) ყოველთვის ჩართულია.','v.search':'ხმების ძებნა…','v.selected':'მონიშნული','v.system':'სისტემური','v.nopreview':'ნიმუში არ არის','v.unavailable':'ამ ElevenLabs ანგარიშში არ არის','v.pickone':'მონიშნეთ მინიმუმ ერთი ხმა ან მოხსენით შეზღუდვა.','v.loadfail':'ხმების ჩატვირთვა ElevenLabs-იდან ვერ მოხერხდა. შეამოწმეთ API გასაღები ინტეგრაციებში.','msg.voicegone':'ეს ხმა აღარ არის ხელმისაწვდომი. სია განახლდა.',
       'fc.allclaims':'ყველა მტკიცება','pg.tab.retrieval':'ძიების ტესტი','pg.tab.score':'პასუხის შეფასება','pg.tab.sentiment':'განწყობა','pg.ans.label':'ოპერატორის პასუხი (ნებისმიერ ენაზე)','pg.ans.ph':'ჩასვით ან აკრიფეთ ოპერატორის პასუხი — შეფასდება ამ ორგანიზაციის რუბრიკით…','pg.ans.run':'პასუხის შეფასება','pg.ans.norubric':'აქტიური რუბრიკა არ არის — ჯერ განსაზღვრეთ ის „შეფასების“ ჩანართში.','pg.ans.empty':'შეიყვანეთ პასუხი შესაფასებლად.','pg.ans.usingv':'რუბრიკის ვერსია',
       'tab.playground':'ზარის შეფასება','pg.heading':'შეაფასეთ ზარი ან პასუხი','pg.mode.text':'ტექსტი','pg.mode.audio':'აუდიო / ვიდეო','pg.mode.sentiment':'განწყობა','pg.audiolabel':'ზარის ჩანაწერი (აუდიო ან ვიდეო)','pg.run':'შეფასება','pg.audioempty':'აირჩიეთ აუდიო ან ვიდეო ფაილი.',
@@ -635,7 +635,7 @@ const CQ = (() => {
       'tip.label':'Дополнительная информация',
       'err.toolarge':'Файл слишком большой для загрузки. Используйте более короткую запись или файл меньшего размера.','err.timeout':'Анализ занял слишком много времени и превысил лимит. Попробуйте более короткую запись.','err.unavailable':'Сервис временно недоступен. Пожалуйста, попробуйте через минуту.','err.http':'Что-то пошло не так на нашей стороне. Попробуйте ещё раз через минуту — если повторится, обратитесь в поддержку. (Код {status})','err.badresp':'Сервер вернул неожиданный ответ. Пожалуйста, попробуйте снова.',
       'quota.using':'Вы используете CommuniQ анонимно —','quota.analyses':'расшифровок','quota.clips':'аудиоклипов','quota.left':'осталось сегодня.','quota.more':'для базы знаний и более высоких лимитов.','quota.disabled':'Анонимный доступ отключён.',
-      'fc.title':'Проверка по базе знаний','fc.accuracy':'точность','fc.supported':'подтверждено','fc.contradicted':'опровергнуто','fc.notinkb':'нет в базе','fc.misinfo':'Возможно, недостоверная информация','fc.nochecked':'Проверяемых утверждений не найдено.',
+      'fc.title':'Проверка по базе знаний','fc.accuracy':'точность','fc.supported':'подтверждено','fc.contradicted':'опровергнуто','fc.notinkb':'нет в базе','fc.partial':'частично верно','fc.misinfo':'Возможно, недостоверная информация','fc.nochecked':'Проверяемых утверждений не найдено.',
       'adm.voices':'Голоса','adm.voicevis':'Голоса, видимые клиентам','f.restrictvoices':'Показывать клиентам только отмеченные голоса','f.defaultvoice':'Голос по умолчанию','v.hint':'Неотмеченные голоса скрыты из списка для клиентов и отклоняются TTS. Оставьте флажок снятым, чтобы показывать все голоса. Системные (включая грузинский) всегда включены.','v.search':'Поиск голосов…','v.selected':'выбрано','v.system':'Системный','v.nopreview':'Нет образца','v.unavailable':'Нет в этом аккаунте ElevenLabs','v.pickone':'Выберите хотя бы один голос или снимите ограничение.','v.loadfail':'Не удалось загрузить голоса из ElevenLabs. Проверьте API-ключ в «Интеграциях».','msg.voicegone':'Этот голос больше недоступен. Список обновлён.',
       'fc.allclaims':'Все утверждения','pg.tab.retrieval':'Тест поиска','pg.tab.score':'Оценка ответа','pg.tab.sentiment':'Тональность','pg.ans.label':'Ответ оператора (на любом языке)','pg.ans.ph':'Вставьте или напишите ответ оператора — он будет оценён по рубрике этой организации…','pg.ans.run':'Оценить ответ','pg.ans.norubric':'Нет активной рубрики — сначала задайте её во вкладке «Оценка».','pg.ans.empty':'Введите ответ для оценки.','pg.ans.usingv':'версия рубрики',
       'tab.playground':'Оценка звонка','pg.heading':'Оцените звонок или ответ','pg.mode.text':'Текст','pg.mode.audio':'Аудио / Видео','pg.mode.sentiment':'Тональность','pg.audiolabel':'Запись звонка (аудио или видео)','pg.run':'Оценить','pg.audioempty':'Выберите аудио- или видеофайл.',
@@ -893,6 +893,14 @@ const CQ = (() => {
   let LANG = (() => { try { return localStorage.getItem('cq_lang') || (navigator.language||'en').slice(0,2); } catch { return 'en'; } })();
   if (!DICT[LANG]) LANG = 'en';
   function t(key) { return (DICT[LANG] && DICT[LANG][key]) || DICT.en[key] || key; }
+  /* Module-local dictionaries. timeline.js / workbench.js carry their own strings and register
+     them here at load time, so a feature's copy lives next to its code instead of inside one
+     thousand-line block. scripts/check_i18n.py scans every extendDict({...}) call literal in
+     frontend/public/*.js with the same parity rules as DICT (and fails on a key defined in two
+     places), so the three languages stay in sync there too. Call it at load, before mountHeader. */
+  function extendDict(ext) {
+    Object.keys(ext || {}).forEach(code => { if (DICT[code]) Object.assign(DICT[code], ext[code]); });
+  }
   function lang() { return LANG; }
 
   /* Safely read a fetch Response as JSON. If the server (or a reverse proxy like nginx)
@@ -1361,8 +1369,13 @@ const CQ = (() => {
     const total = sc.weighted_total;
     const band = v => v == null ? 'muted' : v >= 80 ? 'ok' : v >= 50 ? 'pending' : 'alert';
     const barcls = v => v == null ? '' : v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad';
+    // Evidence used to be a list of strings; the workbench's scoring now returns
+    // {quote, segments, start, end} objects so a finding can be placed on the timeline.
+    // BOTH shapes are in the database (old jobs keep the strings), so this renders either —
+    // _arr alone would stringify an object to "[object Object]".
+    const quote = e => (e && typeof e === 'object' ? e.quote : e);
     const dimRow = d => {
-      const s = d.score, ev = _arr(d.evidence);
+      const s = d.score, ev = _arr((d.evidence || []).map ? d.evidence.map(quote) : d.evidence);
       return `<div class="sc-dim">
         <div class="sc-dim-head">
           <span class="sc-dim-name">${_esc(d.name)}</span>
@@ -1390,7 +1403,11 @@ const CQ = (() => {
     if (!claims.length) return `<div class="card"><h3>${t('fc.title')}</h3><div class="empty">${t('fc.nochecked')}</div></div>`;
     const acc = kb.accuracy_score;
     const accVar = acc == null ? 'muted' : acc >= 80 ? 'ok' : acc >= 50 ? 'pending' : 'alert';
-    const vcls = v => ({SUPPORTED:'supported', CONTRADICTED:'contradicted', NOT_IN_KB:'notinkb'}[v] || 'notinkb');
+    // PARTIALLY_SUPPORTED is a real verdict, not an unknown one: the substance is right but a
+    // detail is wrong. Mapping it to 'notinkb' told a reviewer the knowledge base had nothing to
+    // say about a claim it in fact contradicted in part.
+    const vcls = v => ({SUPPORTED:'supported', PARTIALLY_SUPPORTED:'partial',
+                        CONTRADICTED:'contradicted', NOT_IN_KB:'notinkb'}[v] || 'notinkb');
     const contradicted = claims.filter(x => x.verdict === 'CONTRADICTED');
     const claimCard = cl => {
       const ev = cl.evidence;
@@ -1413,6 +1430,7 @@ const CQ = (() => {
       </div>
       <div style="margin-top:8px">
         <span class="pill supported">${c.supported || 0} ${t('fc.supported')}</span>
+        ${c.partially_supported ? `<span class="pill partial">${c.partially_supported} ${t('fc.partial')}</span>` : ''}
         <span class="pill contradicted">${c.contradicted || 0} ${t('fc.contradicted')}</span>
         <span class="pill notinkb">${c.not_in_kb || 0} ${t('fc.notinkb')}</span>
       </div>
@@ -1502,7 +1520,7 @@ const CQ = (() => {
     });
   }
 
-  return { API, LOGO, t, lang, setLang, applyI18n, toggleTheme, currentTheme, header, mountHeader,
+  return { API, LOGO, t, lang, setLang, extendDict, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, tip, mountTips, select, enhanceSelects, syncSelect, player, attachRecorder,
            analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp,
            autogrow, autogrowBind };
