@@ -426,7 +426,7 @@
           <div class="sc-meta" style="margin-top:6px">${t('wb.sem.share_good')} · ${g}%</div><div class="sc-bar good"><span style="width:${g}%"></span></div>
           <div class="sc-meta" style="margin-top:6px">${t('wb.sem.share_bad')} · ${b}%</div><div class="sc-bar bad"><span style="width:${b}%"></span></div></div>`;
       } else if (modes.includes('voice')) {
-        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.lane.voice')}</div><div class="hint">${esc(noVoiceReason(d))}</div></div>`;
+        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.lane.voice')}</div><div class="hint">${esc(noVoiceReason(sm))}</div></div>`;
       }
       return `<div class="wb-spk-card"><div class="wb-spk-head"><span class="wb-spk-name">${esc(name)}</span>${role}</div>${tx}${vc}</div>`;
     };
