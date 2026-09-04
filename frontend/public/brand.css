@@ -528,3 +528,23 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; }
 }
+
+/* Score colour thresholds (tenant Rubric page). The dot is the colour being described, so the
+   row reads as a legend you can edit rather than a form with three unexplained numbers. */
+.bands-rows { display:flex; flex-direction:column; gap:10px; margin:12px 0 4px; }
+.bands-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.bands-dot { width:14px; height:14px; border-radius:4px; flex:0 0 auto; }
+.bands-dot.good { background:var(--ok); }
+.bands-dot.mid { background:var(--pending); }
+.bands-dot.bad { background:var(--alert); }
+.bands-name { min-width:74px; font-weight:600; color:var(--mist); }
+.bands-range { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; flex-wrap:wrap; }
+.bands-range input { width:74px; margin:0; }
+
+/* Manual score edits + their history (workbench Score tab). */
+.wb-sc-editcell { display:inline-flex; align-items:center; gap:4px; }
+.wb-sc-in { width:72px; margin:0; text-align:right; font-weight:700; }
+.wb-sc-tools { display:flex; align-items:center; gap:8px; margin-top:14px; flex-wrap:wrap; }
+.wb-sc-tools .wb-sc-note { flex:1 1 220px; margin:0; }
+.wb-sc-histbox { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.wb-rev { border:1px solid var(--hairline); border-radius:10px; padding:10px 12px; background:var(--input-bg); }

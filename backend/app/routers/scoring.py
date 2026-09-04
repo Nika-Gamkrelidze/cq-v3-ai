@@ -473,6 +473,42 @@ async def tenant_reset(body: ResetBody, principal: Principal = Depends(_rubric_r
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+class BandsBody(BaseModel):
+    amber_from: int
+    green_from: int
+
+
+@router.get("/scoring/bands")
+async def get_bands(principal: Principal = Depends(resolve_principal)):
+    """Where the colours change on this workspace's scorecards. Readable by anyone who can see
+    a score — the thresholds are how you read the number, not a setting worth hiding."""
+    if principal.kind not in ("tenant", "user"):
+        raise HTTPException(status_code=401, detail="Tenant or account login required")
+    return await scoring_store.get_bands(principal)
+
+
+@router.put("/scoring/bands")
+async def put_bands(body: BandsBody, principal: Principal = Depends(_rubric_editor)):
+    """Move the red/amber/green boundaries. Same permission as editing the rubric: it changes
+    how every past scorecard reads, not just future ones."""
+    try:
+        return await scoring_store.set_bands(principal, body.amber_from, body.green_from,
+                                             "tenant" if principal.kind == "tenant" else "user")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/scoring/bands/reset")
+async def reset_bands(principal: Principal = Depends(_rubric_editor)):
+    """Back to red below 50, amber to 80, green above.
+
+    Deliberately NOT password-guarded and deliberately a separate route from /scoring/reset:
+    this throws away two numbers anyone can retype in seconds, while resetting the rubric
+    throws away work. Sharing one button (or one confirmation) between them would make the
+    cheap action feel dangerous and the dangerous one routine."""
+    return await scoring_store.reset_bands(principal)
+
+
 @router.post("/scoring/import")
 async def tenant_import_rubric(request: Request, file: UploadFile = File(...),
                                as_stream: int = Query(default=0, alias="stream", ge=0, le=1),

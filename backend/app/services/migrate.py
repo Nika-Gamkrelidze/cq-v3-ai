@@ -100,6 +100,11 @@ async def run_startup_migrations() -> list[str]:
         # summaries, personal rubrics). Last: it ALTERs audio_jobs, tts_requests and
         # scoring_configs, all created above.
         await _apply(conn, "workbench.sql")
+        # score_edits.sql: the manual-override history behind audio_jobs.scoring. After
+        # workbench.sql because its FK points at audio_jobs, which analyzer.sql created.
+        await _apply(conn, "score_edits.sql")
+        # score_bands.sql: per-workspace red/amber/green thresholds for a scorecard.
+        await _apply(conn, "score_bands.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

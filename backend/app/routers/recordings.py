@@ -483,6 +483,81 @@ async def factcheck_recording(job_id: str, principal: Principal = Depends(resolv
     return result
 
 
+class ScoreEdit(BaseModel):
+    key: str
+    score: int | None = None
+
+
+class ScoreEditBody(BaseModel):
+    scores: list[ScoreEdit] = []
+    note: str | None = None
+
+
+def _editor_name(principal: Principal) -> str:
+    """Who to record as the author of an edit. A name, not an id: this is read by a person
+    reviewing why a score changed, and it must still mean something after the account is gone."""
+    if principal.is_superadmin:
+        return "superadmin"
+    if principal.kind == "user":
+        return f"user:{principal.user_id}"
+    return f"tenant:{principal.user_id or principal.role or 'member'}"
+
+
+def _require_score_editor(principal: Principal) -> None:
+    """Who may overrule the model. Overriding a score changes how an agent's work is judged,
+    so a plain workspace MEMBER cannot: it is the owner's call (or the operator's). A
+    registered user editing their own recording is their own owner."""
+    _require(principal, ("tenant", "user", "superadmin"), "edit scores")
+    if principal.kind == "tenant" and principal.role not in ("owner", "apikey"):
+        raise HTTPException(status_code=403,
+                            detail="Only a workspace owner can change a score.")
+
+
+@router.get("/recordings/{job_id}/score/revisions")
+async def score_history(job_id: str, principal: Principal = Depends(resolve_principal)):
+    """Every version of this scorecard: the model's own first, then each manual edit with who
+    made it. Readable by anyone who may read the recording — seeing that a score was changed
+    is not a privilege, changing it is."""
+    _require(principal, ("tenant", "user", "superadmin"), "see a recording")
+    await _load(job_id, principal, "id")          # 404s unless the caller may see it
+    return {"revisions": await scoring_store.revisions(job_id)}
+
+
+@router.patch("/recordings/{job_id}/score")
+async def edit_score(job_id: str, body: ScoreEditBody,
+                     principal: Principal = Depends(resolve_principal)):
+    """Replace one or more dimension scores by hand, keeping the model's own scorecard.
+
+    Not metered and not an LLM call: this is a person typing a number. The weighted total is
+    recomputed server-side from the stored weights — a client that posts a total is ignored.
+    """
+    _require_score_editor(principal)
+    row = await _load(job_id, principal, "id, scoring")
+    current = row.get("scoring")
+    if not isinstance(current, dict) or not current.get("dimensions"):
+        raise HTTPException(status_code=409, detail="This recording has not been scored yet.")
+
+    known = {str(d.get("key")) for d in current["dimensions"] if isinstance(d, dict)}
+    edits: dict[str, int | None] = {}
+    for e in body.scores:
+        key = str(e.key)
+        if key not in known:
+            raise HTTPException(status_code=400, detail=f"Unknown dimension: {key}")
+        edits[key] = None if e.score is None else max(0, min(100, int(e.score)))
+    if not edits:
+        raise HTTPException(status_code=400, detail="No scores to change.")
+
+    updated = scoring.apply_manual_scores(current, edits, edited_by=_editor_name(principal))
+    # `original` backfills revision 1 for a scorecard produced before this history existed,
+    # so the model's own numbers are on record even for older recordings.
+    revision = await scoring_store.save_revision(
+        job_id, updated, edited_by=_editor_name(principal), note=body.note, original=current)
+    await _store(job_id, "scoring", updated)
+    log.info("scoring edited job=%s by=%s revision=%s keys=%s",
+             job_id, _editor_name(principal), revision, ",".join(sorted(edits)))
+    return {**updated, "revision": revision}
+
+
 @router.post("/recordings/{job_id}/score")
 async def score_recording(job_id: str, principal: Principal = Depends(resolve_principal)):
     """tenant | user: score against the caller's active rubric — their own, or the default

@@ -414,6 +414,42 @@
           </div>
           <div class="msg" id="scMsg"></div>
         </div>
+
+        <!-- Colour thresholds. A separate card with its OWN reset, deliberately: resetting the
+             rubric throws away work someone tuned, resetting two colour boundaries does not,
+             and one shared button would make the cheap action feel as risky as the costly one. -->
+        <div class="card" id="bandsCard">
+          <h3 data-i18n="tn.bands.heading"></h3>
+          <p class="hint" data-i18n="tn.bands.lead"></p>
+          <div class="bands-rows">
+            <div class="bands-row">
+              <span class="bands-dot bad"></span>
+              <span class="bands-name" data-i18n="tn.bands.red"></span>
+              <span class="bands-range"><span data-i18n="tn.bands.below"></span>
+                <input type="number" id="bandAmber" min="1" max="99" />
+              </span>
+            </div>
+            <div class="bands-row">
+              <span class="bands-dot mid"></span>
+              <span class="bands-name" data-i18n="tn.bands.yellow"></span>
+              <span class="bands-range"><b id="bandAmberEcho">50</b>
+                <span data-i18n="tn.bands.upto"></span>
+                <input type="number" id="bandGreen" min="2" max="100" />
+              </span>
+            </div>
+            <div class="bands-row">
+              <span class="bands-dot good"></span>
+              <span class="bands-name" data-i18n="tn.bands.green"></span>
+              <span class="bands-range"><span data-i18n="tn.bands.from"></span>
+                <b id="bandGreenEcho">80</b> <span data-i18n="tn.bands.andup"></span></span>
+            </div>
+          </div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <button class="ghost" id="bandsReset" data-i18n="tn.bands.reset"></button>
+            <button class="primary" id="bandsSave" data-i18n="tn.bands.save"></button>
+          </div>
+          <div class="msg" id="bandsMsg"></div>
+        </div>
       </section>
 
       <!-- HISTORY — everything this workspace has run: the recordings (audio uploads AND
@@ -1178,6 +1214,10 @@
         api: API, headers: () => authH(), fetch: apiFetch,
         features: ['factcheck', 'score', 'semantic', 'summarise'],
         rubricHref: '#rubric', sentimentConfig,
+        // Overriding a score changes how an agent's work is judged, so it is the owner's
+        // call. The server enforces this too; hiding the control just avoids offering a
+        // member a button that would only ever answer 403.
+        canEditScores: ROLE === 'owner',
         // XHR uploads bypass apiFetch, so the workbench reports its own 401s back here —
         // one expired session, one gate, exactly as everywhere else on this page.
         onUnauthorized: sessionExpired,
@@ -1824,6 +1864,8 @@
         scIsDefault = cfg.is_default === true;
         $('scDefaultNote').classList.toggle('hidden', !scIsDefault);
         $('scReset').classList.toggle('hidden', ro || scIsDefault);
+        $('bandsCard').classList.toggle('hidden', ro);
+        if (!ro) bandsLoad();
         scRenderDims();
       } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
     }
@@ -1832,6 +1874,49 @@
        tuning, so the server asks the caller to re-enter their OWN password — which means a
        password field, in a brand modal (never a native prompt), and a 403 answered where the
        field is rather than as a toast that disappears. */
+    /* ---- score colour thresholds -------------------------------------------------------
+       Two numbers decide three colours, so the form edits the two BOUNDARIES rather than three
+       ranges: ranges let someone save a gap (or an overlap) that a real score falls into, and
+       there is no colour for a score that belongs to no band. */
+    let bandsState = { amber_from: 50, green_from: 80 };
+    function bandsRender() {
+      $('bandAmber').value = bandsState.amber_from;
+      $('bandGreen').value = bandsState.green_from;
+      $('bandAmberEcho').textContent = bandsState.amber_from;
+      $('bandGreenEcho').textContent = bandsState.green_from;
+    }
+    ['bandAmber', 'bandGreen'].forEach(id => $(id).addEventListener('input', () => {
+      $('bandAmberEcho').textContent = $('bandAmber').value || '—';
+      $('bandGreenEcho').textContent = $('bandGreen').value || '—';
+    }));
+    async function bandsLoad() {
+      try {
+        const d = await CQ.readResp(await apiFetch(`${API}/scoring/bands`, { headers: authH() }));
+        bandsState = { amber_from: d.amber_from, green_from: d.green_from };
+        bandsRender();
+      } catch (e) { $('bandsMsg').className = 'msg err'; $('bandsMsg').textContent = e.message; }
+    }
+    async function bandsSubmit(url, init, btn, label) {
+      const m = $('bandsMsg'); m.className = 'msg'; m.textContent = '';
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const d = await CQ.readResp(await apiFetch(url, init));
+        bandsState = { amber_from: d.amber_from, green_from: d.green_from };
+        bandsRender();
+        m.className = 'msg ok'; m.textContent = t('tn.bands.saved');
+        CQ.toast(t('tn.bands.saved'), 'ok');
+      } catch (e) { m.className = 'msg err'; m.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = t(label); }
+    }
+    $('bandsSave').addEventListener('click', () => bandsSubmit(`${API}/scoring/bands`, {
+      method: 'PUT', headers: authH({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ amber_from: Number($('bandAmber').value), green_from: Number($('bandGreen').value) }),
+    }, $('bandsSave'), 'tn.bands.save'));
+    // No password and no confirmation: this is two numbers anyone can retype, unlike the
+    // rubric reset next to it, which discards work.
+    $('bandsReset').addEventListener('click', () => bandsSubmit(`${API}/scoring/bands/reset`,
+      { method: 'POST', headers: authH() }, $('bandsReset'), 'tn.bands.reset'));
+
     $('scReset').addEventListener('click', () => {
       const bg = showModal(`<h3>${t('tn.sc.reset.heading')}</h3>
         <p class="hint">${t('tn.sc.reset.warn')}</p>

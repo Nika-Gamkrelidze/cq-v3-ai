@@ -289,6 +289,42 @@ def _dimension_spans(d: dict, score: int | None, evidence: list[dict], segments)
             for span in spans_from_indices(segments, e["segments"], detail=e["quote"], **extra)]
 
 
+def apply_manual_scores(result: dict, edits: dict, *, edited_by: str) -> dict:
+    """A reviewer's own scores over the model's scorecard, with the totals recomputed in code.
+
+    `edits` is {dimension key: score 0-100}. Only the numbers move: the model's rationale and
+    evidence stay attached to the dimension, because they are what the reviewer was reading
+    when they disagreed, and deleting them would hide the disagreement. An edited dimension is
+    marked so the UI can show which numbers are a person's and which are the model's.
+
+    The weighted total is recomputed HERE rather than trusted from the client, for the same
+    reason `build_result` does it: the model (and now the browser) proposes per-dimension
+    judgements, and code alone owns the arithmetic that turns them into a total someone is
+    assessed on.
+    """
+    dims = [dict(d) for d in (result.get("dimensions") or []) if isinstance(d, dict)]
+    # Stored weights are already percentages summing to ~100; falling back to an equal split
+    # mirrors build_result's own rule for a rubric whose weights are all zero.
+    total_weight = sum(float(d.get("weight") or 0) for d in dims) or float(len(dims) or 1)
+    weighted_total = 0.0
+    for d in dims:
+        key = str(d.get("key"))
+        if key in edits:
+            new = edits[key]
+            if new is not None and int(new) != (d.get("score") if isinstance(d.get("score"), int) else None):
+                d["edited"] = True
+                d["ai_score"] = d.get("ai_score", d.get("score"))
+            d["score"] = None if new is None else max(0, min(100, int(new)))
+        w = float(d.get("weight") or 0) or (1.0 if total_weight == len(dims) else 0.0)
+        score = d.get("score")
+        d["contribution"] = round((score or 0) * w / total_weight, 1)
+        if score is not None:
+            weighted_total += score * w / total_weight
+    return {**result, "dimensions": dims,
+            "weighted_total": round(weighted_total, 1),
+            "edited_by": edited_by, "manually_edited": True}
+
+
 def build_result(dims: list[dict], by_key: dict, version, operator_speaker: str,
                  segments: list[dict] | None = None) -> dict:
     """Apply weights in code → per-dimension contribution + weighted total (0-100), plus the

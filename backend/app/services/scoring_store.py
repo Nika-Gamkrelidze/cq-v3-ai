@@ -228,3 +228,129 @@ def _as_default(dims: list[dict], rubric, source: str, *, updated_at=None, updat
         "updated_at": updated_at,
         "updated_by": updated_by,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Manual score edits — the audit trail behind audio_jobs.scoring
+# --------------------------------------------------------------------------- #
+async def revisions(job_id: str) -> list[dict]:
+    """Every revision of one recording's scorecard, oldest first. Revision 1 is the model's."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT revision, scoring, edited_by, note, created_at
+            FROM scoring_revisions WHERE job_id = $1 ORDER BY revision
+            """, job_id)
+    out = []
+    for r in rows:
+        scoring = r["scoring"]
+        if isinstance(scoring, str):
+            scoring = json.loads(scoring)
+        out.append({"revision": r["revision"], "scoring": scoring, "edited_by": r["edited_by"],
+                    "note": r["note"], "created_at": r["created_at"].isoformat()})
+    return out
+
+
+async def save_revision(job_id: str, scoring: dict, *, edited_by: str | None,
+                        note: str | None = None, original: dict | None = None) -> int:
+    """Append a revision and return its number.
+
+    `original` is the model's own scorecard, written as revision 1 if this recording has no
+    history yet. That backfill is what lets a scorecard produced BEFORE this table existed
+    still show "what the machine said" the first time somebody edits it — without it, the
+    first edit would silently become the earliest thing on record.
+
+    The whole thing is one transaction taking the row's lock, so two reviewers editing the
+    same scorecard at once get two revisions in a defined order rather than one overwriting
+    the other's number.
+    """
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT id FROM audio_jobs WHERE id = $1 FOR UPDATE", job_id)
+            last = await conn.fetchval(
+                "SELECT COALESCE(MAX(revision), 0) FROM scoring_revisions WHERE job_id = $1",
+                job_id)
+            if last == 0 and original is not None:
+                await conn.execute(
+                    """
+                    INSERT INTO scoring_revisions (job_id, revision, scoring, edited_by, note)
+                    VALUES ($1, 1, $2::jsonb, NULL, NULL)
+                    """, job_id, json.dumps(original))
+                last = 1
+            nxt = last + 1
+            await conn.execute(
+                """
+                INSERT INTO scoring_revisions (job_id, revision, scoring, edited_by, note)
+                VALUES ($1, $2, $3::jsonb, $4, $5)
+                """, job_id, nxt, json.dumps(scoring), edited_by, (note or None))
+    return nxt
+
+
+# --------------------------------------------------------------------------- #
+# Score colour bands — a display preference, owned separately from the rubric
+# --------------------------------------------------------------------------- #
+# Three colours, two boundaries: below AMBER_FROM is red, below GREEN_FROM is amber, the rest
+# is green. Kept out of scoring_configs on purpose — "reset the rubric" must not silently
+# repaint everyone's scorecards, and resetting the colours must not throw away the rubric.
+DEFAULT_BANDS = {"amber_from": 50, "green_from": 80}
+
+
+def owner_key(principal) -> str:
+    """The row these thresholds belong to. Tenants share one setting across their users: the
+    colours are how a WORKSPACE reads its scores, not a personal preference."""
+    if getattr(principal, "kind", None) == "user" and principal.user_id:
+        return f"user:{principal.user_id}"
+    if principal.client_id:
+        return f"tenant:{principal.client_id}"
+    return "default"
+
+
+def normalize_bands(amber_from, green_from) -> dict:
+    """Clamp to a usable, ordered pair, or raise ValueError. Rejects the states the CHECK
+    constraint would reject anyway, but with a message a person can act on."""
+    try:
+        amber, green = int(amber_from), int(green_from)
+    except (TypeError, ValueError):
+        raise ValueError("Both thresholds must be whole numbers.") from None
+    if not 1 <= amber <= 99:
+        raise ValueError("The amber threshold must be between 1 and 99.")
+    if not amber < green <= 100:
+        raise ValueError("The green threshold must be above the amber one, and at most 100.")
+    return {"amber_from": amber, "green_from": green}
+
+
+async def get_bands(principal) -> dict:
+    key = owner_key(principal)
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT amber_from, green_from, updated_at, updated_by FROM score_bands WHERE owner_key = $1",
+            key)
+    if not row:
+        return {**DEFAULT_BANDS, "is_default": True}
+    return {"amber_from": row["amber_from"], "green_from": row["green_from"],
+            "is_default": False,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            "updated_by": row["updated_by"]}
+
+
+async def set_bands(principal, amber_from, green_from, updated_by: str) -> dict:
+    bands = normalize_bands(amber_from, green_from)
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO score_bands (owner_key, amber_from, green_from, updated_by)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (owner_key) DO UPDATE
+                SET amber_from = EXCLUDED.amber_from, green_from = EXCLUDED.green_from,
+                    updated_by = EXCLUDED.updated_by, updated_at = now()
+            """, owner_key(principal), bands["amber_from"], bands["green_from"], updated_by)
+    return await get_bands(principal)
+
+
+async def reset_bands(principal) -> dict:
+    """Back to the built-in thresholds by DELETING the row, not by writing the defaults into
+    it: an owner who has never chosen and one who reset to the same numbers then read the same,
+    and a later change to DEFAULT_BANDS reaches both."""
+    async with pool().acquire() as conn:
+        await conn.execute("DELETE FROM score_bands WHERE owner_key = $1", owner_key(principal))
+    return await get_bands(principal)

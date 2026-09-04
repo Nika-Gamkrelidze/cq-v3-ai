@@ -62,7 +62,7 @@
       'wb.sum.needaudio':'Summarise works on audio recordings — add one or more files in the source card.',
       'wb.sum.done':'Summary ready','wb.fc.done':'Fact-check ready','wb.sem.done':'Tone analysis ready',
       'wb.fc.partial':'partially supported','wb.call':'Call {n}','wb.seek':'Jump to this moment',
-      'wb.lane.factcheck':'Fact-check','wb.lane.words':'Sentiment Words','wb.lane.voice':'Sentiment Voice',
+      'wb.lane.factcheck':'Fact-check','wb.lane.words':'Sentiment Words','wb.lane.voice':'Sentiment Voice','wb.sc.save':'Save scores','wb.sc.cancel':'Cancel','wb.sc.whynote':'Why are you changing this? (optional)','wb.sc.saved':'Scores updated.','wb.sc.history':'Show history','wb.sc.hide':'Hide history','wb.sc.nohistory':'No changes yet — these are the original scores.','wb.sc.original':'Original (AI)','wb.sc.was':'was','wb.sc.editedby':'edited by','wb.sc.rev':'Revision','wb.sc.edited':'edited','wb.sc.themodel':'the model',
     },
     ka: {
       'wb.src.title':'წყარო','wb.src.audio':'ჩანაწერის ატვირთვა','wb.src.paste':'ტრანსკრიპტის ჩასმა',
@@ -104,7 +104,7 @@
       'wb.sum.needaudio':'შეჯამება მუშაობს აუდიოჩანაწერებზე — წყაროს ბარათში დაამატეთ ერთი ან რამდენიმე ფაილი.',
       'wb.sum.done':'შეჯამება მზადაა','wb.fc.done':'ფაქტების შემოწმება მზადაა','wb.sem.done':'ტონის ანალიზი მზადაა',
       'wb.fc.partial':'ნაწილობრივ დასტურდება','wb.call':'ზარი {n}','wb.seek':'ამ მომენტზე გადასვლა',
-      'wb.lane.factcheck':'ფაქტები','wb.lane.words':'სენტიმენტი: სიტყვები','wb.lane.voice':'სენტიმენტი: ხმა',
+      'wb.lane.factcheck':'ფაქტები','wb.lane.words':'სენტიმენტი: სიტყვები','wb.lane.voice':'სენტიმენტი: ხმა','wb.sc.save':'ქულების შენახვა','wb.sc.cancel':'გაუქმება','wb.sc.whynote':'რატომ ცვლით? (არასავალდებულო)','wb.sc.saved':'ქულები განახლდა.','wb.sc.history':'ისტორიის ჩვენება','wb.sc.hide':'ისტორიის დამალვა','wb.sc.nohistory':'ცვლილებები არ ყოფილა — ეს საწყისი ქულებია.','wb.sc.original':'საწყისი (AI)','wb.sc.was':'იყო','wb.sc.editedby':'შეასწორა','wb.sc.rev':'ვერსია','wb.sc.edited':'შესწორებული','wb.sc.themodel':'მოდელი',
     },
     ru: {
       'wb.src.title':'Источник','wb.src.audio':'Загрузить запись','wb.src.paste':'Вставить транскрипт',
@@ -146,7 +146,7 @@
       'wb.sum.needaudio':'Сводка работает с аудиозаписями — добавьте один или несколько файлов в карточке источника.',
       'wb.sum.done':'Сводка готова','wb.fc.done':'Проверка фактов готова','wb.sem.done':'Анализ тона готов',
       'wb.fc.partial':'частично подтверждено','wb.call':'Звонок {n}','wb.seek':'Перейти к этому моменту',
-      'wb.lane.factcheck':'Факты','wb.lane.words':'Сентимент: слова','wb.lane.voice':'Сентимент: голос',
+      'wb.lane.factcheck':'Факты','wb.lane.words':'Сентимент: слова','wb.lane.voice':'Сентимент: голос','wb.sc.save':'Сохранить оценки','wb.sc.cancel':'Отмена','wb.sc.whynote':'Почему вы это меняете? (необязательно)','wb.sc.saved':'Оценки обновлены.','wb.sc.history':'Показать историю','wb.sc.hide':'Скрыть историю','wb.sc.nohistory':'Изменений не было — это исходные оценки.','wb.sc.original':'Исходные (ИИ)','wb.sc.was':'было','wb.sc.editedby':'изменил','wb.sc.rev':'Версия','wb.sc.edited':'изменено','wb.sc.themodel':'модель',
     },
   });
 
@@ -262,8 +262,18 @@
   const arr = v => Array.isArray(v) ? v : [];
   const fmtT = s => { s = Math.max(0, Math.floor(num(s) || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
-  const band = v => v == null ? 'muted' : v >= 80 ? 'ok' : v >= 50 ? 'pending' : 'alert';
-  const barcls = v => v == null ? '' : v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad';
+  /* Where a score changes colour. Red below `amber_from`, amber up to `green_from`, green
+     above — the workspace's own thresholds, fetched once per panel (GET /scoring/bands) and
+     falling back to the built-in 50/80 until they arrive.
+
+     These are the ONE source of the three colours: the scorecard number, its bar, and the
+     timeline lane all read them, so a dimension cannot be red in the card and olive on the
+     timeline the way it was when the lane used a continuous hue ramp of its own. */
+  const BANDS = { amber_from: 50, green_from: 80 };
+  const scoreLevel = v => v == null ? 'none'
+    : (v >= BANDS.green_from ? 'good' : v >= BANDS.amber_from ? 'mid' : 'bad');
+  const band = v => ({ good: 'ok', mid: 'pending', bad: 'alert', none: 'muted' })[scoreLevel(v)];
+  const barcls = v => v == null ? '' : scoreLevel(v);
   const pct = v => Math.max(0, Math.min(100, Math.round(num(v) || 0)));
   const LEVELS = ['good', 'mid', 'bad', 'none'];
   const lvl = l => LEVELS.includes(l) ? l : 'none';
@@ -356,19 +366,38 @@
       return `<q class="wb-q"${seekAttrs(e.start, arr(e.segments)[0], ctx.callIndex)}>${esc(e.quote || e.text || '')}${timeBadge(e.start, e.end)}</q>`;
     };
     const dim = d => { const s = num(d.score), ev = arr(d.evidence);
+      // When the reader may overrule the model, the number itself becomes the control —
+      // a separate "edit" mode would hide the evidence they are judging against.
+      const scoreCell = ctx.editable
+        ? `<span class="sc-dim-score wb-sc-editcell"><input type="number" class="wb-sc-in" min="0" max="100"
+             data-key="${esc(d.key)}" value="${s == null ? '' : s}" aria-label="${esc(d.name)}" />
+             <span class="sc-meta">/100</span></span>`
+        : `<span class="sc-dim-score wb-band-${band(s)}">${s == null ? '—' : s}<span class="sc-meta">/100</span></span>`;
+      // An edited dimension says so, and keeps the model's number visible beside it: the
+      // point of an override is the disagreement, and hiding the original hides that.
+      const wasAi = d.edited && d.ai_score != null
+        ? `<span class="pill" style="margin-left:6px">${esc(t('wb.sc.edited'))} · ${esc(t('wb.sc.was'))} ${d.ai_score}</span>` : '';
       return `<div class="sc-dim">
-        <div class="sc-dim-head"><span class="sc-dim-name">${esc(d.name)}</span>
-          <span class="sc-dim-score wb-band-${band(s)}">${s == null ? '—' : s}<span class="sc-meta">/100</span></span></div>
+        <div class="sc-dim-head"><span class="sc-dim-name">${esc(d.name)}${wasAi}</span>
+          ${scoreCell}</div>
         <div class="sc-meta">${t('sc.weight')} ${d.weight ?? '—'}% · ${t('sc.contribution')} ${d.contribution ?? '—'}</div>
         <div class="sc-bar ${barcls(s)}"><span style="width:${pct(s)}%"></span></div>
         ${d.rationale ? `<div class="hint" style="margin-top:6px">${esc(d.rationale)}</div>` : ''}
         ${ev.length ? `<div class="sc-evid">${ev.map(evItem).join('')}</div>` : ''}
       </div>`; };
     const ver = (sc.is_default || sc.version === 0) ? t('wb.sc.default') : (sc.version != null ? `${t('sc.version')} ${esc(sc.version)}` : '');
-    return `<div class="wb-res">
-      <div class="wb-res-head"><div><h3>${t('sc.title')}</h3>${ver ? `<div class="sc-meta">${ver}</div>` : ''}</div>
+    const editedBy = sc.manually_edited && sc.edited_by
+      ? `<div class="sc-meta">${esc(t('wb.sc.editedby'))} ${esc(sc.edited_by)}</div>` : '';
+    const tools = ctx.editable || ctx.jobId ? `<div class="wb-sc-tools">
+        ${ctx.editable ? `<input class="wb-sc-note" type="text" placeholder="${esc(t('wb.sc.whynote'))}" />
+          <button class="primary wb-sc-save" type="button">${esc(t('wb.sc.save'))}</button>` : ''}
+        ${ctx.jobId ? `<button class="ghost wb-sc-hist" type="button">${esc(t('wb.sc.history'))}</button>` : ''}
+      </div><div class="wb-sc-histbox hidden"></div><div class="msg wb-sc-msg"></div>` : '';
+    return `<div class="wb-res" data-job="${esc(ctx.jobId || '')}">
+      <div class="wb-res-head"><div><h3>${t('sc.title')}</h3>${ver ? `<div class="sc-meta">${ver}</div>` : ''}${editedBy}</div>
         <div class="sc-total"><div class="num wb-band-${band(total)}">${total == null ? '—' : total}</div><span class="muted">${t('sc.weighted')} / ${sc.max_total || 100}</span></div></div>
       ${sc.dimensions.map(dim).join('')}
+      ${tools}
     </div>`;
   }
 
@@ -589,6 +618,18 @@
     });
     const guide = $('.wb-guide');
     if (guide) { guide.addEventListener('toggle', () => { if (guide.open && !S.guideLoaded) loadGuide(); }); $('.wb-guide-save').addEventListener('click', saveGuide); }
+
+    /* The workspace's own colour thresholds, once per panel. Failure is silent and harmless:
+       BANDS keeps the built-in 50/80, which is what an unconfigured workspace gets anyway. */
+    (async () => {
+      try {
+        const r = await fetchFn(`${api}/scoring/bands`, { headers: headers() });
+        if (!r.ok) return;
+        const d = await r.json();
+        const a = Number(d.amber_from), g = Number(d.green_from);
+        if (Number.isFinite(a) && Number.isFinite(g) && a < g) { BANDS.amber_from = a; BANDS.green_from = g; renderAll(); }
+      } catch (_) { /* built-in thresholds stand */ }
+    })();
     const onLang = () => {
       CQ.applyI18n(root); sync(); renderAll();
       // Lane names ("Fact-check", "Words", "Voice") and speaker chips are translated at push time — push again.
@@ -828,7 +869,13 @@
     function lanesFor(kind, d) {
       if (!d) return [];
       if (kind === 'factcheck') return [{ id: 'factcheck', name: t('wb.lane.factcheck'), spans: arr(d.spans) }];
-      if (kind === 'score') return arr(d.lanes).map((l, i) => ({ id: 'score:' + (l.key || i), name: l.name || l.key || '', spans: arr(l.spans) }));
+      if (kind === 'score') return arr(d.lanes).map((l, i) => ({
+        id: 'score:' + (l.key || i), name: l.name || l.key || '',
+        // `score: null` on purpose: it makes the timeline colour by `level`, i.e. by the
+        // workspace's own three bands, instead of its own continuous ramp.
+        spans: arr(l.spans).map(sp => Object.assign({}, sp, {
+          level: sp.score == null ? lvl(sp.level) : scoreLevel(num(sp.score)), score: null })),
+      }));
       if (kind === 'semantic') {
         const sp = d.spans || {}, modes = arr(d.modes), out = [];
         if (modes.includes('text') || arr(sp.text).length) out.push({ id: 'semantic:text', name: t('wb.lane.words'), spans: arr(sp.text) });
@@ -966,11 +1013,95 @@
       let html = '';
       if (kind === 'summarise') html = S.summary ? renderSummary(S.summary, { calls: S.source ? S.source.calls.map(c => Object.assign({}, c, { speakerLabels: labelsOf(c) })) : [], active: idx }) : '';
       else if (call && call.results[kind]) {
-        const ctx = { segments: call.segments, speakerLabels: labelsOf(call), callIndex: idx };
+        const ctx = { segments: call.segments, speakerLabels: labelsOf(call), callIndex: idx,
+                      jobId: call.id, editable: kind === 'score' && opts.canEditScores !== false };
         html = kind === 'factcheck' ? renderFactcheck(call.results[kind], ctx) : kind === 'score' ? renderScorecard(call.results[kind], ctx) : renderSemantic(call.results[kind], ctx);
       }
       out.innerHTML = html; CQ.mountTips(out);
+      if (kind === 'score') wireScoreEditing(out);
     }
+    /* ---- manual score edits -------------------------------------------------------------
+       A reviewer disagreeing with the model is the normal case, not an exception, so the
+       numbers are editable in place next to the evidence they were judged on. The browser
+       sends only the changed dimensions; the server recomputes the weighted total and keeps
+       the model's own scorecard as revision 1, so an override never erases what it overrode. */
+    function wireScoreEditing(out) {
+      const box = out.querySelector('.wb-res[data-job]'); if (!box) return;
+      const jobId = box.dataset.job; if (!jobId) return;
+      const msg = box.querySelector('.wb-sc-msg');
+      const save = box.querySelector('.wb-sc-save');
+      const hist = box.querySelector('.wb-sc-hist');
+      const histBox = box.querySelector('.wb-sc-histbox');
+
+      if (save) save.addEventListener('click', async () => {
+        const scores = [];
+        box.querySelectorAll('.wb-sc-in').forEach(inp => {
+          const raw = inp.value.trim();
+          if (raw === '') return;
+          const v = Math.max(0, Math.min(100, Math.round(Number(raw))));
+          if (Number.isFinite(v)) scores.push({ key: inp.dataset.key, score: v });
+        });
+        if (!scores.length) return;
+        const note = (box.querySelector('.wb-sc-note') || {}).value || '';
+        save.disabled = true; save.innerHTML = '<span class="spinner"></span>';
+        try {
+          const r = await fetchFn(`${api}/recordings/${jobId}/score`, {
+            method: 'PATCH', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+            body: JSON.stringify({ scores, note }) });
+          const d = await CQ.readResp(r);
+          const call = activeCall();
+          if (call) call.results.score = d;      // so a re-render shows the saved numbers
+          CQ.toast(t('wb.sc.saved'), 'ok');
+          renderPane('score');
+          // The lanes carry the score colour, so an edited number has to repaint them too.
+          if (call) setLanesFor(call, 'score', lanesFor('score', d));
+        } catch (e) {
+          msg.className = 'msg err wb-sc-msg'; msg.textContent = e.message;
+          save.disabled = false; save.textContent = t('wb.sc.save');
+        }
+      });
+
+      if (hist) hist.addEventListener('click', async () => {
+        if (!histBox.classList.contains('hidden')) {
+          histBox.classList.add('hidden'); hist.textContent = t('wb.sc.history'); return;
+        }
+        hist.disabled = true;
+        try {
+          const r = await fetchFn(`${api}/recordings/${jobId}/score/revisions`, { headers: headers() });
+          const d = await CQ.readResp(r);
+          histBox.innerHTML = renderHistory(arr(d.revisions));
+          histBox.classList.remove('hidden'); hist.textContent = t('wb.sc.hide');
+        } catch (e) {
+          msg.className = 'msg err wb-sc-msg'; msg.textContent = e.message;
+        } finally { hist.disabled = false; }
+      });
+    }
+
+    function renderHistory(revs) {
+      if (revs.length < 2) return `<div class="hint">${esc(t('wb.sc.nohistory'))}</div>`;
+      // Oldest first: the model's own numbers, then what each person changed them to.
+      return revs.map((r, n) => {
+        const sc = r.scoring || {};
+        const who = r.revision === 1 ? t('wb.sc.themodel') : (r.edited_by || '—');
+        const prev = n > 0 ? (revs[n - 1].scoring || {}).dimensions || [] : null;
+        const prevBy = {}; arr(prev).forEach(d => { prevBy[d.key] = d.score; });
+        const dims = arr(sc.dimensions).map(d => {
+          const was = prev && prevBy[d.key] != null && prevBy[d.key] !== d.score
+            ? ` <span class="muted">(${esc(t('wb.sc.was'))} ${prevBy[d.key]})</span>` : '';
+          return `<div class="sc-meta">${esc(d.name)}: <b>${d.score == null ? '—' : d.score}</b>${was}</div>`;
+        }).join('');
+        return `<div class="wb-rev">
+          <div class="wb-inline" style="justify-content:space-between">
+            <b>${esc(t('wb.sc.rev'))} ${r.revision}${r.revision === 1 ? ' · ' + esc(t('wb.sc.original')) : ''}</b>
+            <span class="sc-meta">${esc(who)} · ${esc(new Date(r.created_at).toLocaleString())}</span>
+          </div>
+          <div class="sc-meta" style="margin:4px 0"><b>${sc.weighted_total == null ? '—' : sc.weighted_total}</b> / ${sc.max_total || 100}</div>
+          ${dims}
+          ${r.note ? `<div class="hint" style="margin-top:4px">${esc(r.note)}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
     const renderAll = () => ORDER.forEach(renderPane);
     const busyBtn = b => { b.disabled = true; b.innerHTML = '<span class="spinner"></span>' + esc(t('wb.running')); };
     async function run(kind) {
