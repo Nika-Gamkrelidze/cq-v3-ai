@@ -48,7 +48,8 @@ async def _update(job_id: str, **fields) -> None:
 
 async def create_job(*, filename, content_type, size_bytes, client_id, principal_kind,
                      anon_key, status="queued", batch_id=None, external_ref=None,
-                     client_ip=None, audio=None, user_id=None, source="audio") -> str:
+                     client_ip=None, audio=None, user_id=None, source="audio",
+                     created_by=None) -> str:
     """Create the row. When `audio` is given the bytes are retained — for EVERY principal.
 
     Recordings used to be kept only for anonymous visitors (so abuse could be investigated);
@@ -80,14 +81,14 @@ async def create_job(*, filename, content_type, size_bytes, client_id, principal
                 (filename, content_type, size_bytes, status, stt_model, llm_model,
                  client_id, principal_type, anon_key, batch_id, external_ref,
                  client_ip, audio_path, audio_bytes, audio_sha256, purge_after,
-                 user_id, source)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                 user_id, source, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
             RETURNING id
             """,
             filename, content_type, size_bytes, status, cfg["stt_model"], cfg["llm_model"],
             client_id, principal_kind, anon_key, batch_id, external_ref,
             client_ip, stored.get("path"), stored.get("bytes"), stored.get("sha256"),
-            purge_after, user_id, source))
+            purge_after, user_id, source, created_by))
 
 
 async def mark_error(job_id: str, msg: str) -> None:

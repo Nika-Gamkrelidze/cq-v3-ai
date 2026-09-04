@@ -399,7 +399,7 @@ async def upload_recording(request: Request, file: UploadFile = File(...),
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=principal.anon_key,
         status="transcribing", client_ip=client_ip(request), audio=audio,
-        user_id=_user_id(principal), source="audio")
+        user_id=_user_id(principal), source="audio", created_by=await _actor_name(principal))
 
     if as_stream:
         async def run(emit):
@@ -440,7 +440,8 @@ async def paste_recording(request: Request, body: TextBody,
     job_id = await analysis.create_job(
         filename=TEXT_FILENAME, content_type="text/plain", size_bytes=len(text.encode("utf-8")),
         client_id=principal.client_id, principal_kind=principal.kind, anon_key=None,
-        status="ready", client_ip=client_ip(request), user_id=_user_id(principal), source="text")
+        status="ready", client_ip=client_ip(request), user_id=_user_id(principal), source="text",
+        created_by=await _actor_name(principal))
     await analysis.mark_ready(job_id, transcript=text, language=None, segments=segs,
                               duration_s=None)
     return _recording(job_id, filename=TEXT_FILENAME, language=None, duration_s=None,
@@ -491,6 +492,33 @@ class ScoreEdit(BaseModel):
 class ScoreEditBody(BaseModel):
     scores: list[ScoreEdit] = []
     note: str | None = None
+
+
+async def _actor_name(principal: Principal) -> str | None:
+    """The person's NAME, for the History list's author column.
+
+    Looked up once at creation and stored on the row rather than joined at read time: a shared
+    workspace History is only useful if it still says who ran a call after that account is
+    renamed or deleted, which is precisely when someone goes looking. Anonymous callers get
+    None — there is no person to name, and their IP is not one.
+    """
+    if principal.is_superadmin:
+        return "superadmin"
+    try:
+        async with pool().acquire() as conn:
+            if principal.kind == "tenant" and principal.user_id:
+                return await conn.fetchval(
+                    "SELECT username FROM tenant_users WHERE id = $1", principal.user_id)
+            if principal.kind == "tenant":           # an API key has no person behind it
+                return "API key"
+            if principal.kind == "user" and principal.user_id:
+                row = await conn.fetchrow(
+                    "SELECT display_name, email FROM app_users WHERE id = $1", principal.user_id)
+                if row:
+                    return row["display_name"] or row["email"]
+    except Exception:  # noqa: BLE001 — a missing label must never fail an upload
+        log.warning("could not resolve the actor name for %s", principal.kind)
+    return None
 
 
 def _editor_name(principal: Principal) -> str:
@@ -660,7 +688,7 @@ async def list_recordings(limit: int = 20, principal: Principal = Depends(resolv
     async with pool().acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id, filename, source, status, language, duration_s, created_at,
+            SELECT id, filename, source, status, language, duration_s, created_at, created_by,
                    audio_path IS NOT NULL AS has_audio,
                    kb_check IS NOT NULL AS ran_factcheck,
                    scoring  IS NOT NULL AS ran_score,
@@ -671,6 +699,9 @@ async def list_recordings(limit: int = 20, principal: Principal = Depends(resolv
         "id": str(r["id"]), "filename": r["filename"], "source": r["source"],
         "status": r["status"], "language": r["language"], "duration_s": r["duration_s"],
         "created_at": r["created_at"].isoformat(), "has_audio": r["has_audio"],
+        # Who ran it. A workspace History is shared by every user in the tenant, so a row
+        # without an author is just a thing that happened.
+        "created_by": r["created_by"],
         "ran": {"factcheck": r["ran_factcheck"], "score": r["ran_score"],
                 "semantic": r["ran_semantic"]},
     } for r in rows]
@@ -682,7 +713,7 @@ async def get_recording(job_id: str, principal: Principal = Depends(resolve_prin
     row = await _load(job_id, principal, (
         "id, filename, content_type, size_bytes, source, status, language, duration_s, "
         "transcript, segments, kb_check, scoring, semantic, sentiment, analysis, error, "
-        "created_at, audio_path"))
+        "created_at, created_by, audio_path"))
     has_audio = row.pop("audio_path") is not None
     return {**row, "id": str(row["id"]), "created_at": row["created_at"].isoformat(),
             "has_audio": has_audio, "audio_url": _audio_url(job_id) if has_audio else None}
@@ -805,6 +836,7 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
     n = len(uploads)
     recs: list[dict] = []
     ip = client_ip(request)
+    actor = await _actor_name(principal)   # one lookup for the whole batch
     for i, (filename, content_type, audio) in enumerate(uploads):
         if emit is not None:
             emit("stage", {"stage": "transcribing", "index": i, "count": n, "filename": filename})
@@ -812,7 +844,7 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
             filename=filename, content_type=content_type, size_bytes=len(audio),
             client_id=principal.client_id, principal_kind=principal.kind, anon_key=None,
             status="transcribing", client_ip=ip, audio=audio,
-            user_id=_user_id(principal), source="audio")
+            user_id=_user_id(principal), source="audio", created_by=actor)
         try:
             recs.append(await _ingest(job_id, audio, filename, content_type, cfg))
         except _Failed as exc:
@@ -836,13 +868,14 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO call_summaries (principal_type, client_id, user_id, job_ids, language, summary)
-            VALUES ($1, $2, $3, $4::uuid[], $5, $6::jsonb)
+            INSERT INTO call_summaries (principal_type, client_id, user_id, job_ids, language,
+                                        summary, created_by)
+            VALUES ($1, $2, $3, $4::uuid[], $5, $6::jsonb, $7)
             RETURNING id, created_at
             """,
             principal.kind, principal.client_id if principal.is_tenant else None,
             _user_id(principal), [uuid.UUID(r["id"]) for r in recs],
-            summary.get("language"), json.dumps(summary))
+            summary.get("language"), json.dumps(summary), actor)
     return {"id": str(row["id"]), "summary": summary, "calls": _summary_calls(recs),
             "created_at": row["created_at"].isoformat()}
 
@@ -885,7 +918,7 @@ async def list_summaries(limit: int = 20, principal: Principal = Depends(resolve
     async with pool().acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id, language, job_ids, summary, created_at
+            SELECT id, language, job_ids, summary, created_at, created_by
             FROM call_summaries WHERE {where} ORDER BY created_at DESC LIMIT ${len(args)+1}
             """, *args, limit)
     out = []
@@ -893,7 +926,7 @@ async def list_summaries(limit: int = 20, principal: Principal = Depends(resolve
         summary = _json(r["summary"]) or {}
         out.append({
             "id": str(r["id"]), "language": r["language"],
-            "created_at": r["created_at"].isoformat(),
+            "created_at": r["created_at"].isoformat(), "created_by": r["created_by"],
             "call_count": len(r["job_ids"] or []),
             "short_summary": summary.get("short_summary") or "",
             "calls": [{"job_id": str(c.get("job_id") or ""), "filename": c.get("filename"),
@@ -910,7 +943,7 @@ async def get_summary(summary_id: str, principal: Principal = Depends(resolve_pr
     where, args = _summary_scope(principal, first=2)
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
-            f"SELECT id, language, job_ids, summary, created_at FROM call_summaries "
+            f"SELECT id, language, job_ids, summary, created_at, created_by FROM call_summaries "
             f"WHERE id = $1 AND {where}", summary_id, *args)
         if row is None:
             raise HTTPException(status_code=404, detail="Summary not found")

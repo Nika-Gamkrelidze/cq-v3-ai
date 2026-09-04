@@ -105,6 +105,8 @@ async def run_startup_migrations() -> list[str]:
         await _apply(conn, "score_edits.sql")
         # score_bands.sql: per-workspace red/amber/green thresholds for a scorecard.
         await _apply(conn, "score_bands.sql")
+        # actor.sql: the name of whoever created a recording or summary.
+        await _apply(conn, "actor.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

@@ -1985,6 +1985,13 @@
                        : '<span class="hint">—</span>';
     }
 
+    /* Who ran it. Every user in the workspace sees the same History, so the author is what
+       makes a row attributable; rows created before the name was recorded say so rather than
+       showing a bare dash. */
+    const who = name => name
+      ? `<span class="chip">${esc(name)}</span>`
+      : `<span class="hint">${esc(t('tn.who.unknown'))}</span>`;
+
     async function loadRecordings() {
       const box = $('recList');
       const d = await kbJson(`${API}/recordings?limit=50`);
@@ -1994,7 +2001,8 @@
       box.innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th>${t('th.file')}</th><th class="tight">${t('tn.th.source')}</th><th>${t('th.status')}</th>
         <th class="tight">${t('th.lang')}</th><th class="tight hide-md">${t('tn.th.length')}</th>
-        <th class="hide-md">${t('tn.th.ran')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        <th class="hide-md">${t('tn.th.ran')}</th><th class="tight">${t('tn.th.who')}</th>
+        <th>${t('th.when')}</th></tr></thead><tbody>` +
         rows.map(x => `<tr style="cursor:pointer" data-rec="${esc(x.id)}" tabindex="0" role="button"
             title="${esc(t('tn.hist.open'))}" aria-label="${esc(t('tn.hist.open'))}">
           <td>${esc(x.filename || (x.source === 'text' ? t('wb.src.text') : '—'))}</td>
@@ -2003,6 +2011,7 @@
           <td class="tight">${esc(x.language || '—')}</td>
           <td class="tight hide-md">${esc(fmtSecs(x.duration_s))}</td>
           <td class="hide-md">${ranChips(x.ran)}</td>
+          <td class="tight">${who(x.created_by)}</td>
           <td class="hint">${new Date(x.created_at).toLocaleString()}</td></tr>`).join('') +
         `</tbody></table></div>`;
       box.querySelectorAll('tr[data-rec]').forEach(tr => {
@@ -2020,12 +2029,14 @@
       if (!rows.length) { box.innerHTML = `<div class="empty">${t('tn.hist.sum.none')}</div>`; return; }
       box.innerHTML = `<div class="table-wrap"><table><thead><tr>
         <th class="tight">${t('tn.th.calls')}</th><th>${t('tn.th.summary')}</th>
-        <th class="tight">${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        <th class="tight">${t('th.lang')}</th><th class="tight">${t('tn.th.who')}</th>
+        <th>${t('th.when')}</th></tr></thead><tbody>` +
         rows.map(x => `<tr style="cursor:pointer" data-sum="${esc(x.id)}" tabindex="0" role="button"
             title="${esc(t('tn.hist.open'))}" aria-label="${esc(t('tn.hist.open'))}">
           <td class="tight">${x.call_count ?? 0}</td>
           <td>${esc((x.short_summary || '').slice(0, 160)) || '—'}</td>
           <td class="tight">${esc(x.language || '—')}</td>
+          <td class="tight">${who(x.created_by)}</td>
           <td class="hint">${new Date(x.created_at).toLocaleString()}</td></tr>`).join('') +
         `</tbody></table></div>`;
       box.querySelectorAll('tr[data-sum]').forEach(tr => {
