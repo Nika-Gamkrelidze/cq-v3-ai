@@ -91,7 +91,10 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cora
   cursor:pointer; transition:all .2s var(--ease); }
 .icon-btn:hover { color:var(--beam); border-color:color-mix(in oklab,var(--beam) 60%,transparent); }
 
-main { max-width:960px; margin:0 auto; padding:clamp(18px,4vw,32px) clamp(16px,4vw,28px) 96px; }
+/* Side gutters scale with the viewport and are allowed to get properly wide: the console
+   pages run to 1500px, so a 28px gutter left the content sitting almost against the window
+   edge on a laptop. The 16px floor is what keeps a 375px phone from losing readable width. */
+main { max-width:960px; margin:0 auto; padding:clamp(18px,4vw,32px) clamp(16px,4.5vw,56px) 96px; }
 .narrow { max-width:760px; }
 /* Data consoles use the screen they are given — squeezing a 9-column table into a 960px
    column on a 1900px monitor produced a pointless horizontal scrollbar next to acres of
