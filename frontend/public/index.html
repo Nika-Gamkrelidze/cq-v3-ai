@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CommuniQ Voice AI — Speech, Transcripts &amp; Sentiment</title>
+  <title>CommuniQ Voice AI — Speech &amp; Audio Tools</title>
   <meta name="description" content="Turn text into natural speech — including Georgian — convert audio and video into the formats Asterisk expects, or transcribe a call and hear how it sounded. Powered by CommuniQ." />
   <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -159,11 +159,22 @@
   <script>
     const API = CQ.API, t = CQ.t;
     // The public page must not pretend a signed-in visitor is signed out: with a live
-    // admin or tenant session in this tab, the nav links back to their surface instead of
-    // demanding credentials again.
-    const _navBack = sessionStorage.getItem('cq_admin_token') ? { i18n: 'nav.console', href: 'admin.html' }
-                   : sessionStorage.getItem('cq_tenant_token') ? { i18n: 'nav.workspace', href: 'tenant.html' }
-                   : { i18n: 'nav.signin', href: 'tenant.html' };
+    // admin, tenant or registered-account session in this tab, the nav links back to their
+    // surface instead of demanding credentials again.
+    //
+    // Signed out it now shows BOTH doors, because they are not the same door: "Sign in"
+    // goes to the workspace login (which also routes superadmins), while "Create account"
+    // is the self-serve one — the only door a visitor with no invitation can open.
+    const USER_TOKEN = sessionStorage.getItem('cq_user_token') || '';
+    const _nav = sessionStorage.getItem('cq_admin_token') ? [{ i18n: 'nav.console', href: 'admin.html' }]
+               : sessionStorage.getItem('cq_tenant_token') ? [{ i18n: 'nav.workspace', href: 'tenant.html' }]
+               : USER_TOKEN ? [{ i18n: 'pb.nav.account', href: 'account.html' }]
+               : [{ i18n: 'nav.signin', href: 'tenant.html' }, { i18n: 'pb.nav.create', href: 'account.html' }];
+    // A registered account has its OWN daily allowance and its own history, so its token
+    // rides on the requests this page makes that spend that allowance. Admin and tenant
+    // sessions deliberately do not: their surfaces are admin.html and tenant.html, and the
+    // public page has always run their requests as a guest.
+    const pubAuth = (extra = {}) => USER_TOKEN ? { 'Authorization': 'Bearer ' + USER_TOKEN, ...extra } : extra;
     // …and the same session decides how much of this page exists. Signed out, the public
     // surface is text-to-speech and the converter: the two things that cost us an ffmpeg
     // process and a few ElevenLabs characters. Transcription and the sentiment read are
@@ -173,7 +184,10 @@
     // gone. (The hero used to carry a second line that had to be swapped here because it
     // advertised a transcript this visitor cannot get; the page no longer states its own
     // feature list in prose, so the tabs are the only claim and they are already correct.)
-    const SIGNED_IN = !!(sessionStorage.getItem('cq_admin_token') || sessionStorage.getItem('cq_tenant_token'));
+    // A registered account counts as signed in for exactly this reason: it has a daily
+    // allowance of its own for the same two features, so removing the tabs would hide a
+    // door it has already been given the key to.
+    const SIGNED_IN = !!(sessionStorage.getItem('cq_admin_token') || sessionStorage.getItem('cq_tenant_token') || USER_TOKEN);
     if (!SIGNED_IN) {
       ['stt', 'sentiment'].forEach(name => {
         const tab = document.querySelector('.tab[data-tab="' + name + '"]');
@@ -182,7 +196,7 @@
         if (panel) panel.remove();
       });
     }
-    CQ.mountHeader({ tag: 'Voice AI', nav: [_navBack],
+    CQ.mountHeader({ tag: 'Voice AI', nav: _nav,
       extra: '<span class="dot" id="statusDot" title="API status" style="margin:0 4px"></span>' });
     CQ.enhanceSelects();
 
@@ -197,7 +211,7 @@
     let lastLimits = null;
     async function loadLimits() {
       try {
-        const r = await fetch(`${API}/limits`); if (!r.ok) return;
+        const r = await fetch(`${API}/limits`, { headers: pubAuth() }); if (!r.ok) return;
         const d = await r.json(); lastLimits = d; cvPaintLimits();
         const el = document.getElementById('quota');
         if (!d.anonymous) { el.className = 'quota'; el.innerHTML = ''; return; }
@@ -261,7 +275,7 @@
         sttBtn.disabled = true; sttBtn.innerHTML = '<span class="spinner"></span>' + t('btn.transcribe') + '…';
         try {
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch(`${API}/transcribe`, { method: 'POST', body: fd });
+          const r = await fetch(`${API}/transcribe`, { method: 'POST', headers: pubAuth(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = renderTranscript(d); CQ.toast(t('stt.done'), 'ok');
         } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
@@ -302,7 +316,7 @@
         snBtn.disabled = true; snBtn.innerHTML = '<span class="spinner"></span>' + t('sn.run') + '…';
         try {
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch(`${API}/sentiment`, { method: 'POST', body: fd });
+          const r = await fetch(`${API}/sentiment`, { method: 'POST', headers: pubAuth(), body: fd });
           const d = await CQ.readResp(r);
           out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
           CQ.toast(t('sn.done'), 'ok');
@@ -380,6 +394,9 @@
       if (!voice_id) { err.textContent = t('tts.pickvoice'); return; }
       if (previewMap[voice_id]) { playInto(previewMap[voice_id], 'preview.mp3'); return; }
       const btn = document.getElementById('previewBtn'); btn.disabled = true; btn.textContent = '…';
+      // Deliberately NOT signed as the registered user: this fallback is a six-character
+      // probe for a voice that ships no free preview, and charging it to the account would
+      // file a row of “Hello.” clips in their history for every voice they auditioned.
       try {
         const language_code = document.getElementById('langSelect').value || undefined;
         const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -399,7 +416,7 @@
       try {
         const voice_id = document.getElementById('voiceSelect').value || undefined;
         const language_code = document.getElementById('langSelect').value || undefined;
-        const r = await fetch(`${API}/tts`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const r = await fetch(`${API}/tts`, { method: 'POST', headers: pubAuth({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ text, voice_id, language_code }) });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || t('toast.error')); }
         playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
@@ -742,6 +759,10 @@
       const fd = new FormData();
       cvQueue.forEach(it => fd.append('files', it.file, it.file.name));
       fd.append('format', $c('cvFormat').value || cvState.def);
+      // The converter alone stays a guest request even for a signed-in account: the TTL
+      // line below quotes /convert/formats' anonymous constant, and a signed batch expires
+      // on the storage retention rule instead — the account page's Convert tab is the one
+      // that reads the batch's own `expires_at`, so it is the one that signs the request.
       xhr.open('POST', `${API}/convert?stream=1`, true);
       cvProg(t('cv.stage.upload'), 0);
       cvRender();                                          // repaint without the remove buttons

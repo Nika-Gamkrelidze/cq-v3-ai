@@ -1,0 +1,1216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Account</title>
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="favicon.png" />
+  <script src="brand.js"></script>
+  <script src="timeline.js"></script>
+  <script src="workbench.js"></script>
+  <style>
+    /* Usage meters on the Profile tab. Same visual language as the rubric's weight bars
+       (.sc-bar) — a number, its ceiling, and how much of it is gone. */
+    .use-row { padding:10px 0; border-bottom:1px solid color-mix(in oklab,var(--hairline) 60%,transparent); }
+    .use-row:last-child { border-bottom:none; }
+    .use-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; font-size:13px; }
+    .use-head b { color:var(--paper); font-weight:600; }
+    .use-head span { color:var(--muted); font-variant-numeric:tabular-nums; }
+    /* A history row is a link to something: say so with the cursor, and make the whole row
+       the target rather than a tiny "open" affordance in the last column. */
+    tr.act-row { cursor:pointer; }
+    tr.act-row:hover td { background:color-mix(in oklab,var(--beam) 7%,transparent); }
+    .ran-dots { display:inline-flex; gap:4px; flex-wrap:wrap; }
+    /* The password prompt in front of a destructive action (rubric reset) reuses the confirm
+       modal's shell, so it looks like every other dialog in the app. */
+    .cq-modal label:first-of-type { margin-top:0; }
+  </style>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main class="console">
+    <!-- GATE — two doors in one card: sign in, or make an account. Both are real <form>s so
+         Enter submits from either field and password managers recognise the pairs. -->
+    <div class="gate" id="gate">
+      <div class="card">
+        <h3 data-i18n="ac.gate.heading"></h3>
+        <div class="subtabs" id="gateTabs" role="tablist">
+          <div class="subtab active" data-g="signin" role="tab" data-i18n="ac.gate.signin"></div>
+          <div class="subtab" data-g="register" role="tab" data-i18n="ac.gate.register"></div>
+        </div>
+
+        <form id="signinForm" autocomplete="on">
+          <label for="sEmail" data-i18n="ac.f.signinid"></label>
+          <!-- type=text, NOT type=email: this one box takes a registered user's email AND an
+               operator's or workspace user's username, because /auth/login serves all three.
+               type=email made the browser refuse a superadmin's username before the form ever
+               submitted, which left the operator with no way in from this page. -->
+          <input type="text" id="sEmail" autocomplete="username" />
+          <label for="sPw" data-i18n="f.password"></label>
+          <div class="inline" style="gap:6px">
+            <input type="password" id="sPw" autocomplete="current-password" style="flex:1" />
+            <button type="button" class="icon-btn" id="sPwToggle" data-i18n-title="login.showpw" data-i18n-aria="login.showpw" aria-pressed="false">&#128065;</button>
+          </div>
+          <div class="actions"><button type="submit" class="primary" id="signinBtn" data-i18n="btn.signin"></button></div>
+        </form>
+
+        <form id="registerForm" class="hidden" autocomplete="on">
+          <label for="rEmail" data-i18n="ac.f.email"></label>
+          <input type="email" id="rEmail" autocomplete="username" />
+          <label for="rPw" data-i18n="f.password"></label>
+          <input type="password" id="rPw" autocomplete="new-password" />
+          <div class="hint" data-i18n="ac.reg.pwhint"></div>
+          <label for="rName" data-i18n="ac.f.name"></label>
+          <input type="text" id="rName" autocomplete="name" />
+          <div class="hint" data-i18n="ac.f.name.hint"></div>
+          <div class="actions"><button type="submit" class="primary" id="registerBtn" data-i18n="ac.gate.register"></button></div>
+        </form>
+
+        <div class="msg err" id="gateMsg" aria-live="polite"></div>
+        <hr class="sep" />
+        <p class="hint"><a href="tenant.html" data-i18n="ac.gate.tenant"></a></p>
+      </div>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="quota" id="acBanner"></div>
+      <div class="tabs" id="acTabs">
+        <div class="tab active" data-tab="analyse"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
+        <div class="tab" data-tab="tts"><span>🗣</span> <span data-i18n="tab.tts"></span></div>
+        <div class="tab" data-tab="convert"><span>🎚</span> <span data-i18n="tab.convert"></span></div>
+        <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
+        <div class="tab" data-tab="rubric"><span>🎯</span> <span data-i18n="tab.scoring"></span></div>
+        <div class="tab" data-tab="profile"><span>👤</span> <span data-i18n="ac.tab.profile"></span></div>
+      </div>
+
+      <!-- ANALYSE — the shared workbench, minus fact-check: that one needs a knowledge base,
+           and a registered account has none. -->
+      <section class="panel active" id="panel-analyse">
+        <div id="wbHost"></div>
+      </section>
+
+      <!-- TEXT TO SPEECH — the public page's form, signed in: the clip is stored against the
+           account so it comes back in History. -->
+      <section class="panel" id="panel-tts">
+        <div class="card">
+          <h3 data-i18n="tts.heading"></h3>
+          <div class="row">
+            <div>
+              <label for="langSelect" data-i18n="f.language"></label>
+              <select id="langSelect"></select>
+            </div>
+            <div>
+              <!-- The label text lives in its own span because applyI18n rewrites a
+                   [data-i18n] element's whole textContent — the ⓘ appended by the language
+                   note would be wiped on the first language switch. -->
+              <label for="voiceSelect" id="voiceLabel"><span data-i18n="f.voice"></span></label>
+              <div class="inline">
+                <div style="flex:1"><select id="voiceSelect"><option value="" data-i18n="f.defaultvoice"></option></select></div>
+                <button class="ghost" id="previewBtn" data-i18n-title="tts.previewtitle" data-i18n-aria="tts.previewtitle">▶</button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <label for="ttsText" data-i18n="f.text"></label>
+            <textarea id="ttsText" data-i18n-ph="tts.text_ph"></textarea>
+          </div>
+          <div class="actions"><button class="primary" id="ttsBtn" data-i18n="btn.synth"></button></div>
+          <div class="err" id="ttsErr" aria-live="polite"></div>
+          <div id="ttsPlayer"></div>
+        </div>
+      </section>
+
+      <!-- CONVERT — the public converter, signed in. Same request, same SSE stages; the batch
+           is kept for the account's retention window instead of the anonymous two hours, and
+           the ZIP is fetched with the session header (the download route is scope-checked). -->
+      <section class="panel" id="panel-convert">
+        <div class="card">
+          <h3 data-i18n="cv.heading"></h3>
+          <label data-i18n="cv.files"></label>
+          <div class="drop" id="cvDrop">
+            <input type="file" id="cvFiles" multiple accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" data-i18n-aria="cv.files" />
+            <div class="drop-title" data-i18n="cv.drop.title"></div>
+            <div class="drop-sub" data-i18n="cv.drop.sub"></div>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <div>
+              <!-- Empty data-tip on purpose: mountTips wires the ⓘ at load and keeps it hidden
+                   until cvNote() has a format to describe. -->
+              <label for="cvFormat"><span data-i18n="cv.format"></span><button class="tip" data-tip=""></button></label>
+              <select id="cvFormat"></select>
+            </div>
+          </div>
+          <div id="cvList"></div>
+          <div class="imp-prog hidden" id="cvProg">
+            <div class="imp-prog-head">
+              <span id="cvProgLabel" aria-live="polite"></span>
+              <span class="imp-prog-pct" id="cvProgPct" aria-hidden="true"></span>
+            </div>
+            <div class="sc-bar" id="cvProgBar" role="progressbar" aria-labelledby="cvProgLabel"
+                 aria-valuemin="0" aria-valuemax="100"><span></span></div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="cvRun" data-i18n="cv.run" disabled></button>
+            <button class="ghost hidden" id="cvCancel" data-i18n="btn.cancel"></button>
+            <button class="ghost hidden" id="cvDownload" data-i18n="cv.download"></button>
+            <button class="ghost hidden" id="cvClear" data-i18n="cv.clear"></button>
+          </div>
+          <div class="msg" id="cvSummary" aria-live="polite"></div>
+          <div class="err" id="cvErr"></div>
+          <div class="hint" id="cvTtl"></div>
+        </div>
+      </section>
+
+      <!-- HISTORY — four lists, one per thing this account can produce. -->
+      <section class="panel" id="panel-history">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h3 style="margin:0" data-i18n="ac.hist.recordings"></h3>
+            <button class="ghost" id="reloadHist" data-i18n="btn.refresh"></button>
+          </div>
+          <div id="recList" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="ac.hist.summaries"></h3>
+          <div id="sumList" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="ac.hist.tts"></h3>
+          <div id="ttsList" style="margin-top:12px"></div>
+          <div id="ttsHistPlayer"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="ac.hist.conversions"></h3>
+          <div id="convList" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- RUBRIC — the personal scoring rubric. Same editor as the workspace portal; it starts
+           as a copy of the operator's default until this account saves its own. -->
+      <section class="panel" id="panel-rubric">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline; margin-bottom:14px">
+            <h3 style="margin:0" data-i18n="sc.heading"></h3>
+            <span class="hint" id="scVersion"></span>
+          </div>
+          <p class="msg hidden" id="scDefault" data-i18n="ac.rub.default" style="color:var(--pending); margin-top:0"></p>
+          <div id="scDims"></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <div class="inline" style="gap:8px">
+              <button class="ghost" id="scAdd" data-i18n="sc.adddim"></button>
+              <button class="ghost" id="scNormalize" data-i18n="sc.normalize"></button>
+            </div>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="scSum">0</b>% <span id="scSumFlag"></span></span>
+          </div>
+          <hr class="sep" />
+          <label data-i18n="sc.rubric"></label>
+          <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
+          <div class="actions" style="justify-content:space-between">
+            <button class="primary" id="scSave" data-i18n="sc.save"></button>
+            <button class="ghost" id="scReset" data-i18n="ac.rub.reset"></button>
+          </div>
+          <div class="msg" id="scMsg" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- PROFILE — who this account is, and what is left of today. -->
+      <section class="panel" id="panel-profile">
+        <div class="card">
+          <h3 data-i18n="ac.pf.heading"></h3>
+          <label data-i18n="ac.f.email"></label>
+          <input type="email" id="pfEmail" disabled />
+          <label for="pfName" data-i18n="ac.f.name"></label>
+          <input type="text" id="pfName" autocomplete="name" />
+          <div class="actions"><button class="primary" id="pfSave" data-i18n="btn.save"></button></div>
+          <div class="msg" id="pfMsg" aria-live="polite"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="ac.pf.pw"></h3>
+          <form id="pwForm" autocomplete="on">
+            <label for="pwCur" data-i18n="ac.f.curpw"></label>
+            <input type="password" id="pwCur" autocomplete="current-password" />
+            <label for="pwNew" data-i18n="ac.f.newpw"></label>
+            <input type="password" id="pwNew" autocomplete="new-password" />
+            <label for="pwNew2" data-i18n="ac.f.pw2"></label>
+            <input type="password" id="pwNew2" autocomplete="new-password" />
+            <div class="actions"><button type="submit" class="primary" id="pwSave" data-i18n="ac.pf.pw.change"></button></div>
+          </form>
+          <div class="msg" id="pwMsg" aria-live="polite"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h3 style="margin:0" data-i18n="ac.pf.usage"></h3>
+            <button class="ghost" id="reloadUsage" data-i18n="btn.refresh"></button>
+          </div>
+          <div id="usageBox" style="margin-top:8px"></div>
+          <div id="featBox" style="margin-top:14px"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <div id="modalHost"></div>
+
+  <script>
+    /* ==================================================================================
+       account.html — the REGISTERED-USER page (design-v2.md §13.5).
+
+       Everything a personal account can do: the shared workbench (score / semantic /
+       summarise — no fact-check, that needs a knowledge base), text to speech, the audio
+       converter, its own history, its own scoring rubric and its profile.
+
+       The session token lives in sessionStorage under `cq_user_token` — per tab, on purpose,
+       exactly like the workspace portal: a signed-in console on a shared machine must not
+       follow into every new tab. It is sent as `Authorization: Bearer <token>`, the same
+       header the tenant portal uses, and the server decides which of the two kinds it is.
+       ================================================================================== */
+    const API = CQ.API, t = CQ.t;
+    CQ.mountHeader({ tag: 'Account', who: 'who', nav: [
+      { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
+      { i18n: 'nav.public', href: 'index.html' },
+    ]});
+
+    let TOKEN = sessionStorage.getItem('cq_user_token') || '';
+    let ME = null;              // {id, email, display_name}
+    let LIMITS = null;          // the /limits snapshot: caps, usage today, feature switches
+    let wb = null;              // CQ.Workbench, mounted once the account is known
+    const $ = id => document.getElementById(id);
+    const authH = (extra = {}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
+    const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const feat = name => !LIMITS || !LIMITS.features || LIMITS.features[name] !== false;
+
+    /* An expired token mid-session: one gate, one message, instead of every panel quietly
+       failing in its own way. Every API caller funnels through apiFetch. */
+    function sessionExpired() {
+      TOKEN = ''; sessionStorage.removeItem('cq_user_token');
+      if (wb) { wb.destroy(); wb = null; }
+      $('app').classList.add('hidden'); $('logout').classList.add('hidden');
+      $('gate').classList.remove('hidden');
+      $('gateMsg').className = 'msg err'; $('gateMsg').textContent = t('session.expired');
+      document.title = 'CommuniQ — ' + t('ac.gate.heading');
+      $('who').textContent = '';
+      gateMode('signin'); $('sEmail').focus();
+    }
+    async function apiFetch(url, init) {
+      const r = await fetch(url, init);
+      if (r.status === 401 && TOKEN) sessionExpired();
+      return r;
+    }
+    /* Read a JSON list defensively: an error body or an expired-token payload must never
+       reach .map / .length. Callers get an array or null (null == the request failed). */
+    async function listJson(url) {
+      try {
+        const r = await apiFetch(url, { headers: authH() });
+        if (!r.ok) return null;
+        const d = await r.json().catch(() => null);
+        return Array.isArray(d) ? d : null;
+      } catch { return null; }
+    }
+
+    const fmtWhen = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString(); };
+    function fmtDur(s) {
+      const n = Number(s); if (!isFinite(n) || n <= 0) return '—';
+      const m = Math.floor(n / 60); return m + ':' + String(Math.round(n % 60)).padStart(2, '0');
+    }
+    function human(bytes) {
+      const n = Number(bytes) || 0;
+      if (n >= 1048576) return (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB';
+      if (n >= 1024) return Math.round(n / 1024) + ' KB';
+      return n + ' B';
+    }
+    /* Every download on this page is scope-checked by the server, so a plain <a href> would
+       arrive without the session header and get the same 404 as somebody else's token. Fetch
+       it with the header, hand the browser a blob, and let the object URL go afterwards. */
+    async function authedDownload(path, fallbackName) {
+      try {
+        const r = await apiFetch(API + path, { headers: authH() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error((d && d.detail) || t('toast.error')); }
+        const blob = await r.blob();
+        const cd = r.headers.get('Content-Disposition') || '';
+        const m = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = decodeURIComponent((m && m[1]) || fallbackName || 'download');
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (e) { CQ.toast(e.message, 'err'); }
+    }
+
+    /* ---------------- gate: sign in / create account ---------------- */
+    function gateMode(which) {
+      document.querySelectorAll('#gateTabs .subtab').forEach(s => s.classList.toggle('active', s.dataset.g === which));
+      $('signinForm').classList.toggle('hidden', which !== 'signin');
+      $('registerForm').classList.toggle('hidden', which !== 'register');
+      $('gateMsg').textContent = ''; $('gateMsg').className = 'msg err';
+    }
+    document.querySelectorAll('#gateTabs .subtab').forEach(s =>
+      s.addEventListener('click', () => { gateMode(s.dataset.g); (s.dataset.g === 'signin' ? $('sEmail') : $('rEmail')).focus(); }));
+    $('sPwToggle').addEventListener('click', () => {
+      const showing = $('sPw').type === 'text';
+      $('sPw').type = showing ? 'password' : 'text';
+      $('sPwToggle').setAttribute('aria-pressed', String(!showing));
+    });
+
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    async function gateSubmit(btn, labelKey, run) {
+      $('gateMsg').textContent = ''; $('gateMsg').className = 'msg err';
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t(labelKey) + '…';
+      try { await run(); }
+      catch (e) { $('gateMsg').textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = t(labelKey); }
+    }
+
+    $('signinForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const email = $('sEmail').value.trim(), pw = $('sPw').value;
+      if (!email || !pw) { $('gateMsg').textContent = t('login.empty'); (!email ? $('sEmail') : $('sPw')).focus(); return; }
+      gateSubmit($('signinBtn'), 'btn.signin', async () => {
+        const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: email, password: pw }) });
+        const d = await CQ.readResp(r).catch(err => { throw (r.status === 401 ? new Error(t('login.failed')) : err); });
+        // The one login endpoint serves three kinds of account. An operator or workspace
+        // credential is not the wrong credential, only a different destination — so complete
+        // the sign-in and go there. Telling someone who just typed a correct password to walk
+        // to another page and type it again is a dead end, and it was the ONLY way in for the
+        // operator, whose username this form used to reject outright.
+        if (d.scope === 'admin' || d.scope === 'tenant') {
+          const admin = d.scope === 'admin';
+          sessionStorage.setItem(admin ? 'cq_admin_token' : 'cq_tenant_token', d.token);
+          $('gateMsg').className = 'msg';
+          $('gateMsg').textContent = t(admin ? 'ac.gate.isadmin' : 'ac.gate.istenant');
+          CQ.toast(t('toast.welcome'), 'ok');
+          location.href = admin ? 'admin.html' : 'tenant.html';
+          return;
+        }
+        TOKEN = d.token; sessionStorage.setItem('cq_user_token', TOKEN);
+        enter(d.user); CQ.toast(t('toast.welcome'), 'ok');
+      });
+    });
+
+    $('registerForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const email = $('rEmail').value.trim(), pw = $('rPw').value, name = $('rName').value.trim();
+      // Checked here as well as on the server, so the two rules a person can get wrong are
+      // reported in their own language instead of the API's English.
+      if (!EMAIL_RE.test(email)) { $('gateMsg').textContent = t('ac.reg.bademail'); $('rEmail').focus(); return; }
+      if (pw.length < 8) { $('gateMsg').textContent = t('ac.reg.shortpw'); $('rPw').focus(); return; }
+      gateSubmit($('registerBtn'), 'ac.gate.register', async () => {
+        const r = await fetch(`${API}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: pw, display_name: name }) });
+        // 403 here means the operator closed sign-ups; 409 means the address is taken. Both
+        // arrive as English detail strings, so they are translated rather than echoed.
+        const d = await CQ.readResp(r).catch(err => {
+          if (r.status === 403) throw new Error(t('ac.reg.closed'));
+          if (r.status === 409) throw new Error(t('ac.reg.dup'));
+          throw err;
+        });
+        TOKEN = d.token; sessionStorage.setItem('cq_user_token', TOKEN);
+        enter(d.user); CQ.toast(t('ac.reg.done'), 'ok');
+      });
+    });
+
+    $('logout').addEventListener('click', e => {
+      e.preventDefault(); sessionStorage.removeItem('cq_user_token'); location.reload();
+    });
+
+    /* ---------------- entering the app ---------------- */
+    function whoLabel() { return (ME && (ME.display_name || ME.email)) || ''; }
+    async function enter(user) {
+      ME = user || ME;
+      $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
+      $('who').textContent = whoLabel();
+      document.title = 'CommuniQ — ' + (whoLabel() || t('ac.tab.profile'));
+      $('pfEmail').value = (ME && ME.email) || '';
+      $('pfName').value = (ME && ME.display_name) || '';
+      await loadLimits();
+      mountWorkbench();
+      CQ.enhanceSelects($('panel-tts')); CQ.enhanceSelects($('panel-convert'));
+      loadTts(); cvLoadFormats();
+      showTab(firstVisibleTab());
+    }
+
+    function firstVisibleTab() {
+      const tab = document.querySelector('#acTabs .tab:not(.hidden)');
+      return tab ? tab.dataset.tab : 'profile';
+    }
+    function showTab(name) {
+      const tab = document.querySelector(`#acTabs .tab[data-tab="${name}"]`);
+      if (!tab || tab.classList.contains('hidden')) name = firstVisibleTab();
+      document.querySelectorAll('#acTabs .tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+      document.querySelectorAll('#app .panel').forEach(x => x.classList.toggle('active', x.id === 'panel-' + name));
+      if (name === 'history') loadHistory();
+      if (name === 'rubric') loadRubric();
+      if (name === 'profile') { paintUsage(); loadLimits(); }
+    }
+    document.querySelectorAll('#acTabs .tab').forEach(tb => tb.addEventListener('click', () => showTab(tb.dataset.tab)));
+
+    /* The workbench without fact-check: a registered account has no knowledge base, and the
+       server answers 403 on that route for exactly that reason. The other three analysers are
+       feature switches the operator can turn off per tier, so the tab list follows /limits. */
+    function wbFeatures() { return ['score', 'semantic', 'summarise'].filter(feat); }
+    function mountWorkbench() {
+      if (!CQ.Workbench || !$('wbHost')) return;
+      if (wb) { wb.destroy(); wb = null; }
+      if (!wbFeatures().length) return;
+      wb = CQ.Workbench($('wbHost'), {
+        api: API, headers: authH, fetch: apiFetch,
+        features: wbFeatures(),
+        rubricHref: '#rubric',
+        sentimentConfig: null,          // the tone guidance is the operator's, not this account's
+        onUnauthorized: sessionExpired,
+      });
+    }
+    // The workbench's "edit the rubric" link is a same-page anchor here, not a navigation.
+    $('wbHost').addEventListener('click', e => {
+      const a = e.target && e.target.closest ? e.target.closest('a[href="#rubric"]') : null;
+      if (a) { e.preventDefault(); showTab('rubric'); }
+    });
+
+    /* ---------------- limits: the banner, the tabs, the meters ---------------- */
+    async function loadLimits() {
+      try {
+        const r = await apiFetch(`${API}/limits`, { headers: authH() });
+        if (!r.ok) return;
+        const d = await r.json().catch(() => null);
+        if (!d || typeof d !== 'object') return;
+        LIMITS = d;
+      } catch { return; }
+      paintBanner(); paintTabs(); paintUsage();
+    }
+    /* `active:false` is the operator switching this account off. Nothing is hidden — the
+       tabs still explain what the account HAD — but the reason every button now fails is
+       stated once, at the top, instead of arriving as a 403 per click. */
+    function paintBanner() {
+      const el = $('acBanner');
+      if (LIMITS && LIMITS.active === false) { el.className = 'quota warn show'; el.textContent = t('ac.disabled'); }
+      else { el.className = 'quota'; el.textContent = ''; }
+    }
+    function paintTabs() {
+      const vis = { analyse: feat('analyze') && wbFeatures().length > 0, tts: feat('tts'),
+                    convert: feat('convert'), history: true, rubric: feat('score'), profile: true };
+      document.querySelectorAll('#acTabs .tab').forEach(tb => tb.classList.toggle('hidden', vis[tb.dataset.tab] === false));
+      const active = document.querySelector('#acTabs .tab.active');
+      if (!active || active.classList.contains('hidden')) showTab(firstVisibleTab());
+    }
+    function usageRow(labelKey, used, max) {
+      const u = Number(used) || 0, m = Number(max) || 0;
+      const right = m > 0 ? t('ac.pf.of').replace('{used}', u).replace('{max}', m) : `${u} · ${t('ac.pf.nolimit')}`;
+      const w = m > 0 ? Math.min(100, Math.round((u / m) * 100)) : 0;
+      const cls = m > 0 && u >= m ? ' bad' : m > 0 && u / m >= 0.8 ? ' mid' : ' good';
+      return `<div class="use-row"><div class="use-head"><b>${esc(t(labelKey))}</b><span>${esc(right)}</span></div>
+        <div class="sc-bar${cls}"><span style="width:${w}%"></span></div></div>`;
+    }
+    function paintUsage() {
+      const box = $('usageBox'); if (!box) return;
+      if (!LIMITS) { box.innerHTML = `<div class="empty">${esc(t('err.unavailable'))}</div>`; $('featBox').innerHTML = ''; return; }
+      const used = LIMITS.used || {};
+      box.innerHTML = usageRow('quota.analyses', used.analyses, LIMITS.max_analyses_per_day)
+        + usageRow('quota.clips', used.tts, LIMITS.max_tts_per_day)
+        + usageRow('quota.conversions', used.conversions, LIMITS.max_conversions_per_day)
+        + (Number(LIMITS.max_audio_mb) > 0
+            ? `<div class="use-row"><div class="use-head"><b>${esc(t('ac.pf.maxupload'))}</b><span>${Number(LIMITS.max_audio_mb)} MB</span></div></div>` : '');
+      const map = [['analyze', 'tab.analyze'], ['tts', 'tab.tts'], ['convert', 'tab.convert'],
+                   ['score', 'wb.tab.score'], ['semantic', 'wb.tab.semantic'], ['summarise', 'wb.tab.summarise']];
+      $('featBox').innerHTML = `<div class="hint" style="margin-bottom:6px">${esc(t('ac.pf.features'))}</div>`
+        + map.map(([k, key]) => `<span class="pill ${feat(k) ? 'on' : 'off'}">${esc(t(key))}</span> `).join('');
+    }
+    $('reloadUsage').addEventListener('click', loadLimits);
+
+    /* ---------------- History ---------------- */
+    $('reloadHist').addEventListener('click', loadHistory);
+    function loadHistory() { loadRecordings(); loadSummaries(); loadTtsHistory(); loadConversions(); }
+
+    function emptyOr(box, rows, emptyKey) {
+      if (rows === null) { box.innerHTML = `<div class="msg err">${esc(t('err.unavailable'))}</div>`; return false; }
+      if (!rows.length) { box.innerHTML = `<div class="empty">${esc(t(emptyKey))}</div>`; return false; }
+      return true;
+    }
+    async function loadRecordings() {
+      const box = $('recList'), rows = await listJson(`${API}/recordings?limit=25`);
+      if (!emptyOr(box, rows, 'ac.hist.none.rec')) return;
+      const dot = (on, key) => `<span class="pill ${on ? 'ready' : 'notinkb'}">${esc(t(key))}</span>`;
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${esc(t('th.file'))}</th><th>${esc(t('ac.th.source'))}</th><th class="hide-md">${esc(t('th.lang'))}</th>
+        <th class="hide-md">${esc(t('ac.th.duration'))}</th><th>${esc(t('ac.th.ran'))}</th><th>${esc(t('th.when'))}</th>
+        </tr></thead><tbody>` + rows.map(r => {
+          const ran = r.ran || {};
+          return `<tr class="act-row" data-id="${esc(r.id)}">
+            <td>${esc(r.filename || t('ac.hist.pasted'))}</td>
+            <td>${esc(t(r.source === 'text' ? 'ac.src.text' : 'ac.src.audio'))}</td>
+            <td class="hide-md">${esc(r.language || '—')}</td>
+            <td class="hide-md">${esc(fmtDur(r.duration_s))}</td>
+            <td><span class="ran-dots">${dot(ran.score, 'wb.tab.score')}${dot(ran.semantic, 'wb.tab.semantic')}</span></td>
+            <td class="hint">${esc(fmtWhen(r.created_at))}</td></tr>`;
+        }).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openRecording(tr.dataset.id)));
+    }
+    async function loadSummaries() {
+      const box = $('sumList'), rows = await listJson(`${API}/summaries?limit=25`);
+      if (!emptyOr(box, rows, 'ac.hist.none.sum')) return;
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${esc(t('ac.th.summary'))}</th><th>${esc(t('ac.th.calls'))}</th><th class="hide-md">${esc(t('th.lang'))}</th>
+        <th>${esc(t('th.when'))}</th></tr></thead><tbody>` + rows.map(r => `<tr class="act-row" data-id="${esc(r.id)}">
+          <td>${esc((r.short_summary || '').slice(0, 140) || '—')}</td>
+          <td>${Number(r.call_count) || 0}</td>
+          <td class="hide-md">${esc(r.language || '—')}</td>
+          <td class="hint">${esc(fmtWhen(r.created_at))}</td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openSummary(tr.dataset.id)));
+    }
+    function openRecording(id) {
+      if (!wb) { CQ.toast(t('ac.hist.noanalyse'), 'err'); return; }
+      showTab('analyse'); wb.open({ id });
+    }
+    function openSummary(id) {
+      if (!wb) { CQ.toast(t('ac.hist.noanalyse'), 'err'); return; }
+      showTab('analyse'); wb.openSummary({ id });
+    }
+
+    let ttsHistPlayer = null, ttsHistSrc = '';
+    async function loadTtsHistory() {
+      const box = $('ttsList'), rows = await listJson(`${API}/tts/history?limit=25`);
+      if (!emptyOr(box, rows, 'ac.hist.none.tts')) return;
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${esc(t('f.text'))}</th><th class="hide-md">${esc(t('th.lang'))}</th><th>${esc(t('th.when'))}</th><th></th>
+        </tr></thead><tbody>` + rows.map(r => `<tr>
+          <td>${esc(r.text || '—')}</td>
+          <td class="hide-md">${esc(r.language_code || '—')}</td>
+          <td class="hint">${esc(fmtWhen(r.created_at))}</td>
+          <td>${r.has_audio && r.audio_url
+            ? `<button class="act" data-play="${esc(r.audio_url)}" title="${esc(t('ac.hist.play'))}" aria-label="${esc(t('ac.hist.play'))}">▶</button>`
+            : `<span class="hint">${esc(t('ac.hist.gone'))}</span>`}</td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('[data-play]').forEach(b => b.addEventListener('click', () => playClip(b.dataset.play, b)));
+    }
+    /* The clip route is scope-checked, so the <audio> cannot fetch it by URL — the bytes come
+       down with the session header once and play from an object URL. */
+    async function playClip(path, btn) {
+      if (ttsHistSrc === path && ttsHistPlayer) { ttsHistPlayer.toggle(); return; }
+      btn.disabled = true;
+      try {
+        const r = await apiFetch(API + path, { headers: authH() });
+        if (!r.ok) throw new Error(t('ac.hist.gone'));
+        const url = URL.createObjectURL(await r.blob());
+        ttsHistPlayer = CQ.player($('ttsHistPlayer'), url, { name: 'speech.mp3' }); ttsHistSrc = path;
+      } catch (e) { CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; }
+    }
+
+    /* A batch's remaining life is read from its OWN expires_at, never from the format
+       catalogue's TTL constant — that number is the anonymous two hours and would be a lie
+       on an account whose batches live for days. */
+    function expiryLabel(iso) {
+      if (!iso) return '';
+      const ms = new Date(iso).getTime() - Date.now();
+      if (!isFinite(ms)) return '';
+      if (ms <= 0) return t('ac.hist.expired');
+      const h = Math.floor(ms / 3600000);
+      if (h >= 24) return t('ac.hist.left.d').replace('{n}', Math.floor(h / 24));
+      if (h >= 1) return t('ac.hist.left.h').replace('{n}', h);
+      return t('ac.hist.left.m').replace('{n}', Math.max(1, Math.round(ms / 60000)));
+    }
+    async function loadConversions() {
+      const box = $('convList'), rows = await listJson(`${API}/convert/history?limit=25`);
+      if (!emptyOr(box, rows, 'ac.hist.none.conv')) return;
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${esc(t('cv.format'))}</th><th>${esc(t('ac.th.files'))}</th><th class="hide-md">${esc(t('th.size'))}</th>
+        <th>${esc(t('th.when'))}</th><th>${esc(t('ac.th.expires'))}</th><th></th></tr></thead><tbody>`
+        + rows.map(r => `<tr>
+          <td>${esc(r.format || '—')}</td>
+          <td>${Number(r.file_count) || 0}</td>
+          <td class="hide-md">${esc(human(r.total_bytes))}</td>
+          <td class="hint">${esc(fmtWhen(r.created_at))}</td>
+          <td class="hint">${esc(expiryLabel(r.expires_at) || '—')}</td>
+          <td>${r.download_path
+            ? `<button class="act" data-dl="${esc(r.download_path)}" title="${esc(t('cv.download'))}" aria-label="${esc(t('cv.download'))}">⭳</button>`
+            : `<span class="hint">${esc(t('ac.hist.expired'))}</span>`}</td></tr>`).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('[data-dl]').forEach(b => b.addEventListener('click', () => authedDownload(b.dataset.dl, 'converted.zip')));
+    }
+
+    /* ---------------- Rubric (personal scoring rubric) ---------------- */
+    let scDims = [], scLoaded = false, scVer = null, scIsDefault = false;
+    function scShowVersion() {
+      $('scVersion').textContent = scIsDefault ? t('ac.rub.defaultver') : (scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'));
+      $('scDefault').classList.toggle('hidden', !scIsDefault);
+      $('scReset').classList.toggle('hidden', scIsDefault);   // nothing to reset to yet
+    }
+    function scRow(d, i) {
+      return `<div class="sc-edit" data-i="${i}">
+        <div class="inline" style="justify-content:space-between; margin-bottom:8px">
+          <span class="sc-edit-num">${i + 1}</span>
+          <button class="act danger sc-del" data-i="${i}" title="${esc(t('sc.remove'))}" aria-label="${esc(t('sc.remove'))}">🗑</button>
+        </div>
+        <div class="row">
+          <div style="flex:2"><label>${esc(t('sc.dname'))}</label><input class="sc-name" value="${esc(d.name || '')}" placeholder="${esc(t('sc.dname.ph'))}"/></div>
+          <div class="w-num"><label>${esc(t('sc.dweight'))}</label><input class="sc-weight" type="number" min="0" step="1" value="${d.weight ?? 0}"/></div>
+        </div>
+        <label>${esc(t('sc.ddesc'))}</label><input class="sc-desc" value="${esc(d.description || '')}"/>
+        <label>${esc(t('sc.dguide'))}</label><textarea class="sc-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}">${esc(d.guidance || '')}</textarea>
+      </div>`;
+    }
+    function scReadDom() {
+      scDims = [...$('scDims').querySelectorAll('.sc-edit[data-i]')].map(el => ({
+        key: (scDims[+el.dataset.i] || {}).key,
+        name: el.querySelector('.sc-name').value.trim(),
+        weight: parseFloat(el.querySelector('.sc-weight').value) || 0,
+        description: el.querySelector('.sc-desc').value.trim(),
+        guidance: el.querySelector('.sc-guide').value.trim(),
+      }));
+    }
+    function scRenderDims() {
+      const box = $('scDims');
+      box.innerHTML = scDims.length ? scDims.map(scRow).join('') : `<div class="empty">${esc(t('sc.nodims'))}</div>`;
+      box.querySelectorAll('.sc-del').forEach(b => b.addEventListener('click', () => { scReadDom(); scDims.splice(+b.dataset.i, 1); scRenderDims(); }));
+      box.querySelectorAll('.sc-weight').forEach(inp => inp.addEventListener('input', scSum));
+      scSum();
+      CQ.autogrowBind(box, '.sc-guide');
+    }
+    function scSum() {
+      let s = 0; $('scDims').querySelectorAll('.sc-weight').forEach(i => s += parseFloat(i.value) || 0);
+      s = Math.round(s * 10) / 10;
+      const ok = Math.abs(s - 100) <= 0.5;
+      $('scSum').textContent = s; $('scSum').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      $('scSumFlag').textContent = ok ? '✓' : '✗'; $('scSumFlag').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      return ok;
+    }
+    $('scAdd').addEventListener('click', () => { scReadDom(); scDims.push({ name: '', weight: 0, description: '', guidance: '' }); scRenderDims(); });
+    // Rescale weights proportionally so they total exactly 100% (drift goes on the last one).
+    $('scNormalize').addEventListener('click', () => {
+      scReadDom(); const n = scDims.length; if (!n) return;
+      const total = scDims.reduce((a, d) => a + (d.weight || 0), 0);
+      if (total <= 0) scDims.forEach(d => d.weight = Math.round(100 / n));
+      else scDims.forEach(d => d.weight = Math.round((d.weight / total) * 100));
+      scDims[n - 1].weight += 100 - scDims.reduce((a, d) => a + d.weight, 0);
+      scRenderDims();
+    });
+    function scApply(cfg) {
+      scDims = (Array.isArray(cfg.dimensions) ? cfg.dimensions : []).map(d => ({
+        key: d.key, name: d.name || '', weight: d.weight || 0, description: d.description || '', guidance: d.guidance || '' }));
+      $('scRubric').value = cfg.rubric || '';
+      scVer = cfg.version || null; scIsDefault = cfg.is_default === true || cfg.version === 0;
+      scLoaded = true; scShowVersion(); scRenderDims();
+    }
+    async function loadRubric() {
+      $('scMsg').textContent = ''; $('scMsg').className = 'msg';
+      try { scApply(await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }))); }
+      catch (e) { $('scMsg').className = 'msg err'; $('scMsg').textContent = e.message; }
+    }
+    $('scSave').addEventListener('click', async () => {
+      scReadDom();
+      if (!scDims.length) { $('scMsg').className = 'msg err'; $('scMsg').textContent = t('sc.needone'); return; }
+      if (scDims.some(d => !d.name)) { $('scMsg').className = 'msg err'; $('scMsg').textContent = t('sc.needname'); return; }
+      const total = Math.round(scDims.reduce((a, d) => a + (d.weight || 0), 0) * 10) / 10;
+      if (Math.abs(total - 100) > 0.5) { $('scMsg').className = 'msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
+      const btn = $('scSave'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        scApply(await CQ.readResp(await apiFetch(`${API}/scoring/config`, { method: 'PUT',
+          headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) })));
+        $('scMsg').className = 'msg ok'; $('scMsg').textContent = t('sc.saved'); CQ.toast(t('sc.saved'), 'ok');
+      } catch (e) { $('scMsg').className = 'msg err'; $('scMsg').textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = t('sc.save'); }
+    });
+
+    /* Reset throws away a rubric someone may have spent an afternoon on, so the server asks
+       for this account's OWN password again. A brand modal, never a native prompt(). */
+    function askPassword(message, okLabel) {
+      return new Promise(resolve => {
+        const bg = document.createElement('div'); bg.className = 'cq-modal-bg';
+        bg.innerHTML = `<form class="cq-modal" role="dialog" aria-modal="true">
+          <p></p>
+          <label for="askPw">${esc(t('f.password'))}</label>
+          <input type="password" id="askPw" autocomplete="current-password" />
+          <div class="actions"><button type="button" class="ghost" data-c>${esc(t('btn.cancel'))}</button>
+          <button type="submit" class="danger">${esc(okLabel)}</button></div></form>`;
+        bg.querySelector('p').textContent = message;
+        document.body.appendChild(bg);
+        const done = v => { bg.remove(); resolve(v); };
+        bg.querySelector('[data-c]').addEventListener('click', () => done(null));
+        bg.querySelector('form').addEventListener('submit', e => { e.preventDefault(); done(bg.querySelector('#askPw').value); });
+        bg.addEventListener('click', e => { if (e.target === bg) done(null); });
+        bg.querySelector('#askPw').focus();
+      });
+    }
+    $('scReset').addEventListener('click', async () => {
+      const pw = await askPassword(t('ac.rub.reset.ask'), t('ac.rub.reset'));
+      if (pw === null) return;
+      $('scMsg').className = 'msg'; $('scMsg').textContent = '';
+      if (!pw) { $('scMsg').className = 'msg err'; $('scMsg').textContent = t('ac.rub.reset.needpw'); return; }
+      const btn = $('scReset'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await apiFetch(`${API}/scoring/reset`, { method: 'POST',
+          headers: authH({ 'Content-Type': 'application/json' }), body: JSON.stringify({ password: pw }) });
+        const d = await CQ.readResp(r).catch(err => { throw (r.status === 403 ? new Error(t('ac.rub.reset.badpw')) : err); });
+        scApply(d);
+        $('scMsg').className = 'msg ok'; $('scMsg').textContent = t('ac.rub.reset.done'); CQ.toast(t('ac.rub.reset.done'), 'ok');
+      } catch (e) { $('scMsg').className = 'msg err'; $('scMsg').textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = t('ac.rub.reset'); }
+    });
+
+    /* ---------------- Profile ---------------- */
+    $('pfSave').addEventListener('click', async () => {
+      const m = $('pfMsg'); m.className = 'msg'; m.textContent = '';
+      const btn = $('pfSave'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const d = await CQ.readResp(await apiFetch(`${API}/auth/me`, { method: 'PUT',
+          headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ display_name: $('pfName').value.trim() }) }));
+        ME = d.user || ME;
+        $('who').textContent = whoLabel(); document.title = 'CommuniQ — ' + (whoLabel() || t('ac.tab.profile'));
+        m.className = 'msg ok'; m.textContent = t('ac.pf.saved'); CQ.toast(t('ac.pf.saved'), 'ok');
+      } catch (e) { m.className = 'msg err'; m.textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = t('btn.save'); }
+    });
+    $('pwForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const m = $('pwMsg'); m.className = 'msg'; m.textContent = '';
+      const cur = $('pwCur').value, a = $('pwNew').value, b = $('pwNew2').value;
+      if (!cur) { m.className = 'msg err'; m.textContent = t('ac.pf.pw.needcur'); $('pwCur').focus(); return; }
+      if (a.length < 8) { m.className = 'msg err'; m.textContent = t('ac.reg.shortpw'); $('pwNew').focus(); return; }
+      if (a !== b) { m.className = 'msg err'; m.textContent = t('ac.pf.pw.mismatch'); $('pwNew2').focus(); return; }
+      const btn = $('pwSave'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await apiFetch(`${API}/auth/me`, { method: 'PUT', headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ current_password: cur, new_password: a }) });
+        await CQ.readResp(r).catch(err => { throw (r.status === 403 ? new Error(t('ac.pf.pw.badcur')) : err); });
+        $('pwCur').value = ''; $('pwNew').value = ''; $('pwNew2').value = '';
+        m.className = 'msg ok'; m.textContent = t('ac.pf.pw.done'); CQ.toast(t('ac.pf.pw.done'), 'ok');
+      } catch (err) { m.className = 'msg err'; m.textContent = err.message; }
+      finally { btn.disabled = false; btn.textContent = t('ac.pf.pw.change'); }
+    });
+
+    /* ---------------- Text to speech (single reusable player) ---------------- */
+    let ttsLoaded = false, ttsPlayer = null, curSrc = null, langNoteRefresh = null;
+    const previewMap = {};
+    async function loadTts() {
+      if (ttsLoaded) return;
+      try { const r = await fetch(`${API}/languages`); if (r.ok) {
+        // The API is the source of truth for WHICH languages exist; the wording is ours. Its
+        // name/note are English-only, so they are the fallback, not the display text.
+        const langs = await r.json(); const sel = $('langSelect');
+        const fallback = {};
+        (Array.isArray(langs) ? langs : []).forEach(l => {
+          fallback[l.code] = l.note || '';
+          const nameKey = 'lang.' + l.code, trName = t(nameKey);
+          const o = document.createElement('option'); o.value = l.code;
+          o.textContent = (trName === nameKey ? l.name : trName); sel.appendChild(o);
+        });
+        const has = code => [...sel.options].some(o => o.value === code);
+        let want = ''; try { want = sessionStorage.getItem('cq_tts_lang') || ''; } catch {}
+        if (want && has(want)) sel.value = want;
+        sel.addEventListener('change', () => { try { sessionStorage.setItem('cq_tts_lang', sel.value); } catch {} });
+        CQ.syncSelect(sel);
+        // Hung off the Voice label because it is a warning about the VOICE: on Georgian,
+        // moving off the default voice is what produces English-accented fake Georgian.
+        const showNote = () => {
+          const label = $('voiceLabel'); if (!label) return;
+          const key = 'lang.note.' + sel.value, trn = t(key);
+          if (trn !== key) CQ.tip(label, trn, { i18n: key });
+          else CQ.tip(label, fallback[sel.value] || '');
+        };
+        sel.addEventListener('change', showNote); showNote();
+        langNoteRefresh = showNote;
+      } } catch {}
+      try { const r = await fetch(`${API}/voices`); if (r.ok) {
+        const voices = await r.json(); const sel = $('voiceSelect');
+        if (Array.isArray(voices)) voices.forEach(v => { if (v.preview_url) previewMap[v.voice_id] = v.preview_url;
+          const o = document.createElement('option'); o.value = v.voice_id;
+          o.textContent = (v.name || v.voice_id || '') + (v.category ? ` (${v.category})` : ''); sel.appendChild(o); });
+        CQ.syncSelect(sel);
+      } } catch {}
+      ttsLoaded = true;
+    }
+    function playInto(url, name) {
+      const box = $('ttsPlayer');
+      if (curSrc === url && ttsPlayer) { ttsPlayer.toggle(); return; }
+      ttsPlayer = CQ.player(box, url, { name }); curSrc = url;
+    }
+    $('previewBtn').addEventListener('click', async () => {
+      const err = $('ttsErr'); err.textContent = '';
+      const voice_id = $('voiceSelect').value;
+      if (!voice_id) { err.textContent = t('tts.pickvoice'); return; }
+      // The catalogue's own preview clip costs nothing — no synthesis, no quota unit.
+      if (previewMap[voice_id]) { playInto(previewMap[voice_id], 'preview.mp3'); return; }
+      const btn = $('previewBtn'); btn.disabled = true; btn.textContent = '…';
+      try {
+        const language_code = $('langSelect').value || undefined;
+        const r = await apiFetch(`${API}/tts`, { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ text: 'Hello.', voice_id, language_code }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error((d && d.detail) || t('tts.previewfail')); }
+        playInto(URL.createObjectURL(await r.blob()), 'preview.mp3');
+      } catch (e) { err.textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = '▶'; loadLimits(); }
+    });
+    $('ttsBtn').addEventListener('click', async () => {
+      const text = $('ttsText').value.trim();
+      const err = $('ttsErr'); err.textContent = '';
+      if (!text) { err.textContent = t('tts.needtext'); return; }
+      const btn = $('ttsBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('btn.synth') + '…';
+      try {
+        const voice_id = $('voiceSelect').value || undefined;
+        const language_code = $('langSelect').value || undefined;
+        const r = await apiFetch(`${API}/tts`, { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ text, voice_id, language_code }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error((d && d.detail) || t('toast.error')); }
+        playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
+      } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = t('btn.synth'); loadLimits(); }
+    });
+
+    /* ---------------- Audio converter -------------------------------------------------
+       The public page's converter, signed in. One request per batch over XMLHttpRequest with
+       ?stream=1 — the same shape and the same reason as there: the request has two long
+       phases (the upload, then the ffmpeg work) and only xhr.upload.onprogress knows how many
+       bytes have really left the browser while only the SSE frames know how many files the
+       server has really finished. The differences here are the session header, an expiry read
+       from the batch's own expires_at, and a download that goes through fetch because the
+       download route is scope-checked. */
+    const cvState = { formats: [], limits: {}, def: '', xhr: null, dl: '', result: null, expires: null };
+    let cvQueue = [];
+    const $c = id => document.getElementById(id);
+
+    function cvLabel(f) { const k = 'cv.f.' + f.id, trn = t(k); return trn === k ? (f.label || f.id) : trn; }
+    function cvDesc(f) { const k = 'cv.f.' + f.id + '.d', trn = t(k); return trn === k ? (f.description || '') : trn; }
+    function cvFind(id) { return cvState.formats.filter(f => f.id === id)[0] || null; }
+    function cvPaintFormats() {
+      const sel = $c('cvFormat'); if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = '';
+      cvState.formats.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = cvLabel(f); sel.appendChild(o); });
+      const want = cvFind(keep) ? keep : (cvFind(cvState.def) ? cvState.def : (cvState.formats[0] || {}).id);
+      if (want) sel.value = want;
+      CQ.syncSelect(sel);
+      cvNote();
+    }
+    function cvNote() {
+      const label = document.querySelector('label[for="cvFormat"]'); if (!label) return;
+      const f = cvFind($c('cvFormat').value);
+      CQ.tip(label, f ? cvDesc(f) : '');
+    }
+    const CV_ST = { queued: ['cv.st.queued', 'pending'], converting: ['cv.st.converting', 'processing'],
+                    done: ['cv.st.done', 'done'], failed: ['cv.st.failed', 'error'] };
+    function cvRender() {
+      const box = $c('cvList'); if (!box) return;
+      const busy = !!cvState.xhr;
+      if (!cvQueue.length) { box.innerHTML = ''; cvButtons(); return; }
+      box.innerHTML = `<div class="table-wrap" style="margin-top:14px"><table>
+        <thead><tr><th>${esc(t('th.file'))}</th><th>${esc(t('th.size'))}</th><th>${esc(t('th.status'))}</th><th></th></tr></thead>
+        <tbody>${cvQueue.map((it, i) => {
+          const s = CV_ST[it.state] || CV_ST.queued;
+          const detail = it.error ? `<div class="cv-why">${esc(it.error)}</div>`
+            : (it.state === 'done' && it.output)
+              ? `<div class="cv-out">→ ${esc(it.output)}${it.bytes == null ? '' : ' · ' + human(it.bytes)}</div>` : '';
+          return `<tr>
+            <td class="cv-file">${esc(it.file.name)}${detail}</td>
+            <td class="cv-size">${esc(human(it.file.size))}</td>
+            <td><span class="pill ${s[1]}">${esc(t(s[0]))}</span></td>
+            <td class="inline">${busy ? '' : `<button class="act danger" data-rm="${i}">✕</button>`}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-rm]').forEach(b => {
+        b.title = t('btn.remove'); b.setAttribute('aria-label', t('btn.remove'));
+        b.addEventListener('click', () => { cvQueue.splice(+b.dataset.rm, 1); cvClearResult(); cvRender(); });
+      });
+      cvButtons();
+    }
+    function cvButtons() {
+      if (!$c('cvRun')) return;
+      const busy = !!cvState.xhr;
+      $c('cvRun').disabled = busy || !cvQueue.length || !cvState.formats.length;
+      $c('cvCancel').classList.toggle('hidden', !busy);
+      $c('cvClear').classList.toggle('hidden', busy || !cvQueue.length);
+      $c('cvDownload').classList.toggle('hidden', busy || !cvState.dl);
+    }
+    // Any change to the list invalidates the ZIP built from the previous one, so the download
+    // goes away with it rather than quietly handing over the last batch.
+    function cvClearResult() {
+      cvState.dl = ''; cvState.expires = null; cvState.result = null; cvPaintResult();
+      cvQueue.forEach(it => { it.state = 'queued'; it.error = null; it.output = null; it.bytes = null; });
+    }
+    function cvPaintResult() {
+      const sum = $c('cvSummary'); if (!sum) return;
+      const r = cvState.result;
+      if (!r) { sum.textContent = ''; sum.className = 'msg'; $c('cvTtl').textContent = ''; return; }
+      sum.textContent = r.ok === 0 ? t('cv.done.none')
+        : r.fail === 0 ? t('cv.done.all').replace('{n}', r.ok)
+        : t('cv.done.some').replace('{ok}', r.ok).replace('{total}', r.total).replace('{fail}', r.fail);
+      sum.className = 'msg' + (r.ok === 0 ? ' err' : r.fail === 0 ? ' ok' : '');
+      const label = cvState.dl ? expiryLabel(cvState.expires) : '';
+      $c('cvTtl').textContent = label ? t('ac.cv.expires').replace('{when}', label) : '';
+    }
+    function cvAdd(list) {
+      if (cvState.xhr) return;
+      const err = $c('cvErr'); err.textContent = '';
+      const maxFiles = Number(cvState.limits.max_files) || 0;
+      const maxOne = Number(cvState.limits.max_file_bytes) || 0;
+      let refused = '';
+      Array.prototype.slice.call(list || []).forEach(f => {
+        if (!f) return;
+        // A dropped FOLDER arrives as a zero-byte entry with no type, and so does an empty
+        // file. Neither has audio in it.
+        if (!f.size && !f.type) return;
+        if (cvQueue.some(x => x.file.name === f.name && x.file.size === f.size && x.file.lastModified === f.lastModified)) return;
+        if (maxOne && f.size > maxOne) { refused = t('cv.toobig').replace('{name}', () => f.name).replace('{max}', human(maxOne)); return; }
+        if (maxFiles && cvQueue.length >= maxFiles) { refused = t('cv.toomany').replace('{max}', maxFiles); return; }
+        cvQueue.push({ file: f, state: 'queued', error: null, output: null, bytes: null });
+      });
+      cvClearResult();
+      if (refused) err.textContent = refused;
+      cvRender();
+    }
+    /* Pull whole `event: x\ndata: {…}\n\n` frames out of a buffer that grows between ticks,
+       keeping the partial tail for next time — a frame can arrive split across two progress
+       events, and consuming only what is complete is what stops one being applied twice. */
+    function cvSseFrames(st, text) {
+      st.buf += text.replace(/\r\n/g, '\n');
+      const out = []; let i;
+      while ((i = st.buf.indexOf('\n\n')) >= 0) {
+        const raw = st.buf.slice(0, i); st.buf = st.buf.slice(i + 2);
+        let name = '', data = '';
+        raw.split('\n').forEach(line => {
+          if (!line || line[0] === ':') return;
+          if (line.indexOf('event:') === 0) name = line.slice(6).trim();
+          else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.slice(5).trim();
+        });
+        if (!name) continue;
+        let payload; try { payload = data ? JSON.parse(data) : {}; } catch { continue; }
+        out.push([name, payload]);
+      }
+      return out;
+    }
+    function cvProg(label, pct) {
+      const bar = $c('cvProgBar'), fill = bar.firstElementChild;
+      $c('cvProg').classList.remove('hidden');
+      $c('cvProgLabel').textContent = label;
+      if (pct === null) {
+        bar.classList.add('indet'); fill.style.width = '';
+        bar.removeAttribute('aria-valuenow'); $c('cvProgPct').textContent = '';
+      } else {
+        const v = Math.max(0, Math.min(100, Math.round(pct)));
+        bar.classList.remove('indet'); fill.style.width = v + '%';
+        bar.setAttribute('aria-valuenow', String(v)); $c('cvProgPct').textContent = v + '%';
+      }
+    }
+    function cvApplyRow(d) {
+      const it = cvQueue[Number(d.index)];
+      if (!it) return;
+      it.state = d.ok ? 'done' : 'failed';
+      it.error = d.ok ? null : (d.error || t('cv.fail'));
+      it.output = d.output || null;
+      it.bytes = d.bytes == null ? null : d.bytes;
+    }
+    function cvMarkNext() {
+      for (let i = 0; i < cvQueue.length; i++) {
+        if (cvQueue[i].state === 'queued') { cvQueue[i].state = 'converting'; return; }
+      }
+    }
+    function cvApplyDone(d, detail) {
+      const files = (d && Array.isArray(d.files)) ? d.files : [];
+      files.forEach(cvApplyRow);
+      cvQueue.forEach(it => { if (it.state === 'converting') it.state = 'queued'; });
+      const total = Number(d && d.total) || cvQueue.length;
+      const okN = Number(d && d.converted) || 0;
+      const bad = (d && d.failed != null) ? Number(d.failed) : Math.max(0, total - okN);
+      const path = d && d.download_path;
+      if (d && d.token && typeof path === 'string' && path.indexOf('/convert/') === 0) {
+        cvState.dl = path; cvState.expires = d.expires_at || null;
+      }
+      cvState.result = { total: total, ok: okN, fail: bad };
+      cvPaintResult();
+      // A quota refusal is the server saying the allowance ran out part-way through. The files
+      // before it really did convert, so it is a note beside a real result.
+      const why = detail || (d && d.quota_refusal) || '';
+      if (why) $c('cvErr').textContent = why;
+      if (okN > 0) CQ.toast($c('cvSummary').textContent, bad ? 'info' : 'ok');
+      loadLimits();
+      if ($('panel-history').classList.contains('active')) loadConversions();
+    }
+    function cvApplySse(st, ev, ok, fail) {
+      if (st.done) return;
+      const name = ev[0], d = ev[1] || {};
+      if (name === 'stage') {
+        st.stage = d.stage || 'converting';
+        st.total = Number(d.total) || st.total;
+        cvMarkNext(); cvRender();
+        cvProg(t('cv.stage.converting').replace('{done}', 0).replace('{total}', st.total), 0);
+      } else if (name === 'progress') {
+        st.stage = st.stage || 'converting';
+        st.total = Number(d.total) || st.total;
+        cvApplyRow(d); st.fin++;
+        cvMarkNext(); cvRender();
+        cvProg(t('cv.stage.converting').replace('{done}', st.fin).replace('{total}', st.total),
+               st.total ? (st.fin / st.total) * 100 : null);
+      } else if (name === 'done') ok(d);
+      else if (name === 'error') {
+        if (d && Array.isArray(d.files)) ok(d, d.detail); else fail(d.detail);
+      }
+    }
+    function cvRun() {
+      const err = $c('cvErr'); err.textContent = '';
+      if (cvState.xhr) return;
+      if (!cvQueue.length) { err.textContent = t('cv.nofiles'); return; }
+      const lim = cvState.limits || {};
+      const bytes = cvQueue.reduce((a, x) => a + (x.file.size || 0), 0);
+      if (lim.max_files && cvQueue.length > lim.max_files) { err.textContent = t('cv.toomany').replace('{max}', lim.max_files); return; }
+      if (lim.max_batch_bytes && bytes > lim.max_batch_bytes) { err.textContent = t('cv.batchtoobig').replace('{max}', human(lim.max_batch_bytes)); return; }
+
+      cvClearResult();
+      const st = { buf: '', seen: 0, done: false, streaming: null, stage: '', total: cvQueue.length, fin: 0 };
+      const xhr = new XMLHttpRequest(); cvState.xhr = xhr;
+      const finish = () => {
+        if (cvState.xhr === xhr) cvState.xhr = null;
+        $c('cvProg').classList.add('hidden');
+        $c('cvProgBar').classList.remove('indet');
+        $c('cvProgBar').firstElementChild.style.width = '0%';
+        cvRender();
+      };
+      const fail = msg => {
+        if (st.done) return;
+        st.done = true; finish();
+        err.textContent = msg || t('cv.fail'); CQ.toast(msg || t('cv.fail'), 'err'); loadLimits();
+      };
+      const ok = (d, detail) => { if (st.done) return; st.done = true; cvApplyDone(d, detail); finish(); };
+
+      xhr.upload.addEventListener('progress', e => {
+        if (st.done || st.stage) return;                    // the server owns the bar from here
+        cvProg(t('cv.stage.upload'), e.lengthComputable && e.total ? (e.loaded / e.total) * 100 : null);
+      });
+      xhr.upload.addEventListener('load', () => { if (!st.done && !st.stage) cvProg(t('cv.stage.queued'), null); });
+      xhr.addEventListener('readystatechange', () => {
+        if (xhr.readyState !== 2 || st.streaming !== null) return;
+        // Refusals (400 unknown format, 413 too big, 503 no ffmpeg) are ordinary JSON. The
+        // Content-Type is the tell: decide once on the headers.
+        st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (!st.streaming) cvProg(t('cv.stage.queued'), null);
+      });
+      xhr.addEventListener('progress', () => {
+        if (!st.streaming || st.done) return;
+        const chunk = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+        if (!chunk) return;
+        cvSseFrames(st, chunk).forEach(ev => cvApplySse(st, ev, ok, fail));
+      });
+      xhr.addEventListener('load', async () => {
+        if (st.done) return;
+        if (st.streaming === null) st.streaming = (xhr.getResponseHeader('Content-Type') || '').toLowerCase().indexOf('text/event-stream') >= 0;
+        if (xhr.status === 401 && TOKEN) { finish(); sessionExpired(); return; }
+        if (st.streaming) {
+          const tail = xhr.responseText.slice(st.seen); st.seen = xhr.responseText.length;
+          cvSseFrames(st, tail).forEach(ev => cvApplySse(st, ev, ok, fail));
+          if (!st.done) fail(t('cv.fail'));
+          return;
+        }
+        if (!xhr.status) { fail(t('sc.import.netfail')); return; }
+        try { ok(await CQ.readResp(new Response(xhr.responseText || '', { status: xhr.status }))); }
+        catch (e) { fail(e.message); }
+      });
+      xhr.addEventListener('error', () => { if (!st.done) fail(t('sc.import.netfail')); });
+      xhr.addEventListener('abort', () => {
+        if (st.done) return;
+        st.done = true;
+        // Whatever finished before the abort keeps its verdict; the one in flight goes back to
+        // queued, because we no longer have any idea what happened to it.
+        cvQueue.forEach(it => { if (it.state === 'converting') it.state = 'queued'; });
+        finish();
+        err.textContent = t('cv.cancelled'); loadLimits();
+      });
+
+      const fd = new FormData();
+      cvQueue.forEach(it => fd.append('files', it.file, it.file.name));
+      fd.append('format', $c('cvFormat').value || cvState.def);
+      xhr.open('POST', `${API}/convert?stream=1`, true);
+      const h = authH(); Object.keys(h).forEach(k => xhr.setRequestHeader(k, h[k]));
+      cvProg(t('cv.stage.upload'), 0);
+      cvRender();
+      xhr.send(fd);                                        // no xhr.timeout: a big batch runs for minutes
+    }
+    async function cvLoadFormats() {
+      if (cvState.formats.length) return;
+      let r = null;
+      try { r = await fetch(`${API}/convert/formats`); }
+      catch { $c('cvErr').textContent = t('err.unavailable'); return; }
+      if (!r.ok) { $c('cvErr').textContent = r.status === 404 ? t('cv.unavailable') : t('err.unavailable'); return; }
+      let d = null; try { d = await r.json(); } catch {}
+      if (!d || d.available === false || !Array.isArray(d.formats) || !d.formats.length) {
+        $c('cvErr').textContent = t('cv.unavailable'); return;
+      }
+      cvState.formats = d.formats.filter(f => f && f.id);
+      cvState.limits = d.limits || {};
+      cvState.def = d.default || '';
+      cvPaintFormats(); cvButtons();
+    }
+    {
+      const cvInput = $c('cvFiles'), cvDrop = $c('cvDrop');
+      cvInput.addEventListener('change', () => {
+        const picked = Array.prototype.slice.call(cvInput.files || []);
+        cvInput.value = '';                    // so picking the same file again still fires
+        cvAdd(picked);
+      });
+      ['dragover','dragenter'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.add('drag'); }));
+      ['dragleave','drop'].forEach(ev => cvDrop.addEventListener(ev, e => { e.preventDefault(); cvDrop.classList.remove('drag'); }));
+      cvDrop.addEventListener('drop', e => { if (e.dataTransfer) cvAdd(e.dataTransfer.files); });
+      $c('cvFormat').addEventListener('change', cvNote);
+      $c('cvRun').addEventListener('click', cvRun);
+      $c('cvCancel').addEventListener('click', () => { if (cvState.xhr) cvState.xhr.abort(); });
+      $c('cvClear').addEventListener('click', () => { cvQueue = []; cvClearResult(); $c('cvErr').textContent = ''; cvRender(); });
+      $c('cvDownload').addEventListener('click', () => { if (cvState.dl) authedDownload(cvState.dl, 'converted.zip'); });
+      // Leaving the page: drop the request so the server sees the disconnect instead of
+      // finishing a ZIP nobody can claim any more.
+      window.addEventListener('pagehide', () => { if (cvState.xhr) cvState.xhr.abort(); });
+    }
+    CQ.mountTips(document);
+
+    /* Language switch: everything painted from the DICT in JS has to be repainted by hand —
+       applyI18n only touches [data-i18n] attributes. */
+    document.addEventListener('cq:lang', () => {
+      if ($('app').classList.contains('hidden')) return;
+      const sel = $('langSelect');
+      if (sel) { [...sel.options].forEach(o => { const k = 'lang.' + o.value, trn = t(k); if (trn !== k) o.textContent = trn; }); CQ.syncSelect(sel); }
+      CQ.syncSelect($('voiceSelect'));
+      if (langNoteRefresh) langNoteRefresh();
+      cvPaintFormats(); cvRender(); cvPaintResult();
+      paintBanner(); paintUsage();
+      if (scLoaded) { scReadDom(); scRenderDims(); scShowVersion(); }   // relabel, keep unsaved edits
+      if ($('panel-history').classList.contains('active')) loadHistory();
+    });
+
+    /* ---------------- boot ---------------- */
+    if (TOKEN) {
+      // Freeze the gate while the session check is in flight, so someone with a valid session
+      // never sees an interactive sign-in form flash at them.
+      const frozen = ['sEmail','sPw','signinBtn','rEmail','rPw','rName','registerBtn'];
+      frozen.forEach(id => $(id).disabled = true);
+      $('gateMsg').className = 'msg'; $('gateMsg').textContent = t('login.checking');
+      const unfreeze = () => { frozen.forEach(id => $(id).disabled = false);
+        $('gateMsg').className = 'msg err'; if ($('gateMsg').textContent === t('login.checking')) $('gateMsg').textContent = ''; };
+      fetch(`${API}/auth/me`, { headers: authH() })
+        .then(r => {
+          if (r.ok) return r.json().then(me => {
+            unfreeze();
+            // A workspace token in this tab is not this page's session: leave it alone and
+            // ask for the account's own credentials instead of clearing someone else's.
+            if (me.kind === 'user') enter(me.user);
+            else { sessionStorage.removeItem('cq_user_token'); TOKEN = ''; }
+          });
+          // 403 is a DISABLED account, and its token is still good — keep it, sign in, and let
+          // the banner explain. 401 is a token this page should forget.
+          if (r.status === 401) { unfreeze(); sessionStorage.removeItem('cq_user_token'); TOKEN = ''; return; }
+          if (r.status === 403) { unfreeze(); $('gateMsg').textContent = t('ac.disabled'); return; }
+          throw new Error('http ' + r.status);   // an outage, not an invalid token
+        })
+        .catch(() => {   // network/API down: KEEP the token, offer a retry
+          unfreeze();
+          $('gateMsg').innerHTML = '';
+          $('gateMsg').append(t('err.unavailable') + ' ');
+          const rb = document.createElement('button');
+          rb.type = 'button'; rb.className = 'ghost'; rb.textContent = t('btn.retry');
+          rb.addEventListener('click', () => location.reload());
+          $('gateMsg').append(rb);
+        });
+    } else {
+      $('sEmail').focus();
+    }
+  </script>
+</body>
+</html>

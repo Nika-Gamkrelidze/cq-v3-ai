@@ -18,8 +18,11 @@
     <div id="app" class="hidden">
       <div class="tabs">
         <div class="tab active" data-tab="tenants" data-i18n="adm.tenants"></div>
+        <div class="tab" data-tab="users" data-i18n="pb.users"></div>
         <div class="tab" data-tab="embeddings" data-i18n="adm.embeddings"></div>
         <div class="tab" data-tab="anon" data-i18n="adm.anon"></div>
+        <div class="tab" data-tab="storage" data-i18n="pb.storage"></div>
+        <div class="tab" data-tab="defrubric" data-i18n="pb.defrubric"></div>
         <div class="tab" data-tab="integrations" data-i18n="adm.integrations"></div>
         <div class="tab" data-tab="voices" data-i18n="adm.voices"></div>
         <div class="tab" data-tab="bot" data-i18n="adm.bot"></div>
@@ -41,6 +44,51 @@
           <div class="inline" style="justify-content:space-between"><h3 style="margin:0" data-i18n="adm.tenants"></h3>
             <button class="ghost" id="reloadTenants" data-i18n="btn.refresh"></button></div>
           <div id="tenantList" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- REGISTERED ACCOUNTS -->
+      <!-- Two cards, in the order an operator needs them: the tier first (what a new account
+           gets by default), then the accounts themselves. There is no mail provider, so the
+           reset button here is the ONLY password-recovery path a registered user has. -->
+      <section class="panel" id="panel-users">
+        <div class="card">
+          <h3 data-i18n="pb.reg.heading"></h3>
+          <p class="hint" data-i18n="pb.reg.desc"></p>
+          <!-- "Sign-ups open" is NOT a master switch over existing accounts: the tip says so,
+               because the obvious reading of a checkbox called "enabled" is the wrong one and
+               an operator reaching for it at 3am is trying to stop new sign-ups, not to lock
+               out everyone who already has an account. -->
+          <label class="inline" style="gap:8px"><input type="checkbox" id="r_enabled" /> <span data-i18n="pb.reg.signups"></span><button class="tip" data-tip-i18n="pb.reg.signups.hint" style="margin-left:0"></button></label>
+          <div class="row" style="margin-top:12px">
+            <div><label data-i18n="adm.maxanalyses"></label><input id="r_analyses" type="number" min="0" /></div>
+            <div><label data-i18n="adm.maxmb"></label><input id="r_mb" type="number" min="0" /></div>
+            <div><label data-i18n="adm.maxtts"></label><input id="r_tts" type="number" min="0" /></div>
+            <div><label data-i18n="pb.reg.maxconv"></label><input id="r_conv" type="number" min="0" /></div>
+          </div>
+          <h4 data-i18n="adm.features"></h4>
+          <div class="inline" style="gap:18px; flex-wrap:wrap; row-gap:8px">
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_analyze" /> <span data-i18n="feat.analyze"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_tts" /> <span data-i18n="feat.tts"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_convert" /> <span data-i18n="pb.feat.convert"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_score" /> <span data-i18n="pb.feat.score"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_semantic" /> <span data-i18n="pb.feat.semantic"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" id="rf_summarise" /> <span data-i18n="pb.feat.summarise"></span></label>
+          </div>
+          <div class="actions"><button class="primary" id="saveReg" data-i18n="btn.savelimits"></button></div>
+          <div class="msg" id="regMsg"></div>
+        </div>
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; row-gap:8px">
+            <h3 style="margin:0" data-i18n="pb.users.heading"></h3>
+            <div class="inline" style="gap:8px">
+              <input id="u_search" data-i18n-ph="pb.users.search" style="width:220px" />
+              <button class="ghost" id="reloadUsers" data-i18n="btn.refresh"></button>
+            </div>
+          </div>
+          <p class="hint" data-i18n="pb.users.legend"></p>
+          <div id="userList" style="margin-top:6px"></div>
+          <div class="msg" id="userMsg"></div>
         </div>
       </section>
 
@@ -77,8 +125,13 @@
             <div><label data-i18n="adm.maxanalyses"></label><input id="a_analyses" type="number" /></div>
             <div><label data-i18n="adm.maxmb"></label><input id="a_mb" type="number" /></div>
             <div><label data-i18n="adm.maxtts"></label><input id="a_tts" type="number" /></div>
-            <div><label><span data-i18n="adm.retention"></span><button class="tip" data-tip-i18n="adm.retention.hint"></button></label><input id="a_retention" type="number" min="0" /></div>
           </div>
+          <!-- Retention used to live here as a fourth number. It governs EVERY stored
+               recording now, not just an anonymous visitor's, so it moved to its own tab
+               rather than staying under a heading that understates what it deletes. The
+               line stays because an operator who knew where the field was needs to be told
+               where it went, not left to conclude the setting was dropped. -->
+          <p class="hint" data-i18n="pb.storage.moved"></p>
           <h4 data-i18n="adm.features"></h4>
           <div class="inline" style="gap:18px">
             <label class="inline" style="gap:6px"><input type="checkbox" id="f_analyze" /> <span data-i18n="feat.analyze"></span></label>
@@ -94,6 +147,51 @@
           <textarea id="sn_guidance" data-i18n-ph="sn.guidance.ph" style="min-height:80px"></textarea>
           <div class="actions"><button class="primary" id="saveSentiment" data-i18n="sn.save"></button></div>
           <div class="msg" id="sentimentMsg"></div>
+        </div>
+      </section>
+
+      <!-- STORAGE -->
+      <!-- One field, its own tab. It is here rather than on Anonymous because the number
+           now decides when a paying tenant's call recording stops being replayable, and a
+           control that dangerous should not be read as "settings for guests". -->
+      <section class="panel" id="panel-storage">
+        <div class="card">
+          <h3 data-i18n="pb.storage.heading"></h3>
+          <p class="hint" data-i18n="pb.storage.desc"></p>
+          <div class="row" style="margin-top:6px">
+            <div class="w-num"><label><span data-i18n="pb.storage.days"></span><button class="tip" data-tip-i18n="pb.storage.hint"></button></label>
+              <input id="st_days" type="number" min="0" max="3650" /></div>
+          </div>
+          <div class="actions"><button class="primary" id="saveStorage" data-i18n="btn.save"></button></div>
+          <div class="msg" id="storageMsg"></div>
+        </div>
+      </section>
+
+      <!-- DEFAULT RUBRIC -->
+      <!-- The same editor as the tenant portal's Rubric panel, one level up: this is what
+           every owner WITHOUT a rubric of their own is scored against. The source pill is
+           the important half — until an operator saves here, what is on screen is only a
+           proposal (the demo tenant's rubric, or the built-in starter). -->
+      <section class="panel" id="panel-defrubric">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; row-gap:6px">
+            <h3 style="margin:0" data-i18n="pb.defrubric.heading"></h3>
+            <span class="inline" style="gap:8px"><span class="pill" id="drSource">—</span><span class="hint" id="drUpdated"></span></span>
+          </div>
+          <p class="hint" data-i18n="pb.defrubric.desc"></p>
+          <div id="drDims"></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <div class="inline" style="gap:8px">
+              <button class="ghost" id="drAdd" data-i18n="sc.adddim"></button>
+              <button class="ghost" id="drNormalize" data-i18n="sc.normalize"></button>
+            </div>
+            <span class="hint"><span data-i18n="sc.sum"></span>: <b id="drSum">0</b>% <span id="drSumFlag"></span></span>
+          </div>
+          <hr class="sep" />
+          <label data-i18n="sc.rubric"></label>
+          <textarea id="drRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
+          <div class="actions"><button class="primary" id="drSave" data-i18n="sc.save"></button></div>
+          <div class="msg" id="drMsg"></div>
         </div>
       </section>
 
@@ -182,6 +280,7 @@
       </section>
     </div>
   </main>
+  <div id="modalHost"></div>
 
   <script>
     const API = CQ.API, t = CQ.t;
@@ -218,9 +317,19 @@
     document.addEventListener('cq:lang', () => { if ($('app').classList.contains('hidden')) return;
       loadTenants();
       // The kill-switch pills/buttons are built in JS, so data-i18n cannot retranslate them.
-      if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); } });
+      if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); }
+      // Same reason for these two: their rows and their source pill are painted in JS, so
+      // data-i18n cannot reach them. Repainted whether or not their panel is on screen —
+      // nothing re-renders them on tab activation, so a table left stale while hidden would
+      // still be stale in the old language when the operator finally opens it.
+      renderUsers();
+      // Read the editor back first: a language switch mid-edit must not throw away the
+      // dimensions someone has typed but not saved.
+      if ($('drDims').querySelector('.sc-edit')) drReadDom();
+      drRenderDims(); drPaintSource(); });
 
-    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadSentimentSettings(), loadTenants(), loadVoices()]); }
+    async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadSentimentSettings(),
+      loadTenants(), loadVoices(), loadRegistered(), loadUsers(), loadStorage(), loadDefaultRubric()]); }
 
     // Login happens on the unified sign-in page; this console is token-gated only.
     let settingsLoaded = false;   // guards saveInt: never PUT fields that never loaded
@@ -400,14 +509,12 @@
       const r = await adminFetch(`${API}/admin/anonymous-limits`, { headers: hdr() }); if (!r.ok) return; const d = await r.json();
       $('a_enabled').checked = !!d.enabled; $('a_analyses').value = d.max_analyses_per_day ?? 0;
       $('a_mb').value = d.max_audio_mb ?? 0; $('a_tts').value = d.max_tts_per_day ?? 0;
-      $('a_retention').value = d.retention_days ?? 30;
       $('f_analyze').checked = !!(d.features||{}).analyze; $('f_tts').checked = !!(d.features||{}).tts;
     }
     $('saveAnon').addEventListener('click', async () => {
       const m = $('anonMsg'); m.className='msg'; m.textContent='';
       const patch = { enabled: $('a_enabled').checked, max_analyses_per_day: parseInt($('a_analyses').value)||0,
         max_audio_mb: parseInt($('a_mb').value)||0, max_tts_per_day: parseInt($('a_tts').value)||0,
-        retention_days: parseInt($('a_retention').value)||0,
         features: { analyze: $('f_analyze').checked, tts: $('f_tts').checked, kb: false } };
       const r = await adminFetch(`${API}/admin/anonymous-limits`, { method:'PUT', headers: jhdr(), body: JSON.stringify(patch) });
       m.className = r.ok ? 'msg ok' : 'msg err'; m.textContent = r.ok ? t('toast.saved') : t('toast.error'); if (r.ok) CQ.toast(t('toast.saved'),'ok');
@@ -550,6 +657,329 @@
         });
       }
     }
+
+    // ---- Modal host ---------------------------------------------------------------------
+    // Same helper the tenant portal and the KB console use: a brand dialog, dismissed by
+    // clicking the backdrop. Never a native prompt() — those cannot be translated, cannot be
+    // styled, and cannot hold a copy button.
+    function showModal(inner, max = '520px') {
+      const bg = document.createElement('div'); bg.className = 'cq-modal-bg';
+      bg.innerHTML = `<div class="cq-modal" style="max-width:${max}; max-height:86vh; overflow:auto">${inner}</div>`;
+      bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+      $('modalHost').appendChild(bg); return bg;
+    }
+    const fmtWhen = v => { if (!v) return '—'; const d = new Date(v); return isNaN(d) ? '—' : d.toLocaleString(); };
+
+    // navigator.clipboard needs a secure context, and this app is served over plain HTTP on
+    // the server. The textarea fallback is not decoration — it is the path that actually runs
+    // in production, and a password the operator cannot copy is a password they retype wrong.
+    //
+    // The branch order is load-bearing: execCommand only works INSIDE the click's user
+    // gesture, and an `await` spends that gesture. So the insecure-origin case takes the
+    // synchronous path FIRST, before this function has awaited anything, instead of
+    // discovering it needs the fallback after the async clipboard has already rejected.
+    function copyFallback(text) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        const ok = document.execCommand('copy'); ta.remove(); return ok;
+      } catch { return false; }
+    }
+    async function copyText(text) {
+      let pending = null;
+      try { if (navigator.clipboard && window.isSecureContext) pending = navigator.clipboard.writeText(text); } catch {}
+      if (!pending) return copyFallback(text);          // still inside the gesture
+      try { await pending; return true; } catch {}
+      return copyFallback(text);                        // a denied permission on a secure origin
+    }
+
+    // ---- Registered tier: what a self-service account gets by default ---------------------
+    const REG_FEATURES = ['analyze','tts','convert','score','semantic','summarise'];
+    let REG = {};                       // the effective tier — also feeds the override modal's placeholders
+    async function loadRegistered() {
+      const r = await adminFetch(`${API}/admin/registered-limits`, { headers: hdr() }); if (!r.ok) return;
+      const d = await r.json(); REG = d || {};
+      $('r_enabled').checked = !!d.enabled;
+      $('r_analyses').value = d.max_analyses_per_day ?? 0; $('r_mb').value = d.max_audio_mb ?? 0;
+      $('r_tts').value = d.max_tts_per_day ?? 0; $('r_conv').value = d.max_conversions_per_day ?? 0;
+      const f = d.features || {};
+      REG_FEATURES.forEach(k => { const el = $('rf_' + k); if (el) el.checked = !!f[k]; });
+    }
+    $('saveReg').addEventListener('click', async () => {
+      const m = $('regMsg'); m.className = 'msg'; m.textContent = '';
+      const features = {}; REG_FEATURES.forEach(k => features[k] = $('rf_' + k).checked);
+      const patch = { enabled: $('r_enabled').checked,
+        max_analyses_per_day: parseInt($('r_analyses').value) || 0,
+        max_audio_mb: parseInt($('r_mb').value) || 0,
+        max_tts_per_day: parseInt($('r_tts').value) || 0,
+        max_conversions_per_day: parseInt($('r_conv').value) || 0,
+        features };
+      const b = $('saveReg'); b.disabled = true;
+      try {
+        const r = await adminFetch(`${API}/admin/registered-limits`, { method: 'PUT', headers: jhdr(), body: JSON.stringify(patch) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { m.className = 'msg err'; m.textContent = d.detail || t('toast.error'); return; }
+        REG = d || REG; m.className = 'msg ok'; m.textContent = t('toast.saved'); CQ.toast(t('toast.saved'), 'ok');
+      } finally { b.disabled = false; }
+    });
+
+    // ---- Registered accounts ---------------------------------------------------------------
+    // The table is the operator's only view of self-service users, so it carries the four facts
+    // a support call starts from: is the account on, when was it made, when did they last get
+    // in, and what have they spent today.
+    let USERS = [], userQ = '', userTimer = 0;
+    const OVERRIDE_KEYS = [['max_analyses_per_day','adm.maxanalyses'], ['max_audio_mb','adm.maxmb'],
+                           ['max_tts_per_day','adm.maxtts'], ['max_conversions_per_day','pb.reg.maxconv']];
+    const findUser = id => USERS.find(u => String(u.id) === String(id));
+
+    async function loadUsers() {
+      const m = $('userMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await adminFetch(`${API}/admin/users?limit=200&q=${encodeURIComponent(userQ)}`, { headers: hdr() });
+      if (!r.ok) { m.className = 'msg err'; m.textContent = t('toast.error'); return; }
+      const d = await r.json().catch(() => ({}));
+      USERS = Array.isArray(d && d.users) ? d.users : [];
+      renderUsers();
+    }
+    function renderUsers() {
+      const box = $('userList');
+      if (!USERS.length) { box.innerHTML = `<div class="empty">${esc(userQ ? t('pb.users.nomatch') : t('pb.users.none'))}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+          <th>${t('pb.th.email')}</th><th>${t('pb.th.name')}</th><th>${t('th.active')}</th>
+          <th>${t('pb.th.created')}</th><th>${t('pb.th.lastlogin')}</th><th>${t('pb.th.today')}</th><th></th>
+        </tr></thead><tbody>` + USERS.map(u => {
+          const used = u.used || {};
+          // A dot on the Limits button so an account that already has an override is visible
+          // without opening four modals to find it.
+          const ov = Object.keys(u.limits || {}).length ? ' ●' : '';
+          return `<tr>
+            <td>${esc(u.email)}</td>
+            <td>${esc(u.display_name || '—')}</td>
+            <td><span class="pill ${u.is_active ? 'on' : 'off'}">${u.is_active ? '●' : '○'}</span></td>
+            <td class="hint">${esc(fmtWhen(u.created_at))}</td>
+            <td class="hint">${u.last_login_at ? esc(fmtWhen(u.last_login_at)) : esc(t('pb.never'))}</td>
+            <td class="hint">${(used.analyses ?? 0)} · ${(used.tts ?? 0)} · ${(used.conversions ?? 0)}</td>
+            <td class="inline">
+              <button class="ghost" data-uact="active" data-id="${esc(u.id)}">${u.is_active ? t('pb.act.deactivate') : t('pb.act.activate')}</button>
+              <button class="ghost" data-uact="limits" data-id="${esc(u.id)}">${t('pb.act.limits')}${ov}</button>
+              <button class="ghost" data-uact="pw" data-id="${esc(u.id)}">${t('pb.act.resetpw')}</button>
+              <button class="danger" data-uact="del" data-id="${esc(u.id)}">${t('btn.delete')}</button>
+            </td></tr>`;
+        }).join('') + `</tbody></table></div>`;
+      box.querySelectorAll('button[data-uact]').forEach(b =>
+        b.addEventListener('click', () => userAction(b.dataset.uact, b.dataset.id, b)));
+    }
+    $('reloadUsers').addEventListener('click', loadUsers);
+    $('u_search').addEventListener('input', e => {
+      userQ = e.target.value.trim();
+      clearTimeout(userTimer); userTimer = setTimeout(loadUsers, 250);   // one request per pause, not per keystroke
+    });
+
+    async function putUser(id, body) {
+      const m = $('userMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await adminFetch(`${API}/admin/users/${id}`, { method: 'PUT', headers: jhdr(), body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { m.className = 'msg err'; m.textContent = d.detail || t('toast.error'); CQ.toast(d.detail || t('toast.error'), 'err'); return null; }
+      const i = USERS.findIndex(u => String(u.id) === String(id));
+      if (i >= 0 && d && d.id) USERS[i] = d;
+      renderUsers(); return d;
+    }
+
+    async function userAction(act, id, btn) {
+      const u = findUser(id); if (!u) return;
+      if (act === 'active') {
+        btn.disabled = true;
+        try { if (await putUser(id, { is_active: !u.is_active })) CQ.toast(t('pb.user.saved'), 'ok'); }
+        finally { btn.disabled = false; }
+        return;
+      }
+      if (act === 'limits') return userLimitsModal(u);
+      if (act === 'pw') return resetUserPassword(u);
+      if (act === 'del') {
+        // The confirm says what SURVIVES the delete, because the surprising half of this
+        // action is not what it removes — it is what it leaves behind.
+        if (!(await CQ.confirm(t('pb.del.confirm').replace('{email}', () => u.email), { ok: t('btn.delete') }))) return;
+        const r = await adminFetch(`${API}/admin/users/${id}`, { method: 'DELETE', headers: hdr() });
+        if (!r.ok) { CQ.toast(t('toast.error'), 'err'); return; }
+        CQ.toast(t('pb.del.done'), 'ok');
+        USERS = USERS.filter(x => String(x.id) !== String(id)); renderUsers();
+      }
+    }
+
+    // Per-account overrides. The PUT REPLACES the blob, so this form is the whole truth for
+    // one account: a field left empty is not "unchanged", it is "use the tier's number", and
+    // the placeholder shows which number that would be.
+    function userLimitsModal(u) {
+      const L = u.limits || {};
+      const fields = OVERRIDE_KEYS.map(([key, labelKey]) =>
+        `<div><label>${esc(t(labelKey))}</label>
+           <input id="ul-${key}" type="number" min="0" value="${L[key] ?? ''}" placeholder="${esc(String(REG[key] ?? ''))}" /></div>`).join('');
+      const bg = showModal(`<h3 style="margin-top:0">${esc(t('pb.lim.title'))}</h3>
+        <p class="hint" style="margin-top:-6px">${esc(u.email)}</p>
+        <div class="row">${fields}</div>
+        <p class="hint">${esc(t('pb.lim.note'))}</p>
+        <div class="msg" id="ulMsg"></div>
+        <div class="actions"><button class="ghost" id="ulCancel">${esc(t('btn.cancel'))}</button>
+          <button class="primary" id="ulSave">${esc(t('btn.save'))}</button></div>`);
+      bg.querySelector('#ulCancel').addEventListener('click', () => bg.remove());
+      bg.querySelector('#ulSave').addEventListener('click', async () => {
+        const limits = {};
+        for (const [key] of OVERRIDE_KEYS) {
+          const raw = (bg.querySelector('#ul-' + key).value || '').trim();
+          if (raw === '') continue;                    // no override — the tier decides
+          const n = parseInt(raw, 10);
+          if (!isFinite(n) || n < 0) { const m = bg.querySelector('#ulMsg'); m.className = 'msg err'; m.textContent = t('toast.error'); return; }
+          limits[key] = n;
+        }
+        const b = bg.querySelector('#ulSave'); b.disabled = true;
+        const d = await putUser(u.id, { limits });
+        b.disabled = false;
+        if (d) { CQ.toast(t('pb.lim.saved'), 'ok'); bg.remove(); }
+        else { const m = bg.querySelector('#ulMsg'); m.className = 'msg err'; m.textContent = $('userMsg').textContent || t('toast.error'); }
+      });
+    }
+
+    // The only password-recovery path a registered user has: there is no mail provider, so
+    // the operator reads the new password out. It is shown once and never stored in the
+    // clear — the modal says so, because an operator who closes it without copying has to
+    // reset again, and they should learn that BEFORE they close it.
+    async function resetUserPassword(u) {
+      if (!(await CQ.confirm(t('pb.pw.confirm').replace('{email}', () => u.email), { ok: t('pb.act.resetpw') }))) return;
+      const r = await adminFetch(`${API}/admin/users/${u.id}/reset-password`, { method: 'POST', headers: hdr() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.password) { CQ.toast((d && d.detail) || t('toast.error'), 'err'); return; }
+      const bg = showModal(`<h3 style="margin-top:0">${esc(t('pb.pw.title'))}</h3>
+        <p class="hint" style="margin-top:-6px">${esc(u.email)}</p>
+        <div class="inline" style="gap:10px; flex-wrap:wrap">
+          <code id="pwVal" style="font-size:16px; user-select:all">${esc(d.password)}</code>
+          <button class="ghost" id="pwCopy">${esc(t('pb.copy'))}</button>
+        </div>
+        <p class="hint">${esc(t('pb.pw.once'))}</p>
+        <div class="actions"><button class="primary" id="pwClose">${esc(t('pb.close'))}</button></div>`);
+      bg.querySelector('#pwCopy').addEventListener('click', async () => {
+        const ok = await copyText(d.password);
+        CQ.toast(ok ? t('pb.copied') : t('pb.copyfail'), ok ? 'ok' : 'err');
+      });
+      bg.querySelector('#pwClose').addEventListener('click', () => bg.remove());
+    }
+
+    // ---- Storage retention ----------------------------------------------------------------
+    async function loadStorage() {
+      const r = await adminFetch(`${API}/admin/storage`, { headers: hdr() }); if (!r.ok) return;
+      const d = await r.json().catch(() => ({}));
+      $('st_days').value = d.retention_days ?? 30;
+    }
+    $('saveStorage').addEventListener('click', async () => {
+      const m = $('storageMsg'); m.className = 'msg'; m.textContent = '';
+      // 0 is a real, storable answer here ("keep forever"), so it is parsed rather than
+      // ||-defaulted into 30 the way a truthiness test would.
+      const n = parseInt($('st_days').value, 10);
+      if (!isFinite(n) || n < 0 || n > 3650) { m.className = 'msg err'; m.textContent = t('toast.error'); return; }
+      const b = $('saveStorage'); b.disabled = true;
+      try {
+        const r = await adminFetch(`${API}/admin/storage`, { method: 'PUT', headers: jhdr(), body: JSON.stringify({ retention_days: n }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { m.className = 'msg err'; m.textContent = d.detail || t('toast.error'); return; }
+        $('st_days').value = d.retention_days ?? n;
+        m.className = 'msg ok'; m.textContent = t('toast.saved'); CQ.toast(t('toast.saved'), 'ok');
+      } finally { b.disabled = false; }
+    });
+
+    // ---- Default rubric --------------------------------------------------------------------
+    // The tenant portal's dimension editor, one level up. Deliberately without the AI import:
+    // this rubric is the fallback every owner inherits, and it is written once by hand rather
+    // than drafted from a customer's document.
+    let drDims = [];
+    function drRow(d, i) {
+      return `<div class="sc-edit" data-i="${i}">
+        <div class="inline" style="justify-content:space-between; margin-bottom:8px">
+          <span class="sc-edit-num">${i + 1}</span>
+          <button class="act danger dr-del" data-i="${i}" title="${esc(t('sc.remove'))}" aria-label="${esc(t('sc.remove'))}">🗑</button>
+        </div>
+        <div class="row">
+          <div style="flex:2"><label>${esc(t('sc.dname'))}</label><input class="dr-name" value="${esc(d.name || '')}" placeholder="${esc(t('sc.dname.ph'))}" /></div>
+          <div class="w-num"><label>${esc(t('sc.dweight'))}</label><input class="dr-weight" type="number" min="0" step="1" value="${d.weight ?? 0}" /></div>
+        </div>
+        <label>${esc(t('sc.ddesc'))}</label><input class="dr-desc" value="${esc(d.description || '')}" />
+        <label>${esc(t('sc.dguide'))}</label><textarea class="dr-guide" style="min-height:54px" placeholder="${esc(t('sc.dguide.ph'))}">${esc(d.guidance || '')}</textarea>
+      </div>`;
+    }
+    function drReadDom() {
+      drDims = [...$('drDims').querySelectorAll('.sc-edit[data-i]')].map(el => ({
+        key: (drDims[+el.dataset.i] || {}).key,
+        name: el.querySelector('.dr-name').value.trim(),
+        weight: parseFloat(el.querySelector('.dr-weight').value) || 0,
+        description: el.querySelector('.dr-desc').value.trim(),
+        guidance: el.querySelector('.dr-guide').value.trim(),
+      }));
+    }
+    function drRenderDims() {
+      const box = $('drDims');
+      box.innerHTML = drDims.length ? drDims.map(drRow).join('') : `<div class="empty">${esc(t('sc.nodims'))}</div>`;
+      box.querySelectorAll('.dr-del').forEach(b => b.addEventListener('click', () => { drReadDom(); drDims.splice(+b.dataset.i, 1); drRenderDims(); }));
+      box.querySelectorAll('.dr-weight').forEach(inp => inp.addEventListener('input', drSum));
+      drSum();
+      CQ.autogrowBind(box, '.dr-guide');
+    }
+    function drSum() {
+      let s = 0; $('drDims').querySelectorAll('.dr-weight').forEach(i => s += parseFloat(i.value) || 0);
+      s = Math.round(s * 10) / 10;
+      const ok = Math.abs(s - 100) <= 0.5;
+      $('drSum').textContent = s; $('drSum').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      $('drSumFlag').textContent = ok ? '✓' : '✗'; $('drSumFlag').style.color = ok ? 'var(--ok)' : 'var(--coral)';
+      return ok;
+    }
+    // 'demo' and 'builtin' both mean "nothing is saved here yet" — the editor is showing a
+    // proposal. Saying that in the pill is the difference between an operator editing the
+    // default and an operator believing they already have one.
+    const DR_SRC = { stored: ['pb.src.stored', 'ready'], demo: ['pb.src.demo', 'processing'], builtin: ['pb.src.builtin', 'notinkb'] };
+    let drMeta = { source: '', updated_at: null, updated_by: '' };
+    function drPaintSource() {
+      const [key, cls] = DR_SRC[drMeta.source] || ['pb.src.builtin', 'notinkb'];
+      $('drSource').className = 'pill ' + cls; $('drSource').textContent = t(key);
+      $('drUpdated').textContent = drMeta.updated_at
+        ? t('pb.defrubric.updated').replace('{when}', () => fmtWhen(drMeta.updated_at)).replace('{who}', () => drMeta.updated_by || '—')
+        : '';
+    }
+    function drApply(d) {
+      drDims = (Array.isArray(d.dimensions) ? d.dimensions : []).map(x => ({
+        key: x.key, name: x.name || '', weight: x.weight || 0, description: x.description || '', guidance: x.guidance || '' }));
+      $('drRubric').value = d.rubric || '';
+      drMeta = { source: d.source || '', updated_at: d.updated_at || null, updated_by: d.updated_by || '' };
+      drPaintSource(); drRenderDims();
+    }
+    async function loadDefaultRubric() {
+      const m = $('drMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await adminFetch(`${API}/admin/default-rubric`, { headers: hdr() });
+      if (!r.ok) { m.className = 'msg err'; m.textContent = t('toast.error'); return; }
+      drApply(await r.json().catch(() => ({})));
+    }
+    $('drAdd').addEventListener('click', () => { drReadDom(); drDims.push({ name: '', weight: 0, description: '', guidance: '' }); drRenderDims(); });
+    $('drNormalize').addEventListener('click', () => {
+      drReadDom(); const n = drDims.length; if (!n) return;
+      const total = drDims.reduce((a, d) => a + (d.weight || 0), 0);
+      if (total <= 0) drDims.forEach(d => d.weight = Math.round(100 / n));
+      else drDims.forEach(d => d.weight = Math.round((d.weight / total) * 100));
+      drDims[n - 1].weight += 100 - drDims.reduce((a, d) => a + d.weight, 0);
+      drRenderDims();
+    });
+    $('drSave').addEventListener('click', async () => {
+      drReadDom();
+      const m = $('drMsg'); m.className = 'msg'; m.textContent = '';
+      if (!drDims.length) { m.className = 'msg err'; m.textContent = t('sc.needone'); return; }
+      if (drDims.some(d => !d.name)) { m.className = 'msg err'; m.textContent = t('sc.needname'); return; }
+      const total = Math.round(drDims.reduce((a, d) => a + (d.weight || 0), 0) * 10) / 10;
+      if (Math.abs(total - 100) > 0.5) { m.className = 'msg err'; m.textContent = t('sc.mustbe100').replace('{total}', () => total); return; }
+      const b = $('drSave'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await adminFetch(`${API}/admin/default-rubric`, { method: 'PUT', headers: jhdr(),
+          body: JSON.stringify({ dimensions: drDims, rubric: $('drRubric').value }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { m.className = 'msg err'; m.textContent = d.detail || t('toast.error'); return; }
+        drApply(d);
+        m.className = 'msg ok'; m.textContent = t('pb.defrubric.saved'); CQ.toast(t('pb.defrubric.saved'), 'ok');
+      } finally { b.disabled = false; b.textContent = t('sc.save'); }
+    });
 
     // ---- BOT CONTROL: autopilot kill switch + per-tenant state -------------------------
     // The switch itself is one `app_settings` blob: {global_disabled, disabled_clients:[id]}.

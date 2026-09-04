@@ -11,6 +11,10 @@
   <link rel="stylesheet" href="brand.css" />
   <link rel="icon" href="favicon.png" />
   <script src="brand.js"></script>
+  <!-- The call workbench and its player. Both are self-contained: they inject their own CSS
+       and register their own en/ka/ru strings, so they must load AFTER brand.js. -->
+  <script src="timeline.js"></script>
+  <script src="workbench.js"></script>
   <style>
     /* KB Health (curation review queue). Shared visual language with kb-admin.html. */
     .cur-q { background:var(--input-bg); border:1px solid var(--hairline); border-left:3px solid var(--beam);
@@ -79,8 +83,7 @@
       <div class="tabs">
         <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
-        <div class="tab" data-tab="playground"><span>🧪</span> <span data-i18n="tab.playground"></span></div>
-        <div class="tab" data-tab="scoring"><span>🎯</span> <span data-i18n="tab.scoring"></span></div>
+        <div class="tab" data-tab="rubric"><span>🎯</span> <span data-i18n="tab.scoring"></span></div>
         <div class="tab" data-tab="health"><span>🩺</span> <span data-i18n="cur.tab"></span></div>
         <div class="tab" data-tab="bot"><span>🤖</span> <span data-i18n="tab.bot"></span></div>
         <div class="tab" data-tab="history"><span>🗂</span> <span data-i18n="tab.history"></span></div>
@@ -248,74 +251,12 @@
         </div>
       </section>
 
-      <!-- ANALYZE -->
+      <!-- ANALYSE — the call workbench: one upload (audio OR a pasted transcript), one player,
+           and each analyser a toggleable lane on the same timeline. The panel is entirely
+           CQ.Workbench (workbench.js); this page only supplies the auth, the rubric link and
+           the tenant's sentiment guidance, and opens stored recordings into it from History. -->
       <section class="panel" id="panel-analyze">
-        <div class="card">
-          <h3 data-i18n="an.heading_kb"></h3>
-          <label data-i18n="f.audiofile"></label>
-          <div class="drop" id="audioDrop">
-            <input type="file" id="audio" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
-            <div class="drop-title" id="audioDropTitle" data-i18n="drop.title"></div>
-            <div class="drop-sub" data-i18n="drop.sub_kb"></div>
-          </div>
-          <div class="rec-row">
-            <span class="hint" data-i18n="rec.or"></span>
-            <button class="ghost" type="button" id="recBtn"></button>
-            <span class="rec-status hint" id="recStatus"></span>
-          </div>
-          <div class="actions"><button class="primary" id="analyzeBtn" data-i18n="btn.analyze"></button></div>
-          <div class="msg err" id="analyzeErr"></div>
-        </div>
-        <div id="analyzeResult"></div>
-      </section>
-
-      <!-- PLAYGROUND -->
-      <section class="panel" id="panel-playground">
-        <div class="card">
-          <h3 data-i18n="pg.heading"></h3>
-          <div class="subtabs" id="pgTabs">
-            <div class="subtab active" data-pg="text" data-i18n="pg.mode.text"></div>
-            <div class="subtab" data-pg="audio" data-i18n="pg.mode.audio"></div>
-            <div class="subtab" data-pg="sentiment" data-i18n="pg.mode.sentiment"></div>
-          </div>
-          <div id="pg-text">
-            <label data-i18n="pg.ans.label"></label>
-            <textarea id="pgText" data-i18n-ph="pg.ans.ph" style="min-height:110px"></textarea>
-          </div>
-          <div id="pg-audio" class="hidden">
-            <label data-i18n="pg.audiolabel"></label>
-            <div class="drop" id="pgDrop">
-              <input type="file" id="pgFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
-              <div class="drop-title" id="pgDropTitle" data-i18n="drop.title"></div>
-              <div class="drop-sub" data-i18n="drop.sub_kb"></div>
-            </div>
-          </div>
-          <!-- SENTIMENT — deliberately separate from the audio/text scoring modes above:
-               config here, own Save button, then a plain audio-in/sentiment-out tool that
-               shares the page's single pgRun button. -->
-          <div id="pg-sentiment" class="hidden">
-            <div class="sub" style="margin-bottom:14px">
-              <div class="inline" style="justify-content:space-between; align-items:baseline">
-                <b style="color:var(--mist)" data-i18n="sn.config"></b>
-                <span class="hint" id="snCfgMsg"></span>
-              </div>
-              <p class="hint hidden" id="snReadonly" data-i18n="sn.readonly" style="color:var(--pending)"></p>
-              <label class="inline" style="gap:8px"><input type="checkbox" id="snEnabled" /> <span data-i18n="sn.enabled"></span></label>
-              <label data-i18n="sn.guidance"></label>
-              <textarea id="snGuidance" data-i18n-ph="sn.guidance.ph" style="min-height:70px"></textarea>
-              <div class="actions"><button class="ghost" id="snCfgSave" data-i18n="sn.save"></button></div>
-            </div>
-            <label data-i18n="sn.audiolabel"></label>
-            <div class="drop" id="pgSnDrop">
-              <input type="file" id="pgSnFile" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.amr,.aiff,.oga,.3gp" />
-              <div class="drop-title" id="pgSnDropTitle" data-i18n="drop.title"></div>
-              <div class="drop-sub" data-i18n="drop.sub_sn"></div>
-            </div>
-          </div>
-          <div class="actions"><button class="primary" id="pgRun" data-i18n="pg.run"></button></div>
-          <div class="msg err" id="pgErr"></div>
-        </div>
-        <div id="pgResult"></div>
+        <div id="wbHost"></div>
       </section>
 
       <!-- KB HEALTH (curation review queue) -->
@@ -431,14 +372,17 @@
         </div>
       </section>
 
-      <!-- SCORING (self-serve rubric config; same editor as the KB-admin console) -->
-      <section class="panel" id="panel-scoring">
+      <!-- RUBRIC (self-serve rubric config; same editor as the KB-admin console) -->
+      <section class="panel" id="panel-rubric">
         <div class="card">
           <div class="inline" style="justify-content:space-between; align-items:baseline; margin-bottom:14px">
             <h3 style="margin:0" data-i18n="sc.heading"></h3>
             <span class="hint" id="scVersion"></span>
           </div>
           <p class="hint hidden" id="scReadonly" data-i18n="sc.readonly" style="color:var(--pending)"></p>
+          <!-- Shown while `/scoring/config` answers with is_default: the numbers on screen are
+               the shared default, not this workspace's rubric, and saving is what forks it. -->
+          <div class="msg hidden" id="scDefaultNote" data-i18n="tn.sc.isdefault"></div>
           <div id="scDims"></div>
           <div class="actions" style="justify-content:space-between; align-items:center">
             <div class="inline" style="gap:8px">
@@ -464,20 +408,29 @@
           <hr class="sep" />
           <label data-i18n="sc.rubric"></label>
           <textarea id="scRubric" style="min-height:80px" data-i18n-ph="sc.rubric.ph"></textarea>
-          <div class="actions"><button class="primary" id="scSave" data-i18n="sc.save"></button></div>
+          <div class="actions" style="justify-content:space-between; align-items:center">
+            <button class="ghost" id="scReset" data-i18n="tn.sc.reset"></button>
+            <button class="primary" id="scSave" data-i18n="sc.save"></button>
+          </div>
           <div class="msg" id="scMsg"></div>
         </div>
       </section>
 
-      <!-- HISTORY -->
+      <!-- HISTORY — everything this workspace has run: the recordings (audio uploads AND
+           pasted transcripts, including the rows the old /analyze pipeline created) and the
+           call summaries. A row is not a dead end: clicking it re-opens the recording in the
+           Analyse tab, with its stored results and, while the file is still kept, its audio. -->
       <section class="panel" id="panel-history">
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:center">
-            <h3 style="margin:0" data-i18n="hist.heading"></h3><button class="ghost" id="reloadJobs" data-i18n="btn.refresh"></button>
+            <h3 style="margin:0" data-i18n="tn.hist.rec"></h3><button class="ghost" id="reloadHist" data-i18n="btn.refresh"></button>
           </div>
-          <div id="jobList" style="margin-top:12px"></div>
+          <div id="recList" style="margin-top:12px"></div>
         </div>
-        <div id="jobDetail"></div>
+        <div class="card">
+          <h3 style="margin:0 0 12px" data-i18n="tn.hist.sum"></h3>
+          <div id="sumList"></div>
+        </div>
       </section>
     </div>
   </main>
@@ -498,11 +451,12 @@
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
       tb.classList.add('active'); $('panel-'+tb.dataset.tab).classList.add('active');
-      if (tb.dataset.tab==='kb') kbLoad(); if (tb.dataset.tab==='history') loadJobs();
+      if (tb.dataset.tab==='kb') kbLoad(); if (tb.dataset.tab==='history') loadHistory();
       if (tb.dataset.tab==='health') loadCuration();
       if (tb.dataset.tab==='bot') loadBot();
-      if (tb.dataset.tab==='scoring') loadScoring();
+      if (tb.dataset.tab==='rubric') loadScoring();
     }));
+    function showTab(name) { const tb = document.querySelector(`.tab[data-tab="${name}"]`); if (tb) tb.click(); }
     // KB console subtabs. Scoped by container id — the import switcher below and the rubric
     // playground's switcher are separate `.subtab` groups on the same page.
     document.querySelectorAll('#kbTabs .subtab').forEach(s => s.addEventListener('click', () => {
@@ -519,7 +473,7 @@
       // The custom <select> paints its own trigger from option text, so applyI18n alone
       // leaves it showing the previous language until it is re-rendered.
       ['kfStatus','kfVis','kChunkDoc'].forEach(id => CQ.syncSelect($(id)));
-      kbLoad(); loadJobs();
+      kbLoad(); if ($('panel-history').classList.contains('active')) loadHistory();
       if ($('panel-health').classList.contains('active')) loadCuration();
       if (scLoaded) { scReadDom(); scRenderDims(); scShowVersion(); } // relabel, keep unsaved edits
       if (botCfg) botStatePill(); } });   // the state pill is built in JS, not data-i18n
@@ -538,16 +492,6 @@
     }
     paintTplLinks();
     document.addEventListener('cq:lang', paintTplLinks);
-    // dropzone
-    const audioInput = $('audio');
-    { const drop = $('audioDrop');
-      audioInput.addEventListener('change', () => { const f = audioInput.files[0];
-        $('audioDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
-      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
-      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
-      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { audioInput.files = e.dataTransfer.files; audioInput.dispatchEvent(new Event('change')); } });
-      CQ.attachRecorder({ button: $('recBtn'), status: $('recStatus'), fileInput: audioInput });
-    }
 
     // unified login (tenant users + superadmin).
     // Sessions are DELIBERATELY per-tab (sessionStorage): a QA console signed into customer
@@ -576,6 +520,7 @@
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
       if (client) { $('who').textContent = client.name; document.title = 'CommuniQ — ' + client.name; }
       CQ.enhanceSelects($('panel-kb'));
+      mountWorkbench();
       kbLoad();
     }
     // An expired token mid-session: one gate, one message, instead of every feature quietly
@@ -1192,103 +1137,81 @@
     });
     $('kbq').addEventListener('keydown', e => { if (e.key==='Enter') $('kbSearchBtn').click(); });
 
-    // analyze
-    $('analyzeBtn').addEventListener('click', async () => {
-      const f = $('audio').files[0]; const err = $('analyzeErr'); const out = $('analyzeResult');
-      err.textContent=''; out.innerHTML='';
-      if (!f) { err.textContent = t('stt.nofile'); return; }
-      const btn = $('analyzeBtn'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+t('btn.analyze')+'…';
-      try {
-        const fd = new FormData(); fd.append('file', f);
-        const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
-        const d = await CQ.readResp(r);
-        out.innerHTML = renderAnalysis(d); CQ.toast(t('res.done'), 'ok');
-      } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
-      finally { btn.disabled=false; btn.textContent=t('btn.analyze'); }
-    });
-    function renderAnalysis(d) {
-      // Shared with the KB-admin console's Playground audio-score mode — see brand.js.
-      return CQ.analysisHTML(d) + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
-    }
-    // ---- Playground: score typed text, an uploaded audio/video, OR run standalone sentiment ----
-    document.querySelectorAll('#pgTabs .subtab').forEach(s => s.addEventListener('click', () => {
-      document.querySelectorAll('#pgTabs .subtab').forEach(x=>x.classList.remove('active')); s.classList.add('active');
-      $('pg-text').classList.toggle('hidden', s.dataset.pg!=='text');
-      $('pg-audio').classList.toggle('hidden', s.dataset.pg!=='audio');
-      $('pg-sentiment').classList.toggle('hidden', s.dataset.pg!=='sentiment');
-      if (s.dataset.pg==='sentiment') loadSentimentConfig();
-    }));
-    { const drop = $('pgDrop'), inp = $('pgFile');
-      inp.addEventListener('change', () => { const f = inp.files[0];
-        $('pgDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
-      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
-      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
-      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
-    }
-    { const drop = $('pgSnDrop'), inp = $('pgSnFile');
-      inp.addEventListener('change', () => { const f = inp.files[0];
-        $('pgSnDropTitle').innerHTML = f ? `<span class="drop-file">${esc(f.name)}</span>` : t('drop.title'); });
-      ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
-      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
-      drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { inp.files = e.dataTransfer.files; inp.dispatchEvent(new Event('change')); } });
-    }
-    // Sentiment config: same owner|apikey policy as the Scoring tab (ROLE is set in enter()).
-    async function loadSentimentConfig() {
-      const ro = ROLE !== 'owner';
-      $('snReadonly').classList.toggle('hidden', !ro);
-      $('snEnabled').disabled = ro; $('snGuidance').disabled = ro;
-      $('snCfgSave').classList.toggle('hidden', ro);
-      $('snCfgMsg').textContent='';
-      try {
+    /* ==================================================================================
+       ANALYSE — CQ.Workbench
+       One upload (audio, or a pasted transcript), one player, and four analysers that each
+       add their own lanes to the same timeline. Everything the panel does lives in
+       workbench.js; this page only hands it the session (auth headers + the 401 funnel), the
+       link back to the Rubric tab, and the tenant's sentiment guidance.
+       Mounted once, at sign-in, because History opens rows into it (wb.open) from a tab that
+       may be visited before Analyse ever is.
+       ================================================================================== */
+    let wb = null;
+    let snEnabled = true;   // the sentiment on/off flag, round-tripped through the guidance save
+
+    // The Guidance block inside the Semantic tab is the old Playground's sentiment form.
+    // `readonly` follows the same owner|apikey policy the server enforces on PUT, so a member
+    // sees the guidance the analyser is actually using without a Save button that would 403.
+    const sentimentConfig = {
+      get: async () => {
         const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { headers: authH() }));
-        $('snEnabled').checked = !!d.enabled; $('snGuidance').value = d.guidance || '';
-      } catch(e){ $('snCfgMsg').textContent = e.message; }
+        snEnabled = d.enabled !== false;
+        const ro = ROLE !== 'owner';
+        const ck = $('wbHost') && $('wbHost').querySelector('#snEnabled');
+        if (ck) { ck.checked = snEnabled; ck.disabled = ro; }
+        return { guidance: d.guidance || '', readonly: ro };
+      },
+      put: async ({ guidance }) => {
+        const ck = $('wbHost') && $('wbHost').querySelector('#snEnabled');
+        if (ck) snEnabled = ck.checked;
+        const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { method: 'PUT',
+          headers: authH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ enabled: snEnabled, guidance }) }));
+        snEnabled = d && d.enabled !== false;
+        return d;
+      },
+    };
+
+    function mountWorkbench() {
+      if (wb || typeof CQ.Workbench !== 'function') return;
+      wb = CQ.Workbench($('wbHost'), {
+        api: API, headers: () => authH(), fetch: apiFetch,
+        features: ['factcheck', 'score', 'semantic', 'summarise'],
+        rubricHref: '#rubric', sentimentConfig,
+        // XHR uploads bypass apiFetch, so the workbench reports its own 401s back here —
+        // one expired session, one gate, exactly as everywhere else on this page.
+        onUnauthorized: sessionExpired,
+      });
+      // "Edit the rubric" inside the Score tab is a link to a tab, not to a page.
+      $('wbHost').addEventListener('click', e => {
+        const a = e.target.closest('a[href="#rubric"]');
+        if (a) { e.preventDefault(); showTab('rubric'); }
+      });
+      // Two controls the tenant portal had before the workbench existed and would otherwise
+      // lose. Both are added to the component's own markup rather than duplicated beside it,
+      // and both no-op silently if the workbench ever stops rendering that markup.
+      //   1. the sentiment ON/OFF switch (the Guidance block carries only the text);
+      //   2. recording straight from the microphone into the source card.
+      const guideBody = $('wbHost').querySelector('.wb-guide-body');
+      if (guideBody) {
+        const lab = document.createElement('label');
+        lab.className = 'inline'; lab.style.gap = '8px'; lab.style.marginBottom = '10px';
+        lab.innerHTML = `<input type="checkbox" id="snEnabled" style="width:auto" /> <span data-i18n="sn.enabled"></span>`;
+        guideBody.insertBefore(lab, guideBody.querySelector('label'));
+        CQ.applyI18n(lab);
+      }
+      const audioPane = $('wbHost').querySelector('.wb-mode-audio');
+      const wbInput = $('wbHost').querySelector('.wb-drop input');
+      if (audioPane && wbInput) {
+        const row = document.createElement('div');
+        row.className = 'rec-row';
+        row.innerHTML = `<span class="hint" data-i18n="rec.or"></span>
+          <button class="ghost" type="button" id="wbRecBtn"></button>
+          <span class="rec-status hint" id="wbRecStatus"></span>`;
+        audioPane.appendChild(row); CQ.applyI18n(row);
+        CQ.attachRecorder({ button: $('wbRecBtn'), status: $('wbRecStatus'), fileInput: wbInput });
+      }
     }
-    $('snCfgSave').addEventListener('click', async () => {
-      const m = $('snCfgMsg'); m.textContent='';
-      const btn = $('snCfgSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
-      try {
-        await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { method:'PUT',
-          headers: authH({'Content-Type':'application/json'}),
-          body: JSON.stringify({ enabled: $('snEnabled').checked, guidance: $('snGuidance').value }) }));
-        m.textContent = t('sn.saved'); CQ.toast(t('sn.saved'),'ok');
-      } catch(e){ m.textContent = e.message; CQ.toast(e.message,'err'); }
-      finally { btn.disabled=false; btn.textContent=t('sn.save'); }
-    });
-    $('pgRun').addEventListener('click', async () => {
-      const mode = (document.querySelector('#pgTabs .subtab.active')||{}).dataset.pg || 'text';
-      const err = $('pgErr'), out = $('pgResult'); err.textContent=''; out.innerHTML='';
-      const btn = $('pgRun'), label = mode==='sentiment' ? t('sn.run') : t('pg.run');
-      try {
-        if (mode === 'text') {
-          const text = $('pgText').value.trim();
-          if (!text) { err.textContent = t('pg.ans.empty'); return; }
-          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
-          const r = await apiFetch(`${API}/scoring/score-text`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ text, factcheck: true }) });
-          const d = await CQ.readResp(r);
-          out.innerHTML = (d.config_version ? `<div class="hint" style="margin-bottom:8px">${t('pg.ans.usingv')} ${d.config_version}</div>` : '')
-            + CQ.scorecardHTML(d.scoring) + CQ.factcheckHTML(d.kb_check);
-        } else if (mode === 'audio') {
-          const f = $('pgFile').files[0];
-          if (!f) { err.textContent = t('pg.audioempty'); return; }
-          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
-          const fd = new FormData(); fd.append('file', f);
-          const r = await apiFetch(`${API}/analyze`, { method:'POST', headers: authH(), body: fd });
-          const d = await CQ.readResp(r);
-          out.innerHTML = renderAnalysis(d);
-        } else {
-          const f = $('pgSnFile').files[0];
-          if (!f) { err.textContent = t('pg.audioempty'); return; }
-          btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'+label+'…';
-          const fd = new FormData(); fd.append('file', f);
-          const r = await apiFetch(`${API}/sentiment`, { method:'POST', headers: authH(), body: fd });
-          const d = await CQ.readResp(r);
-          out.innerHTML = CQ.sentimentHTML(d.sentiment) || `<div class="card"><p class="muted">${t('sn.none')}</p></div>`;
-        }
-        CQ.toast(t(mode === 'sentiment' ? 'sn.done' : 'pg.done'), 'ok');
-      } catch(e){ err.textContent = e.message; CQ.toast(e.message, 'err'); }
-      finally { btn.disabled=false; btn.textContent = label; }
-    });
 
     // ---- KB HEALTH: curation review queue ----------------------------------------------
     // Cards are per-cluster, not per-message: a tenant sees ~6-10 of these, never a feed.
@@ -1439,10 +1362,10 @@
     }
     function curSelBar() { $('curSelBar').classList.toggle('hidden', curSel.size === 0); $('curSelCount').textContent = curSel.size; }
 
-    function openSourceJob(id) {
-      const tb = document.querySelector('.tab[data-tab="history"]'); if (tb) tb.click();
-      openJob(id);
-    }
+    // "Where did this proposal come from?" — the answer is the call itself, so open the
+    // recording in the workbench (which switches tabs) rather than a History row that would
+    // then have to be clicked again.
+    function openSourceJob(id) { openRecording(id); }
 
     function declineModal() {
       const reasons = ['not_true','already_covered','dont_want','temporary'];
@@ -1668,7 +1591,7 @@
     });
 
     // ---- Scoring rubric (self-serve config; view-only for members, editable by owners) ----
-    let scDims = [], scLoaded = false, scVer = null;
+    let scDims = [], scLoaded = false, scVer = null, scIsDefault = false;
     const scEditable = () => ROLE === 'owner';
     function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
     function scRow(d, i) {
@@ -1889,16 +1812,51 @@
       $('scMsg').textContent=''; $('scMsg').className='msg';
       const ro = !scEditable();
       $('scReadonly').classList.toggle('hidden', !ro);
-      ['scAdd','scNormalize','scSave','scImport'].forEach(id => $(id).classList.toggle('hidden', ro));
+      ['scAdd','scNormalize','scSave','scImport','scReset'].forEach(id => $(id).classList.toggle('hidden', ro));
       $('scRubric').disabled = ro;
       try {
         const cfg = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }));
         scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
         $('scRubric').value = cfg.rubric || '';
         scVer = cfg.version || null; scLoaded = true; scShowVersion();
+        // `is_default` means these numbers belong to the shared default, not to this
+        // workspace — and there is nothing to reset to what is already on screen.
+        scIsDefault = cfg.is_default === true;
+        $('scDefaultNote').classList.toggle('hidden', !scIsDefault);
+        $('scReset').classList.toggle('hidden', ro || scIsDefault);
         scRenderDims();
       } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
     }
+
+    /* Reset to the default rubric. This throws away a rubric someone may have spent a day
+       tuning, so the server asks the caller to re-enter their OWN password — which means a
+       password field, in a brand modal (never a native prompt), and a 403 answered where the
+       field is rather than as a toast that disappears. */
+    $('scReset').addEventListener('click', () => {
+      const bg = showModal(`<h3>${t('tn.sc.reset.heading')}</h3>
+        <p class="hint">${t('tn.sc.reset.warn')}</p>
+        <label for="scResetPw">${t('tn.sc.reset.pw')}</label>
+        <input type="password" id="scResetPw" autocomplete="current-password" />
+        <div class="actions"><button class="ghost" data-c>${t('btn.cancel')}</button>
+          <button class="danger" id="scResetGo">${t('tn.sc.reset')}</button></div>
+        <div class="msg err" id="scResetMsg" aria-live="polite"></div>`, '520px');
+      const pw = bg.querySelector('#scResetPw'), go = bg.querySelector('#scResetGo'), msg = bg.querySelector('#scResetMsg');
+      bg.querySelector('[data-c]').addEventListener('click', () => bg.remove());
+      pw.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+      pw.focus();
+      go.addEventListener('click', async () => {
+        msg.textContent = '';
+        if (!pw.value) { msg.textContent = t('tn.sc.reset.needpw'); pw.focus(); return; }
+        go.disabled = true; go.innerHTML = '<span class="spinner"></span>';
+        const r = await kbPost(`${API}/scoring/reset`, { password: pw.value });
+        if (r.ok) { bg.remove(); CQ.toast(t('tn.sc.reset.done'), 'ok'); loadScoring(); return; }
+        const d = await r.json().catch(() => ({}));
+        // 403 is the wrong password — say so in this language, not in the server's English.
+        msg.textContent = r.status === 403 ? t('tn.sc.reset.bad') : ((d && d.detail) || t('toast.error'));
+        go.disabled = false; go.textContent = t('tn.sc.reset');
+        pw.select();
+      });
+    });
     $('scSave').addEventListener('click', async () => {
       scReadDom();
       if (!scDims.length) { $('scMsg').className='msg err'; $('scMsg').textContent=t('sc.needone'); return; }
@@ -1913,23 +1871,100 @@
         CQ.toast(t('sc.saved'),'ok');
         scDims = (d.dimensions||[]).map(x=>({key:x.key,name:x.name,weight:x.weight,description:x.description,guidance:x.guidance}));
         $('scRubric').value = d.rubric||''; scVer = d.version||null; scShowVersion(); scRenderDims();
+        // Saving is what forks the shared default into a rubric of this workspace's own.
+        scIsDefault = false; $('scDefaultNote').classList.add('hidden');
+        $('scReset').classList.toggle('hidden', !scEditable());
       } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
       finally { btn.disabled=false; btn.textContent=t('sc.save'); }
     });
 
-    // history
-    $('reloadJobs').addEventListener('click', loadJobs);
-    async function loadJobs() {
-      const r = await apiFetch(`${API}/jobs`, { headers: authH() }); if (!r.ok) return; const jobs = await r.json();
-      const box = $('jobList');
-      box.innerHTML = jobs.length ? `<div class="table-wrap"><table><thead><tr><th>${t('th.file')}</th><th>${t('th.status')}</th><th>${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
-        jobs.map(j=>`<tr style="cursor:pointer" data-id="${j.id}"><td>${esc(j.filename||'—')}</td><td><span class="pill ${j.status==='done'?'ready':j.status==='error'?'error':'processing'}">${esc(j.status)}</span></td><td>${esc(j.language||'—')}</td><td class="hint">${new Date(j.created_at).toLocaleString()}</td></tr>`).join('') + `</tbody></table></div>`
-        : `<div class="empty">${t('hist.none')}</div>`;
-      box.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openJob(tr.dataset.id)));
+    /* ==================================================================================
+       HISTORY
+       `/recordings` supersedes the old `/jobs` listing for a tenant: both read the same
+       `audio_jobs` rows under the same scope, and the newer one also says which analysers
+       have run, whether the audio is still stored and whether the source was a file or a
+       pasted transcript. So the legacy list is MIGRATED, not kept beside it — rows the old
+       /analyze pipeline created appear here too, and open in the workbench with whatever
+       results they carry (no stored audio, so those play as text).
+       ================================================================================== */
+    $('reloadHist').addEventListener('click', loadHistory);
+    function loadHistory() { loadRecordings(); loadSummaries(); }
+
+    const fmtSecs = s => (s == null || !isFinite(s)) ? '—'
+      : Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
+    // Which analysers have run, in the workbench's own words — never a bare true/false column.
+    function ranChips(ran) {
+      const r = (ran && typeof ran === 'object') ? ran : {};
+      const on = ['factcheck','score','semantic'].filter(k => r[k]);
+      return on.length ? on.map(k => `<span class="chip">${esc(t('wb.tab.' + k))}</span>`).join(' ')
+                       : '<span class="hint">—</span>';
     }
-    async function openJob(id) {
-      const r = await apiFetch(`${API}/jobs/${id}`, { headers: authH() }); const d = await r.json();
-      if (r.ok) $('jobDetail').innerHTML = renderAnalysis(d);
+
+    async function loadRecordings() {
+      const box = $('recList');
+      const d = await kbJson(`${API}/recordings?limit=50`);
+      if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const rows = Array.isArray(d) ? d : [];
+      if (!rows.length) { box.innerHTML = `<div class="empty">${t('tn.hist.rec.none')}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th>${t('th.file')}</th><th class="tight">${t('tn.th.source')}</th><th>${t('th.status')}</th>
+        <th class="tight">${t('th.lang')}</th><th class="tight hide-md">${t('tn.th.length')}</th>
+        <th class="hide-md">${t('tn.th.ran')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        rows.map(x => `<tr style="cursor:pointer" data-rec="${esc(x.id)}" tabindex="0" role="button"
+            title="${esc(t('tn.hist.open'))}" aria-label="${esc(t('tn.hist.open'))}">
+          <td>${esc(x.filename || (x.source === 'text' ? t('wb.src.text') : '—'))}</td>
+          <td class="tight"><span class="chip">${x.source === 'text' ? t('tn.src.text') : t('tn.src.audio')}</span></td>
+          <td><span class="pill ${x.status==='done'||x.status==='ready'?'ready':x.status==='error'?'error':'processing'}">${esc(x.status)}</span></td>
+          <td class="tight">${esc(x.language || '—')}</td>
+          <td class="tight hide-md">${esc(fmtSecs(x.duration_s))}</td>
+          <td class="hide-md">${ranChips(x.ran)}</td>
+          <td class="hint">${new Date(x.created_at).toLocaleString()}</td></tr>`).join('') +
+        `</tbody></table></div>`;
+      box.querySelectorAll('tr[data-rec]').forEach(tr => {
+        const go = () => openRecording(tr.dataset.rec);
+        tr.addEventListener('click', go);
+        tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+      });
+    }
+
+    async function loadSummaries() {
+      const box = $('sumList');
+      const d = await kbJson(`${API}/summaries?limit=50`);
+      if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
+      const rows = Array.isArray(d) ? d : [];
+      if (!rows.length) { box.innerHTML = `<div class="empty">${t('tn.hist.sum.none')}</div>`; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr>
+        <th class="tight">${t('tn.th.calls')}</th><th>${t('tn.th.summary')}</th>
+        <th class="tight">${t('th.lang')}</th><th>${t('th.when')}</th></tr></thead><tbody>` +
+        rows.map(x => `<tr style="cursor:pointer" data-sum="${esc(x.id)}" tabindex="0" role="button"
+            title="${esc(t('tn.hist.open'))}" aria-label="${esc(t('tn.hist.open'))}">
+          <td class="tight">${x.call_count ?? 0}</td>
+          <td>${esc((x.short_summary || '').slice(0, 160)) || '—'}</td>
+          <td class="tight">${esc(x.language || '—')}</td>
+          <td class="hint">${new Date(x.created_at).toLocaleString()}</td></tr>`).join('') +
+        `</tbody></table></div>`;
+      box.querySelectorAll('tr[data-sum]').forEach(tr => {
+        const go = () => openSummaryRow(tr.dataset.sum);
+        tr.addEventListener('click', go);
+        tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+      });
+    }
+
+    /* Opening a row means SHOWING it, in the tab that can play and re-run it — so switch
+       tabs first, then hand the workbench the full row (it fetches the audio itself). */
+    async function openRecording(id) {
+      if (!wb) return;
+      showTab('analyze');
+      const d = await kbJson(`${API}/recordings/${encodeURIComponent(id)}`);
+      if (!d || !d.id) { CQ.toast(t('tkb.loadfail'), 'err'); return; }
+      wb.open(d);
+    }
+    async function openSummaryRow(id) {
+      if (!wb) return;
+      showTab('analyze');
+      const d = await kbJson(`${API}/summaries/${encodeURIComponent(id)}`);
+      if (!d || !d.id) { CQ.toast(t('tkb.loadfail'), 'err'); return; }
+      wb.openSummary(d);
     }
 
     if (TOKEN) {
