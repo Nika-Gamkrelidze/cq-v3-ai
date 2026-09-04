@@ -624,7 +624,7 @@
           <td class="hint">${esc(fmtWhen(r.created_at))}</td>
           <td class="hint">${esc(expiryLabel(r.expires_at) || '—')}</td>
           <td>${r.download_path
-            ? `<button class="act" data-dl="${esc(r.download_path)}" title="${esc(t('cv.download'))}" aria-label="${esc(t('cv.download'))}">⭳</button>`
+            ? `<button class="act" data-dl="${esc(r.download_path)}" title="${esc(t('cv.download'))}" aria-label="${esc(t('cv.download'))}">${CQ.ICON_DL}</button>`
             : `<span class="hint">${esc(t('ac.hist.expired'))}</span>`}</td></tr>`).join('') + `</tbody></table></div>`;
       box.querySelectorAll('[data-dl]').forEach(b => b.addEventListener('click', () => authedDownload(b.dataset.dl, 'converted.zip')));
     }

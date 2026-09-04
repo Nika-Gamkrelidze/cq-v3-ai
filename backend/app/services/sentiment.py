@@ -39,7 +39,12 @@ _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 # Per-segment prosody classifies every turn of a whole call (up to 30 min of decoded audio,
 # batched through the model) rather than one window — the same connect budget, four times
 # the read budget.
-_SEGMENTS_TIMEOUT = httpx.Timeout(120.0, connect=3.0)
+# Read budget for the per-segment call. Generous on purpose: the sidecar decodes the whole
+# file with ffmpeg and then runs one CPU forward pass per speaker turn, on a box that is also
+# serving the embedding encoder. A warm sidecar answers a short call in seconds, but a long
+# call with a hundred turns is genuinely minutes of work, and timing it out means the reviewer
+# is told "unavailable" for something that was merely slow.
+_SEGMENTS_TIMEOUT = httpx.Timeout(300.0, connect=3.0)
 
 # Discrete labels the sidecar may return, mapped to the coarse polarity the UI colours by.
 _POLARITY = {
@@ -281,10 +286,15 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
                            content_type: str | None = None) -> list | None:
     """Acoustic emotion per segment from the sidecar's `POST /prosody/segments`, or None.
 
-    Returns `[{"i", "label", "polarity", "confidence", "arousal", "valence"}]` — one entry
-    per range the sidecar answered for (a slice too short to classify comes back "unknown").
-    Never raises: the same failure modes as `prosody()` resolve to None, and the caller
-    reports the voice half as unavailable instead of losing the text half.
+    Returns `(items, status)`. `items` is `[{"i", "label", "polarity", "confidence",
+    "arousal", "valence"}]` — one entry per range the sidecar answered for (a slice too short
+    to classify comes back "unknown") — or None when there is nothing to report.
+
+    `status` is why: ok | disabled | no_audio | no_timestamps | timeout | unreachable | error.
+    It exists because this used to return a bare None for every one of those, so a reviewer
+    who was told "voice tone unavailable" had no way to tell a sidecar that was still warming
+    up from a recording that never had timestamps — and neither did anyone reading the logs.
+    Never raises: a tone model must not cost the caller the text half of the analysis.
 
     Unlike `prosody()` the upload is NOT truncated: cutting the tail off a compressed file
     would shift or lose every later range, which is worse than no answer. The body is already
@@ -293,8 +303,14 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
     cfg = await settings_store.get_effective()
     url = (cfg.get("sentiment_url") or "").strip()
     ranges = _ranges(segments)
-    if not url or not audio or not ranges:
-        return None
+    if not url:
+        return None, "disabled"
+    if not audio:
+        return None, "no_audio"
+    if not ranges:
+        # Every turn lacks a usable time range — a pasted transcript, or a recording made
+        # before transcripts carried timings. There is nothing to slice.
+        return None, "no_timestamps"
 
     try:
         async with httpx.AsyncClient(timeout=_SEGMENTS_TIMEOUT) as client:
@@ -305,16 +321,20 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
             )
             resp.raise_for_status()
             data = resp.json()
-    except (httpx.HTTPError, ValueError, asyncio.TimeoutError) as exc:
+    except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+        # Almost always a sidecar that is still fetching its model, or a very long call.
+        log.warning("per-segment prosody timed out: %s", exc)
+        return None, "timeout"
+    except (httpx.HTTPError, ValueError) as exc:
         log.warning("per-segment prosody unavailable: %s", exc)
-        return None
+        return None, "unreachable"
     except Exception:  # noqa: BLE001 — a tone model must never break the analysis
         log.exception("per-segment prosody failed")
-        return None
+        return None, "error"
 
     items = data.get("segments") if isinstance(data, dict) else None
     if not isinstance(items, list):
-        return None
+        return None, "error"
     out = []
     for item in items:
         if not isinstance(item, dict) or isinstance(item.get("i"), bool):
@@ -332,4 +352,4 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
             "arousal": _clamp01(item.get("arousal")),
             "valence": _clamp01(item.get("valence")),
         })
-    return out
+    return out, "ok"

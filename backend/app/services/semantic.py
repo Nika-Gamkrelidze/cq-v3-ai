@@ -135,9 +135,16 @@ TONE_TOOL = {
 }
 
 _TONE_SYSTEM = """\
-You assess the tone of a customer-support conversation from its transcript — the WORDS ONLY. \
-Tone of voice (pitch, loudness, pace) is measured separately from the audio and is not your \
-job: judge what was said, never how it may have sounded.
+You perform SENTIMENT analysis on a customer-support conversation from its transcript — the \
+WORDS ONLY. Tone of voice (pitch, loudness, pace) is measured separately from the audio and is \
+not your job: judge what was said, never how it may have sounded.
+
+Judge FEELING, not facts. You are reading for the emotional register of the wording — warmth, \
+patience, frustration, anxiety, dismissiveness, hostility, relief — and how courteous or \
+hostile each turn is toward the other person. Do NOT summarise what the call was about, do not \
+assess whether the answers were correct, and do not evaluate how well the problem was solved: \
+other features do that. A line that is factually wrong but kindly worded is polite; a line \
+that is perfectly accurate but contemptuous is rude.
 
 Each transcript line is printed as [#N time speaker] text. Rate the wording of each line:
 - polite: courteous wording — thanks, apologies, offers to help, patient explanations
@@ -418,16 +425,21 @@ async def _text_tone(segments: list[dict], *, api_key: str, model: str, guidance
 # --------------------------------------------------------------------------- #
 # Voice tone — the sidecar, per segment
 # --------------------------------------------------------------------------- #
-async def _voice_tone(segments: list[dict], audio: bytes, filename, content_type) -> dict | None:
-    """Per-position `{label, confidence}` from the sidecar, or None when it is unavailable.
-    Only segments that carry both times are sent; the rest simply get no voice reading."""
+async def _voice_tone(segments: list[dict], audio: bytes, filename,
+                      content_type) -> tuple[dict | None, str]:
+    """`(per-position {label, confidence}, status)` from the sidecar.
+
+    Only segments that carry both times are sent; the rest simply get no voice reading. The
+    status travels with the result so the caller can say WHY there is no voice half rather
+    than reporting a bare "unavailable" for six different causes.
+    """
     ranges = [{"i": s["i"], "start": s["start"], "end": s["end"]}
               for s in segments if s["start"] is not None and s["end"] is not None]
     if not ranges:
-        return None
-    items = await sentiment.prosody_segments(audio, ranges, filename, content_type)
+        return None, "no_timestamps"
+    items, status = await sentiment.prosody_segments(audio, ranges, filename, content_type)
     if items is None:
-        return None
+        return None, status
     by_pos: dict[int, dict] = {}
     for item in items:
         if not isinstance(item, dict):
@@ -437,7 +449,7 @@ async def _voice_tone(segments: list[dict], audio: bytes, filename, content_type
             continue
         by_pos[pos] = {"label": _str(item.get("label")).lower() or "unknown",
                        "confidence": item.get("confidence")}
-    return by_pos
+    return by_pos, status
 
 
 # --------------------------------------------------------------------------- #
@@ -502,8 +514,10 @@ async def analyse(*, segments, transcript, audio: bytes | None, filename, conten
 
     text_task = _text_tone(rows, api_key=api_key, model=model, guidance=guidance or "",
                            client_id=client_id) if "text" in wanted and rows else _none()
-    voice_task = _voice_tone(rows, audio, filename, content_type) if "voice" in wanted else _none()
-    text_res, voice_by_pos = await asyncio.gather(text_task, voice_task)
+    voice_task = _voice_tone(rows, audio, filename, content_type) if "voice" in wanted \
+        else _none_voice("not_requested")
+    text_res, voice_pair = await asyncio.gather(text_task, voice_task)
+    voice_by_pos, voice_status = voice_pair
 
     tone_by_pos, text_by_speaker, summary = text_res if text_res else ({}, {}, "")
     text_ran = "text" in wanted and text_res is not None
@@ -561,8 +575,15 @@ async def analyse(*, segments, transcript, audio: bytes | None, filename, conten
                   "voice": _spans(rows, voice_keyed) if voice_ran else []},
         "summary": summary,
         "voice_available": voice_ran,
+        # WHY there is no voice half, when there is none. "unavailable" alone sent a reviewer
+        # (and us) hunting through logs for a sidecar that was simply still warming up.
+        "voice_status": "ok" if voice_ran else voice_status,
     }
 
 
 async def _none():
     return None
+
+
+async def _none_voice(status: str):
+    return None, status

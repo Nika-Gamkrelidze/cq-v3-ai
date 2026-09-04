@@ -25,7 +25,8 @@ from app.services import sentiment  # noqa: E402
 SPAN_KEYS = {"segments", "start", "end", "level", "score", "label", "detail"}
 ROW_KEYS = {"i", "speaker", "start", "end", "text_tone", "text_level", "text_note",
             "voice_label", "voice_level", "voice_confidence"}
-RESULT_KEYS = {"modes", "language", "speakers", "segments", "spans", "summary", "voice_available"}
+RESULT_KEYS = {"modes", "language", "speakers", "segments", "spans", "summary",
+               "voice_available", "voice_status"}
 
 
 def seg(i, speaker, start, end, text):
@@ -94,6 +95,9 @@ class Fake:
     def __init__(self):
         self.tone = TONE_ANSWER
         self.voice = VOICE_ANSWER
+        # What the real sidecar wrapper reports when it returns no items; a test that sets
+        # `voice = None` can set this to the reason it wants to assert on.
+        self.voice_status = "unreachable"
         self.fail = None
         self.calls: list[dict] = []
         self.prosody_calls: list[tuple] = []
@@ -105,8 +109,9 @@ class Fake:
         return self.tone
 
     async def prosody_segments(self, audio, ranges, filename=None, content_type=None):
+        # Mirrors the real (items, status) contract — see services/sentiment.py.
         self.prosody_calls.append((audio, ranges, filename, content_type))
-        return self.voice
+        return self.voice, ("ok" if self.voice is not None else self.voice_status)
 
 
 @pytest.fixture
@@ -300,10 +305,38 @@ async def test_voice_judge_receives_the_audio_and_only_the_timed_ranges(fake):
 # ---------------------------------------------------------------------------
 # analyse(): the §6 record, field by field
 # ---------------------------------------------------------------------------
+async def test_voice_status_says_why_there_is_no_voice_half(fake):
+    """A missing voice half must name its cause. Reporting every one of them as a bare
+    "unavailable" is what made a sidecar still fetching its model indistinguishable from a
+    recording that never had timestamps."""
+    fake.voice, fake.voice_status = None, "timeout"
+    out = await run(fake)
+    assert out["voice_available"] is False and out["voice_status"] == "timeout"
+
+    fake.voice, fake.voice_status = None, "unreachable"
+    assert (await run(fake))["voice_status"] == "unreachable"
+
+    # Not asked for at all is its own answer, and never reaches the sidecar.
+    fake.prosody_calls.clear()
+    out = await run(fake, modes={"text"})
+    assert out["voice_status"] == "not_requested" and not fake.prosody_calls
+
+
+async def test_voice_status_no_timestamps_when_segments_carry_no_times(fake):
+    """A pasted transcript (or a recording made before transcripts carried timings) has
+    nothing to slice, so the sidecar is never called."""
+    untimed = [seg(i, "speaker_0", None, None, txt) for i, txt in enumerate(["one", "two"])]
+    out = await run(fake, segments=untimed)
+    assert out["voice_available"] is False and out["voice_status"] == "no_timestamps"
+    assert not fake.prosody_calls
+
+
+
 async def test_result_shape_and_mode_bookkeeping(fake):
     out = await run(fake, language="en")
     assert set(out) == RESULT_KEYS
     assert out["modes"] == ["text", "voice"] and out["voice_available"] is True
+    assert out["voice_status"] == "ok"
     assert out["language"] == "en" and out["summary"] == "Tense call handled politely."
     assert set(out["spans"]) == {"text", "voice"}
     assert [set(r) for r in out["segments"]] == [ROW_KEYS] * 7

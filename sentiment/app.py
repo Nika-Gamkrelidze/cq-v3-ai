@@ -24,6 +24,7 @@ and a cold model download cannot fail the whole compose up.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import logging
@@ -50,12 +51,33 @@ MIN_SLICE_SECONDS = 0.5      # under this a slice carries no usable prosody → 
 BATCH_SIZE = 16              # padded slices per forward pass
 MAX_RANGES = 4000            # a 30-min call in 0.5 s slices; anything more is a bad client
 
-app = FastAPI(title="cq-sentiment", docs_url=None, redoc_url=None)
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    """Start fetching the model the moment the container starts, in the background.
+
+    WHY this is not left lazy: the checkpoint is a ~360 MB download on first use, and until
+    this ran on the first REAL request. Measured on a warm cache a per-segment call takes
+    2-5 s; on a cold one it took 114 s — against a client read timeout of 120 s. So the first
+    person to ask for voice tone after a fresh volume paid the download, timed out, and (since
+    the API reports a tone failure as simply "unavailable") was told voice tone was not
+    available, with nothing anywhere saying why. Warming here moves that cost to container
+    start, where nobody is waiting on it.
+
+    Deliberately a daemon THREAD, not an await: the load is blocking CPU/IO work, and holding
+    up startup would make the container unhealthy for the whole download and take the rest of
+    the API's sentiment with it. /health reports `loaded` so a deploy can see the warm-up.
+    """
+    threading.Thread(target=_warm, name="cq-sentiment-warm", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="cq-sentiment", docs_url=None, redoc_url=None, lifespan=lifespan)
 
 _model = None
 _extractor = None
 _labels: list[str] = []
 _lock = threading.Lock()
+_warm_error: str | None = None
 
 # Maps whatever label set the chosen checkpoint uses onto the vocabulary the API promises.
 _ALIAS = {
@@ -126,9 +148,24 @@ def _decode(raw: bytes, max_seconds: float = MAX_SECONDS) -> "np.ndarray":
             pass
 
 
+def _warm() -> None:
+    """Background warm-up. Never raises: a failed prefetch just leaves the model unloaded, and
+    the next request retries it exactly as before."""
+    global _warm_error
+    try:
+        _load()
+        log.info("model warm: %s", MODEL_ID)
+    except Exception as exc:  # noqa: BLE001 — a failed prefetch must not kill the container
+        _warm_error = str(exc)
+        log.exception("model warm-up failed; the next request will retry")
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": MODEL_ID, "loaded": _model is not None}
+    """`loaded` is what a deploy or an operator should watch: the service answers immediately
+    but is only FAST once the model is in memory."""
+    return {"status": "ok", "model": MODEL_ID, "loaded": _model is not None,
+            "warm_error": _warm_error}
 
 
 @app.post("/prosody")

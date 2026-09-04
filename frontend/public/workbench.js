@@ -39,7 +39,7 @@
       'wb.noaudio':'The recording is no longer stored — only the transcript and its results remain.',
       'wb.audiofail':'Could not load the audio — showing the transcript only.',
       'wb.notl':'Timeline unavailable — showing the transcript.',
-      'wb.tab.factcheck':'Fact-check','wb.tab.score':'Score','wb.tab.semantic':'Semantic','wb.tab.summarise':'Summarise',
+      'wb.tab.factcheck':'Fact-check','wb.tab.score':'Score','wb.tab.semantic':'Sentiment','wb.tab.summarise':'Summarise',
       'wb.fc.note':'Checks only the correctness of information in the call against your knowledge base.',
       'wb.run.factcheck':'Check the facts','wb.run.score':'Score the call','wb.run.semantic':'Analyse the tone','wb.run.summarise':'Summarise',
       'wb.rerun':'Run again','wb.running':'Working…',
@@ -48,8 +48,8 @@
       'wb.sem.words':'Words','wb.sem.voice':'Voice tone','wb.sem.voice.off':'Voice tone needs an audio recording.','wb.sem.pickone':'Tick Words or Voice tone.',
       'wb.sem.words.tip':'Judges only what was said: the politeness, curtness or rudeness of each turn.',
       'wb.sem.voice.tip':'Rates how each speaker sounds — aggressive, tense, calm or patient — from the audio itself, not the words.',
-      'wb.sem.guidance':'Guidance','wb.sem.title':'Semantic analysis','wb.sem.politeness':'Politeness','wb.sem.flags':'Flags',
-      'wb.sem.turns':'Turn by turn','wb.sem.novoice':'Voice tone was not available for this recording.',
+      'wb.sem.guidance':'Guidance','wb.sem.title':'Sentiment analysis','wb.sem.politeness':'Politeness','wb.sem.flags':'Flags',
+      'wb.sem.turns':'Turn by turn','wb.sem.novoice':'Voice tone was not available for this recording.','wb.novoice.timeout':'The voice model was still starting up. Try again in a minute.','wb.novoice.unreachable':'The voice-tone service is not responding. Ask your operator to check it.','wb.novoice.disabled':'Voice tone is not switched on for this deployment.','wb.novoice.error':'The voice-tone service returned an unexpected answer.','wb.novoice.no_timestamps':'This recording has no per-turn timings, so the audio cannot be split by speaker turn. Recordings made before timed transcripts, and pasted transcripts, are affected.','wb.novoice.no_audio':'This is a pasted transcript — there is no audio to listen to.',
       'wb.sem.share_good':'calm','wb.sem.share_bad':'tense','wb.sem.summary':'Overall','wb.confidence':'confidence',
       'wb.tone.polite':'polite','wb.tone.neutral':'neutral','wb.tone.curt':'curt','wb.tone.impolite':'impolite','wb.tone.rude':'rude','wb.tone.aggressive':'aggressive',
       'wb.voice.aggressive':'aggressive','wb.voice.tense':'tense','wb.voice.calm':'calm','wb.voice.patient':'patient','wb.voice.unknown':'unknown',
@@ -62,7 +62,7 @@
       'wb.sum.needaudio':'Summarise works on audio recordings — add one or more files in the source card.',
       'wb.sum.done':'Summary ready','wb.fc.done':'Fact-check ready','wb.sem.done':'Tone analysis ready',
       'wb.fc.partial':'partially supported','wb.call':'Call {n}','wb.seek':'Jump to this moment',
-      'wb.lane.factcheck':'Fact-check','wb.lane.words':'Words','wb.lane.voice':'Voice',
+      'wb.lane.factcheck':'Fact-check','wb.lane.words':'Sentiment Words','wb.lane.voice':'Sentiment Voice',
     },
     ka: {
       'wb.src.title':'წყარო','wb.src.audio':'ჩანაწერის ატვირთვა','wb.src.paste':'ტრანსკრიპტის ჩასმა',
@@ -81,7 +81,7 @@
       'wb.noaudio':'ჩანაწერი აღარ ინახება — დარჩა მხოლოდ ტრანსკრიპტი და მისი შედეგები.',
       'wb.audiofail':'აუდიო ვერ ჩაიტვირთა — ნაჩვენებია მხოლოდ ტრანსკრიპტი.',
       'wb.notl':'დროის ხაზი მიუწვდომელია — ნაჩვენებია ტრანსკრიპტი.',
-      'wb.tab.factcheck':'ფაქტების შემოწმება','wb.tab.score':'შეფასება','wb.tab.semantic':'სემანტიკა','wb.tab.summarise':'შეჯამება',
+      'wb.tab.factcheck':'ფაქტების შემოწმება','wb.tab.score':'შეფასება','wb.tab.semantic':'სენტიმენტი','wb.tab.summarise':'შეჯამება',
       'wb.fc.note':'ამოწმებს მხოლოდ ზარში გაცემული ინფორმაციის სისწორეს თქვენი ცოდნის ბაზის მიხედვით.',
       'wb.run.factcheck':'ფაქტების შემოწმება','wb.run.score':'ზარის შეფასება','wb.run.semantic':'ტონის ანალიზი','wb.run.summarise':'შეჯამება',
       'wb.rerun':'ხელახლა გაშვება','wb.running':'მუშავდება…',
@@ -90,8 +90,8 @@
       'wb.sem.words':'სიტყვები','wb.sem.voice':'ხმის ტონი','wb.sem.voice.off':'ხმის ტონს აუდიოჩანაწერი სჭირდება.','wb.sem.pickone':'მონიშნეთ სიტყვები ან ხმის ტონი.',
       'wb.sem.words.tip':'აფასებს მხოლოდ ნათქვამს: თითოეული რეპლიკის თავაზიანობას, სიმშრალეს ან უხეშობას.',
       'wb.sem.voice.tip':'აფასებს, როგორ ჟღერს თითოეული მოსაუბრე — აგრესიულად, დაძაბულად, მშვიდად თუ მომთმენად — თავად აუდიოს მიხედვით და არა სიტყვების.',
-      'wb.sem.guidance':'მითითებები','wb.sem.title':'სემანტიკური ანალიზი','wb.sem.politeness':'თავაზიანობა','wb.sem.flags':'შენიშვნები',
-      'wb.sem.turns':'რეპლიკების მიხედვით','wb.sem.novoice':'ამ ჩანაწერისთვის ხმის ტონი მიუწვდომელი იყო.',
+      'wb.sem.guidance':'მითითებები','wb.sem.title':'სენტიმენტის ანალიზი','wb.sem.politeness':'თავაზიანობა','wb.sem.flags':'შენიშვნები',
+      'wb.sem.turns':'რეპლიკების მიხედვით','wb.sem.novoice':'ამ ჩანაწერისთვის ხმის ტონი მიუწვდომელი იყო.','wb.novoice.timeout':'ხმის მოდელი ჯერ იტვირთებოდა. სცადეთ ერთ წუთში.','wb.novoice.unreachable':'ხმის ტონის სერვისი არ პასუხობს. სთხოვეთ ოპერატორს შეამოწმოს.','wb.novoice.disabled':'ხმის ტონი ამ სისტემაზე ჩართული არ არის.','wb.novoice.error':'ხმის ტონის სერვისმა მოულოდნელი პასუხი დააბრუნა.','wb.novoice.no_timestamps':'ამ ჩანაწერს რეპლიკების დროები არ აქვს, ამიტომ აუდიოს მოსაუბრეების მიხედვით დაყოფა ვერ ხერხდება. ეს ეხება დროებამდე გაკეთებულ ჩანაწერებსა და ჩასმულ ტრანსკრიფციებს.','wb.novoice.no_audio':'ეს ჩასმული ტრანსკრიფციაა — მოსასმენი აუდიო არ არსებობს.',
       'wb.sem.share_good':'მშვიდი','wb.sem.share_bad':'დაძაბული','wb.sem.summary':'ზოგადი შეფასება','wb.confidence':'სანდოობა',
       'wb.tone.polite':'თავაზიანი','wb.tone.neutral':'ნეიტრალური','wb.tone.curt':'მშრალი','wb.tone.impolite':'უზრდელი','wb.tone.rude':'უხეში','wb.tone.aggressive':'აგრესიული',
       'wb.voice.aggressive':'აგრესიული','wb.voice.tense':'დაძაბული','wb.voice.calm':'მშვიდი','wb.voice.patient':'მომთმენი','wb.voice.unknown':'უცნობი',
@@ -104,7 +104,7 @@
       'wb.sum.needaudio':'შეჯამება მუშაობს აუდიოჩანაწერებზე — წყაროს ბარათში დაამატეთ ერთი ან რამდენიმე ფაილი.',
       'wb.sum.done':'შეჯამება მზადაა','wb.fc.done':'ფაქტების შემოწმება მზადაა','wb.sem.done':'ტონის ანალიზი მზადაა',
       'wb.fc.partial':'ნაწილობრივ დასტურდება','wb.call':'ზარი {n}','wb.seek':'ამ მომენტზე გადასვლა',
-      'wb.lane.factcheck':'ფაქტები','wb.lane.words':'სიტყვები','wb.lane.voice':'ხმა',
+      'wb.lane.factcheck':'ფაქტები','wb.lane.words':'სენტიმენტი: სიტყვები','wb.lane.voice':'სენტიმენტი: ხმა',
     },
     ru: {
       'wb.src.title':'Источник','wb.src.audio':'Загрузить запись','wb.src.paste':'Вставить транскрипт',
@@ -123,7 +123,7 @@
       'wb.noaudio':'Запись больше не хранится — остались только транскрипт и его результаты.',
       'wb.audiofail':'Не удалось загрузить аудио — показан только транскрипт.',
       'wb.notl':'Шкала времени недоступна — показан транскрипт.',
-      'wb.tab.factcheck':'Проверка фактов','wb.tab.score':'Оценка','wb.tab.semantic':'Семантика','wb.tab.summarise':'Сводка',
+      'wb.tab.factcheck':'Проверка фактов','wb.tab.score':'Оценка','wb.tab.semantic':'Сентимент','wb.tab.summarise':'Сводка',
       'wb.fc.note':'Проверяет только правильность сведений, прозвучавших в звонке, по вашей базе знаний.',
       'wb.run.factcheck':'Проверить факты','wb.run.score':'Оценить звонок','wb.run.semantic':'Проанализировать тон','wb.run.summarise':'Составить сводку',
       'wb.rerun':'Запустить снова','wb.running':'Обработка…',
@@ -132,8 +132,8 @@
       'wb.sem.words':'Слова','wb.sem.voice':'Тон голоса','wb.sem.voice.off':'Для тона голоса нужна аудиозапись.','wb.sem.pickone':'Отметьте «Слова» или «Тон голоса».',
       'wb.sem.words.tip':'Оценивает только сказанное: вежливость, сухость или грубость каждой реплики.',
       'wb.sem.voice.tip':'Оценивает, как звучит каждый говорящий — агрессивно, напряжённо, спокойно или терпеливо — по самому аудио, а не по словам.',
-      'wb.sem.guidance':'Указания','wb.sem.title':'Семантический анализ','wb.sem.politeness':'Вежливость','wb.sem.flags':'Замечания',
-      'wb.sem.turns':'По репликам','wb.sem.novoice':'Тон голоса для этой записи недоступен.',
+      'wb.sem.guidance':'Указания','wb.sem.title':'Анализ сентимента','wb.sem.politeness':'Вежливость','wb.sem.flags':'Замечания',
+      'wb.sem.turns':'По репликам','wb.sem.novoice':'Тон голоса для этой записи недоступен.','wb.novoice.timeout':'Модель голоса ещё запускалась. Попробуйте через минуту.','wb.novoice.unreachable':'Служба тона голоса не отвечает. Попросите оператора её проверить.','wb.novoice.disabled':'Тон голоса не включён в этой системе.','wb.novoice.error':'Служба тона голоса вернула неожиданный ответ.','wb.novoice.no_timestamps':'У этой записи нет таймингов реплик, поэтому аудио нельзя разбить по говорящим. Это касается записей, сделанных до появления таймингов, и вставленных расшифровок.','wb.novoice.no_audio':'Это вставленная расшифровка — аудио для прослушивания нет.',
       'wb.sem.share_good':'спокойно','wb.sem.share_bad':'напряжённо','wb.sem.summary':'Общая оценка','wb.confidence':'уверенность',
       'wb.tone.polite':'вежливо','wb.tone.neutral':'нейтрально','wb.tone.curt':'сухо','wb.tone.impolite':'невежливо','wb.tone.rude':'грубо','wb.tone.aggressive':'агрессивно',
       'wb.voice.aggressive':'агрессивный','wb.voice.tense':'напряжённый','wb.voice.calm':'спокойный','wb.voice.patient':'терпеливый','wb.voice.unknown':'неизвестно',
@@ -146,7 +146,7 @@
       'wb.sum.needaudio':'Сводка работает с аудиозаписями — добавьте один или несколько файлов в карточке источника.',
       'wb.sum.done':'Сводка готова','wb.fc.done':'Проверка фактов готова','wb.sem.done':'Анализ тона готов',
       'wb.fc.partial':'частично подтверждено','wb.call':'Звонок {n}','wb.seek':'Перейти к этому моменту',
-      'wb.lane.factcheck':'Факты','wb.lane.words':'Слова','wb.lane.voice':'Голос',
+      'wb.lane.factcheck':'Факты','wb.lane.words':'Сентимент: слова','wb.lane.voice':'Сентимент: голос',
     },
   });
 
@@ -270,6 +270,16 @@
   const worst = (a, b) => { const r = { none: 0, good: 1, mid: 2, bad: 3 }; return (r[lvl(b)] > r[lvl(a)]) ? lvl(b) : lvl(a); };
   const toneLevel = w => ({ polite:'good', neutral:'good', curt:'mid', impolite:'bad', rude:'bad', aggressive:'bad' }[String(w || '').toLowerCase()] || 'none');
   const verdictLevel = w => ({ patient:'good', calm:'good', tense:'mid', aggressive:'bad' }[String(w || '').toLowerCase()] || 'none');
+  /* Why there is no voice half. The backend now names the cause (`voice_status`); older
+     results carry none, so an unrecognised or missing status falls back to the generic line.
+     This matters because "still starting up" is worth retrying and "no per-turn timings" never
+     is, and both used to read identically. */
+  const noVoiceReason = (r) => {
+    const st = r && r.voice_status;
+    if (!st || st === 'ok') return t('wb.sem.novoice');
+    const k = 'wb.novoice.' + st, v = t(k);
+    return v === k ? t('wb.sem.novoice') : v;
+  };
   const word = (prefix, w, fallback) => { if (!w) return fallback == null ? '—' : fallback; const k = prefix + String(w).toLowerCase(); const v = t(k); return v === k ? String(w) : v; };
   const langName = c => { if (!c) return ''; const k = 'lang.' + String(c).toLowerCase().slice(0, 2); const v = t(k); return v === k ? String(c) : v; };
 
@@ -372,7 +382,7 @@
       let tx = '';
       if (s.text) {
         const p = num(s.text.politeness), flags = arr(s.text.flags).filter(Boolean);
-        tx = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.sem.words')}</div>
+        tx = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.lane.words')}</div>
           <div class="wb-inline"><span class="wb-tone ${toneLevel(s.text.overall)}">${esc(word('wb.tone.', s.text.overall))}</span>
             <span class="sc-meta">${t('wb.sem.politeness')} ${p == null ? '—' : p}/100</span></div>
           <div class="sc-bar ${barcls(p)}"><span style="width:${pct(p)}%"></span></div>
@@ -382,12 +392,12 @@
       let vc = '';
       if (s.voice) {
         const g = pct((num(s.voice.share_good) || 0) * 100), b = pct((num(s.voice.share_bad) || 0) * 100);
-        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.sem.voice')}</div>
+        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.lane.voice')}</div>
           <div class="wb-inline"><span class="wb-tone ${verdictLevel(s.voice.voice)}">${esc(word('wb.voice.', s.voice.voice))}</span></div>
           <div class="sc-meta" style="margin-top:6px">${t('wb.sem.share_good')} · ${g}%</div><div class="sc-bar good"><span style="width:${g}%"></span></div>
           <div class="sc-meta" style="margin-top:6px">${t('wb.sem.share_bad')} · ${b}%</div><div class="sc-bar bad"><span style="width:${b}%"></span></div></div>`;
       } else if (modes.includes('voice')) {
-        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.sem.voice')}</div><div class="hint">${t('wb.sem.novoice')}</div></div>`;
+        vc = `<div class="wb-sec"><div class="wb-sec-title">${t('wb.lane.voice')}</div><div class="hint">${esc(noVoiceReason(d))}</div></div>`;
       }
       return `<div class="wb-spk-card"><div class="wb-spk-head"><span class="wb-spk-name">${esc(name)}</span>${role}</div>${tx}${vc}</div>`;
     };
@@ -408,7 +418,7 @@
     const segRows = arr(sm.segments);
     return `<div class="wb-res">
       <div class="wb-res-head"><h3>${t('wb.sem.title')}</h3>${sm.language ? `<span class="muted">${esc(langName(sm.language))}</span>` : ''}</div>
-      ${modes.includes('voice') && sm.voice_available === false ? `<div class="msg" style="color:var(--pending)">${t('wb.sem.novoice')}</div>` : ''}
+      ${modes.includes('voice') && sm.voice_available === false ? `<div class="msg" style="color:var(--pending)">${esc(noVoiceReason(sm))}</div>` : ''}
       <div class="wb-spk">${arr(sm.speakers).map(spk).join('')}</div>
       ${sm.summary ? `<h4>${t('wb.sem.summary')}</h4><p style="margin:0">${esc(sm.summary)}</p>` : ''}
       ${segRows.length ? `<h4>${t('wb.sem.turns')}</h4><div class="wb-segs">${segRows.map(row).join('')}</div>` : ''}

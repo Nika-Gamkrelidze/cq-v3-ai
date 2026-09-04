@@ -381,7 +381,7 @@ const CQ = (() => {
       'pb.feat.convert':'Audio conversion',
       'pb.feat.summarise':'Summarise',
       'pb.feat.score':'Scoring',
-      'pb.feat.semantic':'Semantic analysis',
+      'pb.feat.semantic':'Sentiment analysis',
       'pb.users.heading':'Accounts',
       'pb.users.search':'Search email or name',
       'pb.users.none':'No registered accounts yet.',
@@ -764,7 +764,7 @@ const CQ = (() => {
       'pb.feat.convert':'აუდიოს კონვერტაცია',
       'pb.feat.summarise':'შეჯამება',
       'pb.feat.score':'შეფასება',
-      'pb.feat.semantic':'სემანტიკური ანალიზი',
+      'pb.feat.semantic':'სენტიმენტის ანალიზი',
       'pb.users.heading':'ანგარიშები',
       'pb.users.search':'ძებნა ელფოსტით ან სახელით',
       'pb.users.none':'რეგისტრირებული ანგარიშები ჯერ არ არის.',
@@ -1562,6 +1562,14 @@ const CQ = (() => {
   function enhanceSelects(root = document) { root.querySelectorAll('select:not(.cq-select-native)').forEach(select); }
   function syncSelect(el) { if (el && el._cq) el._cq.render(); }
 
+  /* Download glyph as SVG, not a character. It used to be U+2B73 (⭳), which is absent from
+     the Georgian and Russian font stacks this app ships — so on a Georgian page the download
+     control rendered as an empty tofu box. An inline SVG has no font dependency at all and
+     inherits currentColor, so it follows the theme like the text around it. */
+  const ICON_DL = '<svg class="cq-i" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"'
+    + ' fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M8 2.5v7.5m0 0L5.2 7.2M8 10l2.8-2.8"/><path d="M2.8 12.2v.8a1.2 1.2 0 0 0 1.2 1.2h8a1.2 1.2 0 0 0 1.2-1.2v-.8"/></svg>';
+
   /* ---------------- Audio player ---------------- */
   function fmt(s) { s = Math.floor(s || 0); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
   function player(container, src, { name = 'audio', autoplay = true } = {}) {
@@ -1569,7 +1577,7 @@ const CQ = (() => {
       <button class="cq-play" aria-label="Play/pause">▶</button>
       <input class="cq-seek" type="range" min="0" max="100" value="0" step="0.1" aria-label="Seek" />
       <span class="cq-time">0:00</span>
-      <a class="cq-dl icon-btn" title="Download" download="${name}">⭳</a>
+      <a class="cq-dl icon-btn" title="Download" download="${name}">${ICON_DL}</a>
     </div>`;
     const el = container.querySelector('.cq-player');
     const audio = new Audio(src); audio.preload = 'metadata';
@@ -1820,7 +1828,7 @@ const CQ = (() => {
     });
   }
 
-  return { API, LOGO, t, lang, setLang, extendDict, applyI18n, toggleTheme, currentTheme, header, mountHeader,
+  return { API, LOGO, ICON_DL, t, lang, setLang, extendDict, applyI18n, toggleTheme, currentTheme, header, mountHeader,
            toast, confirm, tip, mountTips, select, enhanceSelects, syncSelect, player, attachRecorder,
            analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp,
            autogrow, autogrowBind };

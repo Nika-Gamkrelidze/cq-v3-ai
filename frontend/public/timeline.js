@@ -338,6 +338,57 @@
     document[m]('keydown', tipEsc, true);
   }
   function tipEsc(e) { if (e.key === 'Escape') tipHide(); }
+
+  /* ---- Space toggles playback anywhere on the page --------------------------------------
+     A reviewer listens with one hand on the keyboard and the other on a notepad; making them
+     click into the waveform first to regain Space is friction in the one place the product is
+     meant to feel like a player. So the key is handled on the DOCUMENT, not just the widget.
+
+     It must never steal Space from something that already owns it: a text box (the pasted
+     transcript, the rubric guidance), a button/link/checkbox (where Space IS the activation
+     key), or anything contenteditable. With several players on the page (the summarise tab
+     mounts one per call) the key goes to the one the reader is actually looking at — the last
+     one they touched if it is still on screen, otherwise the first visible one. */
+  const LIVE = new Set();
+  let lastActive = null;
+
+  function isTypingTarget(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    // Space is the activation key for these; taking it would break the control.
+    return tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY' || el.getAttribute('role') === 'button';
+  }
+  function onScreen(el) {
+    if (!el || !el.isConnected || el.offsetParent === null) return false;
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < (window.innerHeight || 0) && r.width > 0;
+  }
+  function spaceTarget() {
+    if (lastActive && LIVE.has(lastActive) && lastActive.playable() && onScreen(lastActive.root)) return lastActive;
+    for (const inst of LIVE) if (inst.playable() && onScreen(inst.root)) return inst;
+    return null;
+  }
+  function docSpace(e) {
+    if (e.key !== ' ' && e.key !== 'Spacebar') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
+    if (isTypingTarget(e.target)) return;
+    const inst = spaceTarget();
+    if (!inst) return;
+    e.preventDefault();
+    lastActive = inst;
+    inst.toggle();
+  }
+  function register(inst) {
+    if (!LIVE.size) document.addEventListener('keydown', docSpace);
+    LIVE.add(inst);
+  }
+  function unregister(inst) {
+    LIVE.delete(inst);
+    if (lastActive === inst) lastActive = null;
+    if (!LIVE.size) document.removeEventListener('keydown', docSpace);
+  }
   function tipShow(el, label, detail) {
     const box = tipBox();
     box.innerHTML = (label ? `<b>${esc(label)}</b>` : '') + (detail ? `<span>${esc(detail)}</span>` : '');
@@ -395,7 +446,7 @@
           <button type="button" data-rate="2">2×</button>
         </div>
         <a class="tl-dl cq-dl icon-btn" href="#" aria-disabled="true" download title="${esc(t('tl.download'))}"
-           data-i18n-title="tl.download" aria-label="${esc(t('tl.download'))}" data-i18n-aria="tl.download">⭳</a>
+           data-i18n-title="tl.download" aria-label="${esc(t('tl.download'))}" data-i18n-aria="tl.download">${(typeof CQ !== 'undefined' && CQ.ICON_DL) || ''}</a>
       </div>
       <div class="tl-wave tl-busy" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
            aria-label="${esc(t('tl.position'))}" data-i18n-aria="tl.position"
@@ -695,8 +746,9 @@
       root.addEventListener('keydown', (e) => {
         const tag = e.target.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.altKey || e.ctrlKey || e.metaKey) return;
-        const onWave = e.target === wave || e.target === root;
-        if (e.key === ' ' || e.key === 'Spacebar') { if (!onWave) return; e.preventDefault(); if (audio.paused) api.play(); else api.pause(); }
+        // Space is handled document-wide (see docSpace); leave it alone here so the two do
+        // not both fire and cancel each other out.
+        if (e.key === ' ' || e.key === 'Spacebar') return;
         else if (e.key === 'ArrowLeft') { e.preventDefault(); api.seek(state.t - 5); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); api.seek(state.t + 5); }
         else if (e.key === 'Home') { e.preventDefault(); api.seek(0); }
@@ -939,6 +991,7 @@
       destroy() {
         if (state.destroyed) return;
         state.destroyed = true;
+        unregister(handle);
         document.removeEventListener('cq:lang', onLang);
         if (ro) ro.disconnect();
         if (mo) mo.disconnect();
@@ -958,6 +1011,20 @@
     renderTranscript();
     if (wave) { wave.setAttribute('aria-valuemax', String(Math.round(D()))); wave.setAttribute('aria-valuetext', `0:00 / ${fmt(D())}`); }
     if (!textMode) { setPlayBtn(); scheduleDraw(); loadSource(); }
+
+    /* Page-wide Space (see docSpace at the top of this module). `playable` is checked at press
+       time, not at mount: a timeline in the summarise tab whose audio has not loaded yet, or a
+       text-mode one with no player at all, simply is not a candidate. */
+    const handle = {
+      root,
+      playable: () => !state.destroyed && !!(audio && audio.src),
+      toggle: () => { if (audio.paused) api.play(); else api.pause(); },
+    };
+    register(handle);
+    // Touching a player makes it the one Space drives, which is what someone comparing two
+    // calls side by side expects.
+    root.addEventListener('pointerdown', () => { lastActive = handle; }, true);
+
     return api;
   }
 
