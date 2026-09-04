@@ -10,6 +10,12 @@
   --surface:#07273d; --surface-2:#0b3650; --hairline:#1d4661;
   --paper:#ffffff; --mist:#b8c6d0; --muted:#7e94a3;
   --beam:#fa3b3c; --coral:#ff7a64; --ok:#2fb673; --pending:#e8a33d; --alert:#fa3b3c;
+  /* The middle band of a red/amber/green scale, for FILLS only (swatches, bars, timeline
+     spans). Separate from --pending because that one doubles as the "processing" colour
+     and is used as text, where a true yellow on a light ground is unreadable. What makes
+     a band legible here is its HUE against the red and green either side of it, not its
+     luminance against the track — and on light the spans already carry an outline. */
+  --mid:#f2c744;
   --card-bg: rgba(7,39,61,.55); --card-solid:#07273d; --input-bg: rgba(2,19,31,.55);
   --shadow: 0 18px 50px -24px rgba(0,0,0,.7);
   --page:
@@ -25,6 +31,7 @@
      (--mist ~7:1, --muted ~5:1 on white) */
   --paper:#07263c; --mist:#2f4658; --muted:#48606f;
   --beam:#fa3b3c; --coral:#ff5a44; --ok:#1f9b5f; --pending:#c9812a; --alert:#fa3b3c;
+  --mid:#eab308;
   --card-bg: rgba(255,255,255,.8); --card-solid:#ffffff; --input-bg:#ffffff;
   --shadow: 0 18px 44px -26px rgba(7,38,60,.35);
   --page:
@@ -216,7 +223,7 @@ hr.sep { border:none; border-top:1px solid color-mix(in oklab,var(--hairline) 80
 .sc-meta { color:var(--muted); font-size:11.5px; }
 .sc-bar { height:8px; border-radius:999px; margin-top:8px; background:color-mix(in oklab,var(--muted) 22%,transparent); overflow:hidden; }
 .sc-bar > span { display:block; height:100%; border-radius:999px; background:var(--beam); }
-.sc-bar.good > span { background:var(--ok); } .sc-bar.mid > span { background:var(--pending); } .sc-bar.bad > span { background:var(--alert); }
+.sc-bar.good > span { background:var(--ok); } .sc-bar.mid > span { background:var(--mid); } .sc-bar.bad > span { background:var(--alert); }
 
 /* Rubric-import progress — reuses .sc-bar as the track, because a progress bar and a score
    bar are the same object drawn twice otherwise. What is added here is the caption row and
@@ -538,7 +545,7 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
 .bands-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .bands-dot { width:14px; height:14px; border-radius:4px; flex:0 0 auto; }
 .bands-dot.good { background:var(--ok); }
-.bands-dot.mid { background:var(--pending); }
+.bands-dot.mid { background:var(--mid); }
 .bands-dot.bad { background:var(--alert); }
 .bands-name { min-width:74px; font-weight:600; color:var(--mist); }
 .bands-range { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; flex-wrap:wrap; }

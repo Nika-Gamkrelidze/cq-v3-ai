@@ -106,7 +106,7 @@
      --tl-sat/--tl-lig are the S and L of the §3 score gradient; they are theme-scoped so a
      score colour stays readable on the near-white light track (see the light block below). */
   const SHEET = `
-.tl { --tl-good: var(--ready, var(--ok)); --tl-mid: var(--pending); --tl-bad: var(--contradicted, var(--alert));
+.tl { --tl-good: var(--ready, var(--ok)); --tl-mid: var(--mid, var(--pending)); --tl-bad: var(--contradicted, var(--alert));
   --tl-none: var(--muted); --tl-line: var(--line, var(--hairline)); --tl-card: var(--card, var(--card-bg));
   --tl-accent: var(--accent, var(--beam)); --tl-text: var(--text, var(--paper)); --tl-pos: 0%;
   --tl-sat: 65%; --tl-lig: 45%;
@@ -114,7 +114,7 @@
 /* Light theme: the brand level tokens and the §3 gradient both sit at 1.5–2.6:1 against the
    light lane track (rgb(217,218,218)) — unreadable as the only carrier of a verdict. Darkened
    here to ≥3.4:1 (levels) and ≥3.2:1 (gradient, worst case score 50) while keeping each hue. */
-[data-theme="light"] .tl { --tl-good: #1a804f; --tl-mid: #9c6421; --tl-bad: #e20607;
+[data-theme="light"] .tl { --tl-good: #1a804f; --tl-mid: #eab308; --tl-bad: #e20607;
   --tl-sat: 60%; --tl-lig: 30%; }
 .tl *, .tl *::before, .tl *::after { box-sizing: border-box; }
 .tl:focus-visible { outline: none; }
