@@ -1545,8 +1545,14 @@ const CQ = (() => {
         close();
       }));
     }
+    /* `.card` uses backdrop-filter, which makes it a stacking context — so the panel's
+       z-index is confined INSIDE its own card and the NEXT card paints over the open menu
+       (the workspace picker disappearing behind "Knowledge base health"). Children cannot
+       escape a stacking context, so the card itself is raised while its menu is open. */
+    const host = wrap.closest('.card');
     function open() {
       render(); wrap.classList.add('open');
+      if (host) host.classList.add('cq-sel-open');
       const r = wrap.getBoundingClientRect();
       panel.classList.toggle('up', r.bottom + 300 > window.innerHeight && r.top > 320);
       // The panel may now be wider than its trigger, so anchor it to whichever edge keeps
@@ -1557,7 +1563,12 @@ const CQ = (() => {
       document.addEventListener('click', outside, true);
       const s = panel.querySelector('.cq-opt.sel'); if (s) s.scrollIntoView({ block: 'nearest' });
     }
-    function close() { wrap.classList.remove('open'); document.removeEventListener('click', outside, true); }
+    function close() {
+      wrap.classList.remove('open');
+      // Only drop the card back down once NO select inside it is still open.
+      if (host && !host.querySelector('.cq-select.open')) host.classList.remove('cq-sel-open');
+      document.removeEventListener('click', outside, true);
+    }
     function outside(e) { if (!wrap.contains(e.target)) close(); }
     trigger.addEventListener('click', e => { e.preventDefault(); wrap.classList.contains('open') ? close() : open(); });
     trigger.addEventListener('keydown', e => {

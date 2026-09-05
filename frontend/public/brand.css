@@ -472,6 +472,9 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
   background:var(--card-solid); border:1px solid var(--hairline); box-shadow:var(--shadow); }
 .cq-select-panel.up { top:auto; bottom:calc(100% + 6px); }
 .cq-select-panel.rtl { left:auto; right:0; }
+/* Set by brand.js while a menu inside this card is open — see the note there: a
+   backdrop-filtered .card traps its children's z-index, so the card must rise. */
+.card.cq-sel-open { position:relative; z-index:70; }
 .cq-select.open .cq-select-panel { display:block; animation:fade .16s var(--ease); }
 .cq-opt { padding:9px 11px; border-radius:8px; font-size:13.5px; color:var(--mist); cursor:pointer;
   white-space:normal; overflow-wrap:anywhere; }
