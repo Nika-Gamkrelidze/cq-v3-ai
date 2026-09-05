@@ -17,8 +17,25 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 
 COPY app.py .
 
-# Models are cached on a volume, so a rebuild does not re-download them.
-ENV HF_HOME=/data/hf TRANSFORMERS_OFFLINE=0
+# The checkpoint is BAKED INTO THE IMAGE, not fetched at runtime.
+#
+# It used to live only on a volume with HF_HOME=/data/hf, downloaded lazily on first use.
+# That makes the deployment depend on the server reaching huggingface.co at REQUEST time, and
+# when that fetch is slow or blocked there is no good failure: the request simply hangs until
+# the caller's read timeout, every time, and the UI reports the one thing that is not true
+# after the first minute — "the voice model was still starting up". Baking it moves that
+# dependency to build time, where a failure stops the build with a real error instead of
+# turning into a permanently "warming" service.
+ARG SENTIMENT_MODEL="superb/wav2vec2-base-superb-er"
+ENV HF_HOME=/opt/hf
+RUN python -c "import sys; from transformers import AutoFeatureExtractor, AutoModelForAudioClassification; m = sys.argv[1]; AutoFeatureExtractor.from_pretrained(m); AutoModelForAudioClassification.from_pretrained(m); print('baked', m)" "$SENTIMENT_MODEL"     && du -sh /opt/hf
+# The image now CONTAINS one specific checkpoint, so the runtime setting must not drift from
+# it — compose passes the same value as a build arg and as the env var app.py reads.
+ENV SENTIMENT_MODEL=$SENTIMENT_MODEL
+
+# No network needed for the model at runtime: if something ever does try to reach the hub,
+# fail fast and loudly rather than hanging a request behind a download.
+ENV TRANSFORMERS_OFFLINE=1 HF_HUB_OFFLINE=1
 EXPOSE 8080
 
 # One worker: the model is held in-process and a second copy would double the memory for no

@@ -40,20 +40,20 @@ services:
   # leaves the deployment (the tenants are banks and clinics). Optional: if this service is
   # absent the API reports the text-only sentiment instead of failing.
   sentiment:
-    build: ./sentiment
+    build:
+      context: ./sentiment
+      args:
+        # Baked into the image AND used at runtime, from one value — see sentiment/Dockerfile.
+        # A licensing decision as much as a technical one (see sentiment/app.py): must stay a
+        # permissively licensed checkpoint, because this is a commercial product.
+        SENTIMENT_MODEL: "superb/wav2vec2-base-superb-er"
     container_name: cq-sentiment
-    environment:
-      # A licensing decision as much as a technical one — see sentiment/app.py. Must stay a
-      # permissively licensed checkpoint: this is a commercial product.
-      SENTIMENT_MODEL: "superb/wav2vec2-base-superb-er"
-    volumes:
-      - hf_cache:/data/hf
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
-      # The model is fetched lazily on the first request, so the container is healthy long
-      # before it is warm — no 300s start_period needed here, unlike TEI.
+      # The checkpoint is baked into the image, so a healthy container is a warm one —
+      # no download to wait out on first use.
       retries: 10
       start_period: 30s
     restart: unless-stopped

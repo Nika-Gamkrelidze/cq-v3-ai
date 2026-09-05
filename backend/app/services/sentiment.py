@@ -282,6 +282,33 @@ def _ranges(segments) -> list[dict]:
     return out
 
 
+async def _why_unavailable(url: str, fallback: str) -> str:
+    """Turn a failed prosody call into the REASON, by asking the sidecar's own /health.
+
+    `/health` answers instantly even while the model is loading, and reports `loaded` and
+    `warm_error`. So a call that timed out can be explained honestly: the model is still
+    loading (retry is worth it), the model FAILED to load (retrying forever will not help —
+    an operator must look), or the service really is just slow/unreachable.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            resp = await client.get(url.rstrip("/") + "/health")
+            if resp.status_code != 200:
+                return fallback          # a probe that failed explains nothing
+            data = resp.json()
+    except Exception:  # noqa: BLE001 — the probe must never replace one failure with another
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+    if data.get("loaded"):
+        return fallback                      # loaded and still failed: genuinely slow/broken
+    if data.get("warm_error"):
+        # The operator needs the actual exception; the caller gets a status they can act on.
+        log.error("voice-tone model failed to load: %s", str(data.get("warm_error"))[:500])
+        return "model_error"
+    return "warming"
+
+
 async def prosody_segments(audio: bytes, segments, filename: str | None = None,
                            content_type: str | None = None) -> list | None:
     """Acoustic emotion per segment from the sidecar's `POST /prosody/segments`, or None.
@@ -322,12 +349,15 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
             resp.raise_for_status()
             data = resp.json()
     except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
-        # Almost always a sidecar that is still fetching its model, or a very long call.
+        # Do not GUESS why. This used to always report "still starting up", which is a fair
+        # description for the first minute after a deploy and a lie for ever after — and it
+        # was the only thing anyone saw when the sidecar could not load its model at all.
+        # Ask the sidecar what state it is in and say that instead.
         log.warning("per-segment prosody timed out: %s", exc)
-        return None, "timeout"
+        return None, await _why_unavailable(url, "timeout")
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("per-segment prosody unavailable: %s", exc)
-        return None, "unreachable"
+        return None, await _why_unavailable(url, "unreachable")
     except Exception:  # noqa: BLE001 — a tone model must never break the analysis
         log.exception("per-segment prosody failed")
         return None, "error"
