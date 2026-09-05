@@ -97,6 +97,13 @@
     </form>
 
     <div id="app" class="hidden">
+      <!-- Operator only: which tenant this page is showing. Hidden entirely for a tenant,
+           who has one workspace and no business seeing a list of the others. -->
+      <div class="card hidden" id="tenantBar" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+        <label for="tenantPick" style="margin:0" data-i18n="con.tenant"></label>
+        <select id="tenantPick" style="flex:1; min-width:220px; max-width:420px"></select>
+        <span class="hint" id="tenantHint"></span>
+      </div>
       <div class="tabs">
         <div class="tab active" data-tab="kb"><span>📚</span> <span data-i18n="tab.kb"></span></div>
         <div class="tab" data-tab="analyze"><span>🎧</span> <span data-i18n="tab.analyze"></span></div>
@@ -491,14 +498,58 @@
 
   <script>
     const API = CQ.API, t = CQ.t;
-    CQ.mountHeader({ tag: 'Tenant', who: 'who', nav: [
-      { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
-      { i18n: 'nav.public', href: 'index.html' },
-    ]});
+    /* ------------------------------------------------------------------------------
+       THIS PAGE IS BOTH CONSOLES.
+
+       The operator's KB console used to be a second implementation of everything below
+       (kb-admin.html), and the two drifted: the same feature with two behaviours and two
+       sets of bugs. They are now one page. A superadmin arrives with an admin token, picks
+       a tenant from the header, and every call goes to the `/admin/...` twin of the tenant
+       route it would otherwise use — the twins are thin wrappers over the SAME
+       `services/kb_console.py` functions, so what the operator sees is what the customer
+       sees, by construction rather than by discipline.
+
+       The picker grants nothing. It names which tenant an already-authorised operator is
+       looking at; every `/admin/...` route re-checks the superadmin token server-side, and
+       a tenant's browser has no admin token to send in the first place.
+       ------------------------------------------------------------------------------ */
     let TOKEN = sessionStorage.getItem('cq_tenant_token') || '';
+    const ADMIN = sessionStorage.getItem('cq_admin_token') || '';
+    // Admin mode only when there is no tenant session: a superadmin who deliberately signed
+    // into a workspace stays that workspace's user, exactly as before.
+    const adminMode = () => !!ADMIN && !TOKEN;
+    let TID = '';                      // the tenant an operator is currently looking at
+    CQ.mountHeader(adminMode()
+      ? { tag: 'Console', nav: [
+          { i18n: 'nav.console', href: 'admin.html' },
+          // Self-link on purpose: it is what marks the nav pill active, and it points
+          // at the real page rather than bouncing through the old console's redirect.
+          { i18n: 'nav.kb', href: 'tenant.html' },
+          { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
+          { i18n: 'nav.public', href: 'index.html' },
+        ] }
+      : { tag: 'Tenant', who: 'who', nav: [
+          { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
+          { i18n: 'nav.public', href: 'index.html' },
+        ] });
     let ROLE = '';   // tenant user role (owner|member) — owners can edit the scoring rubric
     const $ = id => document.getElementById(id);
-    const authH = (extra={}) => TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra;
+    const authH = (extra={}) => adminMode() ? { 'X-Admin-Token': ADMIN, ...extra }
+      : (TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra);
+    // Every route family this page uses, and its operator twin. Nothing else in the file
+    // builds a KB/scoring/curation/sentiment URL by hand — add a call site, use these.
+    const KBB  = () => adminMode() ? `${API}/admin/kb/${TID}`                 : `${API}/kb`;
+    const SCB  = () => adminMode() ? `${API}/admin/scoring/${TID}`            : `${API}/scoring`;
+    const CURB = () => adminMode() ? `${API}/admin/curation/${TID}/proposals` : `${API}/v1/curation/proposals`;
+    const SENB = () => adminMode() ? `${API}/admin/sentiment/${TID}/config`   : `${API}/sentiment/config`;
+    /* Switching workspace starts fresh loads while the previous ones are still in flight.
+       Whichever lands last wins the DOM, so without this an operator who switches quickly
+       can end up reading workspace A's documents under workspace B's name. Every load
+       carries the generation it was issued in; a reply from an older one is dropped. */
+    let SCOPE_GEN = 0;
+    const STALE = Symbol('stale');
+    const escAttr = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const esc = s => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
     document.querySelectorAll('.tab').forEach(tb => tb.addEventListener('click', () => {
@@ -568,6 +619,56 @@
       } catch(e){ $('gateMsg').textContent = e.message; }
       finally { b.disabled = false; b.textContent = t('btn.signin'); }
     }
+    /* Tabs whose operator twin does not exist yet: the call workbench and history run on
+       /recordings and the bot on /v1/chat, both tenant-scoped by the caller's token. Hiding
+       them is the honest option — an operator never meets a control that would 404. */
+    const ADMIN_TABS = ['kb', 'rubric', 'health'];
+
+    async function enterAsOperator() {
+      document.querySelectorAll('.tab').forEach(tb =>
+        tb.classList.toggle('hidden', !ADMIN_TABS.includes(tb.dataset.tab)));
+      $('tenantBar').classList.remove('hidden');
+      $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
+      $('logout').classList.remove('hidden');
+      document.title = 'CommuniQ — ' + t('nav.kb');
+
+      const list = await kbJson(`${API}/admin/tenants`, { headers: authH() });
+      const sel = $('tenantPick');
+      // null means the request failed. Saying "no workspaces yet" then would be a claim
+      // about the customer list made from a request that never reached it.
+      if (list === null || list === STALE) { $('tenantHint').textContent = t('err.unavailable'); return; }
+      const rows = Array.isArray(list) ? list : (Array.isArray(list.tenants) ? list.tenants : []);
+      if (!rows.length) { $('tenantHint').textContent = t('con.tenant.none'); return; }
+      sel.innerHTML = rows.map(x =>
+        `<option value="${escAttr(x.id)}">${escAttr(x.name)}</option>`).join('');
+      // Remember the tenant across reloads — an operator working one account should not
+      // re-pick it after every refresh. ?tenant= wins, so a shared link opens where it says.
+      const wanted = new URLSearchParams(location.search).get('tenant')
+        || (() => { try { return localStorage.getItem('cq_console_tenant'); } catch { return null; } })();
+      if (wanted && rows.some(x => String(x.id) === wanted)) sel.value = wanted;
+      TID = sel.value || String(rows[0].id);
+      try { localStorage.setItem('cq_console_tenant', TID); } catch {}
+      CQ.enhanceSelects($('tenantBar'));
+      sel.addEventListener('change', () => {
+        TID = sel.value; SCOPE_GEN++;   // abandon anything still in flight for the old one
+        try { localStorage.setItem('cq_console_tenant', TID); } catch {}
+        const active = document.querySelector('.tab.active');
+        reloadActive(active && active.dataset.tab);
+      });
+      CQ.enhanceSelects($('panel-kb'));
+      reloadActive('kb');
+    }
+
+    /* One place that knows how to (re)load a tab, so switching tenants refreshes whatever
+       the operator is looking at rather than only ever the knowledge base. */
+    function reloadActive(name) {
+      if (name === 'history') return loadHistory();
+      if (name === 'health') return loadCuration();
+      if (name === 'bot') return loadBot();
+      if (name === 'rubric') return loadScoring();
+      return kbLoad();
+    }
+
     function enter(client, role) {
       ROLE = role || '';
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
@@ -588,7 +689,14 @@
     }
     async function apiFetch(url, init) {
       const r = await fetch(url, init);
+      // `else if`, deliberately: sessionExpired() clears TOKEN, which would make adminMode()
+      // flip true inside the SAME call and tear down a still-valid console session too.
       if (r.status === 401 && TOKEN) sessionExpired();
+      else if (r.status === 401 && adminMode()) {
+        // An expired admin token must not leave every panel failing in its own way either.
+        sessionStorage.removeItem('cq_admin_token');
+        location.replace('tenant.html');
+      }
       return r;
     }
     $('gate').addEventListener('submit', e => { e.preventDefault(); login(); });
@@ -615,7 +723,7 @@
         let r;
         if (mode==='text') {
           if (!$('i_text').value.trim()) throw new Error(t('tts.needtext'));
-          r = await apiFetch(`${API}/kb/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
+          r = await apiFetch(`${KBB()}/documents/text`, { method:'POST', headers: authH({'Content-Type':'application/json'}),
             body: JSON.stringify({ title, doc_type, text: $('i_text').value, tags: tags?tags.split(',').map(s=>s.trim()):[], metadata: meta }) });
           const d = await CQ.readResp(r);
           m.className='msg ok'; m.textContent = `"${d.title}" — ${t('kb.processing')}`; CQ.toast(t('toast.imported'), 'ok');
@@ -635,7 +743,7 @@
             fd.append('metadata', JSON.stringify(meta));
             if (wantAI) fd.append('restructure', '1');
             try {
-              const rr = await apiFetch(`${API}/kb/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
+              const rr = await apiFetch(`${KBB()}/documents/${mode==='csv'?'csv':'upload'}`, { method:'POST', headers: authH(), body: fd });
               const dd = await CQ.readResp(rr);
               if (dd && dd.id) made.push(dd.id);
             } catch (err) { failed.push(`${files[i].name} — ${err.message}`); }
@@ -664,7 +772,7 @@
       for (let i = 0; i < 40; i++) {
         await new Promise(res => setTimeout(res, 5000));
         let doc = null;
-        try { const r = await apiFetch(`${API}/kb/documents/${id}`, { headers: authH() });
+        try { const r = await apiFetch(`${KBB()}/documents/${id}`, { headers: authH() });
           if (r.ok) doc = await r.json(); } catch {}
         if (!doc || !doc.status || doc.status === 'pending' || doc.status === 'processing') continue;
         const m = $('importMsg');
@@ -682,6 +790,7 @@
        ================================================================================== */
     function kbSection() { const s = document.querySelector('#kbTabs .subtab.active'); return s ? s.dataset.kb : 'overview'; }
     function kbLoad() {
+      if (adminMode() && !TID) return;
       const s = kbSection();
       if (s === 'overview') loadKbOverview();
       else if (s === 'documents') loadDocs();
@@ -697,11 +806,14 @@
     async function kbJson(url, init) {
       // A dead proxy rejects the fetch outright; swallowing it here means every section
       // renders its own "could not load" state instead of a silently blank card.
+      const gen = SCOPE_GEN;
       try {
         const r = await apiFetch(url, init || { headers: authH() });
+        if (gen !== SCOPE_GEN) return STALE;
         if (!r.ok) return null;
-        return await r.json().catch(() => null);
-      } catch { return null; }
+        const body = await r.json().catch(() => null);
+        return gen === SCOPE_GEN ? body : STALE;
+      } catch { return gen === SCOPE_GEN ? null : STALE; }
     }
     /* Mutations go through kbSend so a rejected fetch (proxy down, connection dropped) becomes
        an ordinary not-ok response the caller already knows how to report, rather than an
@@ -723,7 +835,8 @@
     // ---- OVERVIEW ----
     $('kReloadOverview').addEventListener('click', loadKbOverview);
     async function loadKbOverview() {
-      const st = await kbJson(`${API}/kb/stats`);
+      const st = await kbJson(`${KBB()}/stats`);
+      if (st === STALE) return;
       if (!st || typeof st !== 'object') { $('kStats').innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
       const tile = (n, l) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`;
       $('kStats').innerHTML =
@@ -738,7 +851,7 @@
     }
 
     // ---- DOCUMENTS ----
-    let kSel = new Set(), kPage = { limit: 50, offset: 0, total: 0 };
+    let kSel = new Set(), kPage = { limit: 50, offset: 0, count: 0, total: null };
     $('kApplyFilter').addEventListener('click', () => { kPage.offset = 0; loadDocs(); });
     ['kfType','kfTag','kfSearch'].forEach(id => $(id).addEventListener('keydown', e => {
       if (e.key === 'Enter') { kPage.offset = 0; loadDocs(); } }));
@@ -752,15 +865,23 @@
       if ($('kfTag').value.trim()) p.set('tag', $('kfTag').value.trim());
       if ($('kfVis').value) p.set('visibility', $('kfVis').value);
       if ($('kfSearch').value.trim()) p.set('q', $('kfSearch').value.trim());
-      const d = await kbJson(`${API}/kb/documents?${p}`);
+      const d = await kbJson(`${KBB()}/documents?${p}`);
+      if (d === STALE) return;
       const box = $('docList');
       // null == the request failed; [] == the tenant genuinely has no documents. Saying
       // "no documents yet" when the server is down would be a lie about their own KB.
       if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; $('kDocPager').innerHTML = ''; return; }
-      const docs = Array.isArray(d) ? d : [];
-      // `/kb/documents` returns a bare list, so the pager can only know there is a next page
-      // by getting a full one back. Better an honest ›/‹ than a fabricated total.
-      kPage.total = docs.length;
+      /* The two routes answer in two shapes and BOTH are correct: `/kb/documents` is also
+         the partner API `/v1/kb/documents`, whose bare list external consumers already
+         parse, so it cannot grow an envelope; its operator twin was written later and
+         returns {total, documents}. Normalise here, once, and take the real total when the
+         server offers it — that is the difference between an honest pager and a guess. */
+      const docs = Array.isArray(d) ? d : (Array.isArray(d.documents) ? d.documents : []);
+      // Two numbers, deliberately: how many rows THIS page holds, and how many exist in
+      // total when the server is willing to say. Conflating them is what made the pager
+      // guess, and a real total is the only way "›" can be right on the last page.
+      kPage.count = docs.length;
+      kPage.total = (d && Number.isFinite(d.total)) ? d.total : null;
       if (!docs.length) {
         box.innerHTML = `<div class="empty">${t('tkb.docs.none')}</div>`;
         renderPager(); return;
@@ -796,12 +917,15 @@
     }
     function renderPager() {
       const page = Math.floor(kPage.offset / kPage.limit) + 1;
-      const more = kPage.total >= kPage.limit;
+      // With a real total, "is there a next page" is a fact; without one, a full page is
+      // the only hint there might be more.
+      const more = kPage.total == null ? kPage.count >= kPage.limit
+                                       : kPage.offset + kPage.count < kPage.total;
       $('kDocPager').innerHTML = (kPage.offset > 0 || more)
         ? `<button class="ghost" ${kPage.offset<=0?'disabled':''} id="kPrevP">‹</button>
            <span class="hint">${page}</span>
            <button class="ghost" ${more?'':'disabled'} id="kNextP">›</button>`
-        : `<span class="hint">${kPage.total}</span>`;
+        : `<span class="hint">${kPage.total == null ? kPage.count : kPage.total}</span>`;
       if ($('kPrevP')) $('kPrevP').addEventListener('click', () => { kPage.offset = Math.max(0, kPage.offset - kPage.limit); loadDocs(); });
       if ($('kNextP')) $('kNextP').addEventListener('click', () => { kPage.offset += kPage.limit; loadDocs(); });
     }
@@ -813,21 +937,21 @@
       if (act === 'publish' || act === 'unpublish') {
         const msg = t(`vis.confirm.${act}.one`).replace('{title}', title || '');
         if (!(await CQ.confirm(msg, { ok: t('vis.'+act), danger: act === 'unpublish' }))) return;
-        const r = await kbPost(`${API}/kb/documents/${id}/visibility`,
+        const r = await kbPost(`${KBB()}/documents/${id}/visibility`,
                                { visibility: act === 'publish' ? 'public' : 'internal' }, 'PATCH');
         if (r.ok) { CQ.toast(t(`vis.done.${act}`), 'ok'); loadDocs(); } else kbFail(r);
         return;
       }
       if (act === 'del') {
         if (!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', title || ''), { ok: t('kba.delete') }))) return;
-        const r = await kbDelete(`${API}/kb/documents/${id}`);
+        const r = await kbDelete(`${KBB()}/documents/${id}`);
         if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadDocs(); } else kbFail(r);
         return;
       }
       if (act === 'reembed') {
         const b = [...$('docList').querySelectorAll(`button[data-act="reembed"][data-id="${id}"]`)][0];
         if (b) { b.disabled = true; b.innerHTML = '<span class="spinner"></span>'; }
-        const r = await kbSend(`${API}/kb/documents/${id}/reembed`, { method: 'POST', headers: authH() });
+        const r = await kbSend(`${KBB()}/documents/${id}/reembed`, { method: 'POST', headers: authH() });
         if (r.ok) { const d = await r.json().catch(()=>({}));
           CQ.toast(t('tkb.reembed.done').replace('{n}', d.reembedded_chunks ?? 0), 'ok'); }
         else await kbFail(r);
@@ -838,7 +962,8 @@
     }
 
     async function openEditor(id) {
-      const doc = await kbJson(`${API}/kb/documents/${id}`);
+      const doc = await kbJson(`${KBB()}/documents/${id}`);
+      if (doc === STALE) return;
       if (!doc || !doc.id) { CQ.toast(t('toast.error'), 'err'); return; }
       const bg = showModal(`<h3>${t('kba.edit')}: ${esc(doc.title)}</h3>
         <label>${t('kba.doc.title')}</label><input id="ed_title" value="${esc(doc.title)}"/>
@@ -859,7 +984,7 @@
         // Only send `text` when it actually changed — sending it re-chunks and re-embeds.
         if (bg.querySelector('#ed_content').value !== (doc.content_text || '')) body.text = bg.querySelector('#ed_content').value;
         const btn = bg.querySelector('#ed_save'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-        const r = await kbPost(`${API}/kb/documents/${id}`, body, 'PUT');
+        const r = await kbPost(`${KBB()}/documents/${id}`, body, 'PUT');
         if (r.ok) { CQ.toast(t('toast.saved'), 'ok'); bg.remove(); loadDocs(); }
         else { const d = await r.json().catch(()=>({}));
           btn.disabled = false; btn.textContent = t('kba.save');
@@ -898,7 +1023,7 @@
         if (!(await CQ.confirm(msg, { ok: t('vis.'+action), danger: action === 'publish' }))) return;
       }
       if (action === 'reembed' && !(await CQ.confirm(t('tkb.bulk.reembed.confirm').replace('{n}', kSel.size), { ok: t('kba.reembed'), danger: false }))) return;
-      const r = await kbPost(`${API}/kb/bulk`, { action, document_ids: [...kSel], tags });
+      const r = await kbPost(`${KBB()}/bulk`, { action, document_ids: [...kSel], tags });
       if (r.ok) { const d = await r.json().catch(()=>({}));
         CQ.toast(t('bulk.done.' + action).replace('{n}', d.affected ?? 0), 'ok'); loadDocs(); }
       else await kbFail(r);
@@ -919,8 +1044,11 @@
     async function loadChunkDocs(preselect) {
       const sel = $('kChunkDoc'), want = preselect || kChunkWant || sel.value;
       kChunkWant = '';
-      const d = await kbJson(`${API}/kb/documents?limit=500`);
-      const docs = Array.isArray(d) ? d : [];
+      const d = await kbJson(`${KBB()}/documents?limit=500`);
+      if (d === STALE) return;
+      // Same two shapes as loadDocs: bare list from the tenant/partner route, {documents}
+      // from the operator twin. Reading only the first left this picker always empty.
+      const docs = Array.isArray(d) ? d : (d && Array.isArray(d.documents) ? d.documents : []);
       sel.innerHTML = docs.length
         ? docs.map(x => `<option value="${esc(x.id)}">${esc(x.title)} · ${x.chunk_count ?? 0}</option>`).join('')
         : `<option value="">—</option>`;
@@ -933,7 +1061,8 @@
       const box = $('kChunkList');
       if (!docId) { box.innerHTML = `<div class="empty">${t('tkb.chunks.pickone')}</div>`; return; }
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const d = await kbJson(`${API}/kb/documents/${docId}/chunks`);
+      const d = await kbJson(`${KBB()}/documents/${docId}/chunks`);
+      if (d === STALE) return;
       if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
       const chunks = Array.isArray(d) ? d : [];
       if (!chunks.length) { box.innerHTML = `<div class="empty">${t('tkb.chunks.none')}</div>`; return; }
@@ -947,7 +1076,7 @@
         const c = chunks.find(x => x.id === b.dataset.cedit); if (c) editChunk(docId, c); }));
       box.querySelectorAll('[data-cdel]').forEach(b => b.addEventListener('click', async () => {
         if (!(await CQ.confirm(t('tkb.chunk.del.confirm'), { ok: t('kba.delete') }))) return;
-        const r = await kbDelete(`${API}/kb/chunks/${b.dataset.cdel}`);
+        const r = await kbDelete(`${KBB()}/chunks/${b.dataset.cdel}`);
         if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadChunks(docId); } else await kbFail(r);
       }));
     }
@@ -960,7 +1089,7 @@
       bg.querySelector('[data-c]').addEventListener('click', () => bg.remove());
       bg.querySelector('#ce_save').addEventListener('click', async () => {
         const btn = bg.querySelector('#ce_save'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-        const r = await kbPost(`${API}/kb/chunks/${chunk.id}`, { content: bg.querySelector('#ce_content').value }, 'PUT');
+        const r = await kbPost(`${KBB()}/chunks/${chunk.id}`, { content: bg.querySelector('#ce_content').value }, 'PUT');
         if (r.ok) { CQ.toast(t('toast.saved'), 'ok'); bg.remove(); loadChunks(docId); }
         else { const d = await r.json().catch(()=>({}));
           btn.disabled = false; btn.textContent = t('kba.save');
@@ -1036,7 +1165,7 @@
     $('kPgRun').addEventListener('click', async () => {
       const q = $('kPgQuery').value.trim(); const box = $('kPgResults'); if (!q) return;
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const r = await kbPost(`${API}/kb/playground`, { query: q,
+      const r = await kbPost(`${KBB()}/playground`, { query: q,
         top_k: parseInt($('kPgTopk').value, 10) || 8, threshold: parseFloat($('kPgThresh').value) || 0 });
       if (!r.ok) { box.innerHTML = ''; await kbFail(r); return; }
       const d = await r.json().catch(() => null);
@@ -1058,7 +1187,8 @@
     $('kScanDup').addEventListener('click', loadDuplicates);
     async function loadDuplicates() {
       const box = $('kDupBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
-      const d = await kbJson(`${API}/kb/duplicates`);
+      const d = await kbJson(`${KBB()}/duplicates`);
+      if (d === STALE) return;
       if (!d || typeof d !== 'object') { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
       const exact = Array.isArray(d.exact_duplicate_groups) ? d.exact_duplicate_groups : [];
       const near = Array.isArray(d.near_duplicate_pairs) ? d.near_duplicate_pairs : [];
@@ -1081,7 +1211,7 @@
       box.innerHTML = html || `<div class="empty">${t('kba.dup.none')}</div>`;
       box.querySelectorAll('[data-dupdel]').forEach(b => b.addEventListener('click', async () => {
         if (!(await CQ.confirm(t('tkb.del.confirm').replace('{title}', b.dataset.title || ''), { ok: t('kba.delete') }))) return;
-        const r = await kbDelete(`${API}/kb/documents/${b.dataset.dupdel}`);
+        const r = await kbDelete(`${KBB()}/documents/${b.dataset.dupdel}`);
         if (r.ok) { CQ.toast(t('toast.deleted'), 'ok'); loadDuplicates(); } else await kbFail(r);
       }));
     }
@@ -1093,7 +1223,8 @@
       const box = $('kActBox'); box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
       const p = new URLSearchParams({ limit: 100 });
       if ($('kActFilter').value.trim()) p.set('action', $('kActFilter').value.trim());
-      const d = await kbJson(`${API}/kb/activity?${p}`);
+      const d = await kbJson(`${KBB()}/activity?${p}`);
+      if (d === STALE) return;
       if (d === null) { box.innerHTML = `<div class="msg err">${t('tkb.loadfail')}</div>`; return; }
       const ev = d && Array.isArray(d.events) ? d.events : [];
       if (!ev.length) { box.innerHTML = `<div class="empty">${t('kba.act.none')}</div>`; return; }
@@ -1114,8 +1245,8 @@
           setTimeout(() => URL.revokeObjectURL(a.href), 4000); })
         .catch(e => CQ.toast(e.message || t('toast.error'), 'err'));
     }
-    $('kExportJson').addEventListener('click', () => download(`${API}/kb/export?format=json`, 'kb-export.json'));
-    $('kExportCsv').addEventListener('click', () => download(`${API}/kb/export?format=csv`, 'kb-export.csv'));
+    $('kExportJson').addEventListener('click', () => download(`${KBB()}/export?format=json`, 'kb-export.json'));
+    $('kExportCsv').addEventListener('click', () => download(`${KBB()}/export?format=csv`, 'kb-export.csv'));
 
     /* A full-KB re-embed is the single most expensive thing this workspace can trigger: it
        rebuilds every vector on the one CPU-bound embedder that also serves live retrieval for
@@ -1128,7 +1259,7 @@
     $('kReembedAll').addEventListener('click', async () => {
       if (!(await CQ.confirm(t('tkb.reembed.confirm'), { ok: t('tkb.reembed.start'), danger: false }))) return;
       const btn = $('kReembedAll'); btn.disabled = true;
-      const r = await kbSend(`${API}/kb/reembed`, { method: 'POST', headers: authH() });
+      const r = await kbSend(`${KBB()}/reembed`, { method: 'POST', headers: authH() });
       if (r.status === 409) CQ.toast(t('tkb.reembed.busy'), 'err');
       else if (r.ok) CQ.toast(t('tkb.reembed.queued'), 'ok');
       else await kbFail(r);
@@ -1137,7 +1268,8 @@
     async function pollReembed(scheduled) {
       if (!scheduled) stopReembedPoll();
       const box = $('kReembedBox');
-      const d = await kbJson(`${API}/kb/reembed/status`);
+      const d = await kbJson(`${KBB()}/reembed/status`);
+      if (d === STALE) return;
       const btn = $('kReembedAll');
       if (d === null) {
         // Could not read the job row. The button stays enabled — the real double-start guard
@@ -1173,7 +1305,7 @@
     $('kbSearchBtn').addEventListener('click', async () => {
       const q = $('kbq').value.trim(); const box = $('kbSearchResults'); box.innerHTML='';
       if (!q) return; box.innerHTML = `<div class="empty"><span class="spinner"></span>${t('btn.search')}…</div>`;
-      const r = await kbSend(`${API}/kb/search`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ query: q }) });
+      const r = await kbSend(`${KBB()}/search`, { method:'POST', headers: authH({'Content-Type':'application/json'}), body: JSON.stringify({ query: q }) });
       const d = await r.json().catch(() => null);
       if (!r.ok) { box.innerHTML = `<div class="msg err">${esc((d&&d.detail)||t('toast.error'))}</div>`; return; }
       const hits = d && Array.isArray(d.results) ? d.results : [];
@@ -1207,7 +1339,7 @@
     // sees the guidance the analyser is actually using without a Save button that would 403.
     const sentimentConfig = {
       get: async () => {
-        const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { headers: authH() }));
+        const d = await CQ.readResp(await apiFetch(`${SENB()}`, { headers: authH() }));
         snEnabled = d.enabled !== false;
         const ro = ROLE !== 'owner';
         const ck = $('wbHost') && $('wbHost').querySelector('#snEnabled');
@@ -1217,7 +1349,7 @@
       put: async ({ guidance }) => {
         const ck = $('wbHost') && $('wbHost').querySelector('#snEnabled');
         if (ck) snEnabled = ck.checked;
-        const d = await CQ.readResp(await apiFetch(`${API}/sentiment/config`, { method: 'PUT',
+        const d = await CQ.readResp(await apiFetch(`${SENB()}`, { method: 'PUT',
           headers: authH({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ enabled: snEnabled, guidance }) }));
         snEnabled = d && d.enabled !== false;
@@ -1274,7 +1406,7 @@
     // Cards are per-cluster, not per-message: a tenant sees ~6-10 of these, never a feed.
     // The verbatim quotes are the whole point — they are what make a card auditable rather
     // than "the machine says so", so they are never summarised away.
-    const CUR = `${API}/v1/curation/proposals`;
+    const CUR = () => CURB();
     const CH_ICON = { web:'🌐', instagram:'📸', messenger:'💬', whatsapp:'🟩', phone:'☎️', call:'☎️', email:'✉️' };
     const OP_PILL = { add:'ready', update:'processing', remove:'contradicted' };
     let curProposals = [], curSel = new Set();
@@ -1374,7 +1506,10 @@
         const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : '';
         const url = safeUrl(ev.url || (ev.metadata && ev.metadata.url));
         const jobId = ev.source_kind === 'audio_job' && ev.source_id ? ev.source_id : '';
-        const link = jobId ? `<a href="#" data-job="${esc(jobId)}">${t('cur.openjob')} ↗</a>`
+        // The source-call link opens the workbench, which runs on /recordings — a route with
+        // no operator twin, which is exactly why the Analyze tab is hidden in admin mode.
+        // Rendering it here would be a control that does nothing at all when clicked.
+        const link = (jobId && !adminMode()) ? `<a href="#" data-job="${esc(jobId)}">${t('cur.openjob')} ↗</a>`
           : url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${t('cur.opensource')} ↗</a>` : '';
         const foreign = ev.same_tenant === false ? ` <span class="warn-flag">${t('cur.foreign')}</span>` : '';
         return `<div class="cur-q">
@@ -1438,20 +1573,27 @@
     $('reloadCur').addEventListener('click', loadCuration);
     async function loadCuration() {
       const box = $('curList'); curSel.clear(); curSelBar();
+      if (adminMode() && !TID) { box.innerHTML = `<div class="empty">${esc(t('con.tenant.pick'))}</div>`; return; }
       box.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+      // These cards quote a customer's own callers verbatim. Rendering a reply that arrived
+      // after the operator switched workspace would print one tenant's quotes under another
+      // tenant's name — the same failure the KB loads are guarded against.
+      const gen = SCOPE_GEN;
       let d;
       try {
-        const r = await apiFetch(`${CUR}?state=pending`, { headers: authH() });
+        const r = await apiFetch(`${CUR()}?state=pending`, { headers: authH() });
+        if (gen !== SCOPE_GEN) return;
         if (!r.ok) throw new Error(t('cur.loadfail'));
         d = await r.json();
-      } catch (e) { box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+        if (gen !== SCOPE_GEN) return;
+      } catch (e) { if (gen === SCOPE_GEN) box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
       // An expired token / error body must never reach .map — a fixed QA bug.
       const listed = Array.isArray(d) ? d : (Array.isArray(d && d.items) ? d.items : []);
       if (!listed.length) { box.innerHTML = `<div class="empty">${t('cur.none')}</div>`; return; }
       // The list is deliberately light; body, quotes and the live target text come from the
       // per-proposal GET. The open queue is hard-capped at ~10 cards, so this stays cheap.
       curProposals = await Promise.all(listed.map(async p => {
-        try { const rr = await apiFetch(`${CUR}/${p.id}`, { headers: authH() });
+        try { const rr = await apiFetch(`${CUR()}/${p.id}`, { headers: authH() });
           if (rr.ok) { const full = await rr.json(); if (full && full.id) return full; } } catch {}
         return p;
       }));
@@ -1525,14 +1667,14 @@
       try {
         if (act === 'decline') {
           const reason = await declineModal(); if (!reason) return;
-          await curPost(`${CUR}/${id}/decline`, { reason });
+          await curPost(`${CUR()}/${id}/decline`, { reason });
           CQ.toast(t('cur.declinedok'), 'ok'); return loadCuration();
         }
         // Accept-with-edits posts the edited body to the SAME endpoint — `content` present == edited.
         let content;
         if (act === 'edit') { content = await editModal(p); if (content == null) return; }
         if (op === 'remove' && !(await typedConfirm())) return;
-        await curPost(`${CUR}/${id}/accept`, content == null ? {} : { content });
+        await curPost(`${CUR()}/${id}/accept`, content == null ? {} : { content });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
     }
@@ -1543,7 +1685,7 @@
     $('curBulkAccept').addEventListener('click', async () => {
       const ids = [...curSel]; if (!ids.length) return;
       if (!(await CQ.confirm(t('cur.bulk.confirm').replace('{n}', () => ids.length), { ok: t('cur.accept'), danger: false }))) return;
-      try { await curPost(`${CUR}/bulk`, { action: 'accept', ids });
+      try { await curPost(`${CUR()}/bulk`, { action: 'accept', ids });
         CQ.toast(t('cur.applied'), 'ok'); loadCuration();
       } catch (e) { CQ.toast(e.message || t('toast.error'), 'err'); }
     });
@@ -1693,7 +1835,8 @@
 
     // ---- Scoring rubric (self-serve config; view-only for members, editable by owners) ----
     let scDims = [], scLoaded = false, scVer = null, scIsDefault = false;
-    const scEditable = () => ROLE === 'owner';
+    // An operator editing on a tenant's behalf has the same authority as its owner.
+    const scEditable = () => adminMode() || ROLE === 'owner';
     function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
     function scRow(d, i) {
       const dis = scEditable() ? '' : ' disabled';
@@ -1867,7 +2010,7 @@
       });
 
       const fd = new FormData(); fd.append('file', file);
-      xhr.open('POST', `${API}/scoring/import?stream=1`, true);
+      xhr.open('POST', `${SCB()}/import?stream=1`, true);
       const h = authH(); Object.keys(h).forEach(k => xhr.setRequestHeader(k, h[k]));
       scProgStage('sc.import.stage.upload', 0);
       xhr.send(fd);                                          // no xhr.timeout: this runs for minutes
@@ -1909,14 +2052,36 @@
       scDims[n-1].weight += 100 - scDims.reduce((a,d)=>a+d.weight,0);
       scRenderDims();
     });
+    /* Everything on this tab describes ONE workspace, and Save sends whatever is on screen
+       to whichever workspace is selected at click time. So a rubric that failed to load —
+       or that finished loading for a workspace the operator has since left — must not be
+       left on screen: one Save would copy one customer's QA policy into another's account.
+       The editor therefore fails CLOSED: the form is emptied and Save is hidden until a
+       load completes for the workspace currently selected. */
+    function scClear(msg) {
+      scDims = []; scLoaded = false; scVer = null; scIsDefault = false;
+      $('scRubric').value = '';
+      ['scAdd','scNormalize','scSave','scImport','scReset'].forEach(id => $(id).classList.add('hidden'));
+      $('scDefaultNote').classList.add('hidden');
+      $('bandsCard').classList.add('hidden');
+      scRenderDims(); scShowVersion();
+      if (msg) { $('scMsg').className = 'msg err'; $('scMsg').textContent = msg; }
+    }
     async function loadScoring() {
       $('scMsg').textContent=''; $('scMsg').className='msg';
+      if (adminMode() && !TID) { scClear(t('con.tenant.pick')); return; }
+      const gen = SCOPE_GEN;
       const ro = !scEditable();
       $('scReadonly').classList.toggle('hidden', !ro);
-      ['scAdd','scNormalize','scSave','scImport','scReset'].forEach(id => $(id).classList.toggle('hidden', ro));
+      // Reset is decided BEFORE the await: it posts to /scoring/reset, which has no operator
+      // twin on purpose, so an error path that left it on screen would log the operator out.
+      const noReset = ro || adminMode();
+      ['scAdd','scNormalize','scSave','scImport'].forEach(id => $(id).classList.toggle('hidden', ro));
+      $('scReset').classList.toggle('hidden', noReset);
       $('scRubric').disabled = ro;
       try {
-        const cfg = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { headers: authH() }));
+        const cfg = await CQ.readResp(await apiFetch(`${SCB()}/config`, { headers: authH() }));
+        if (gen !== SCOPE_GEN) return;                 // the operator moved on; that was A's
         scDims = (cfg.dimensions||[]).map(d => ({ key:d.key, name:d.name||'', weight:d.weight||0, description:d.description||'', guidance:d.guidance||'' }));
         $('scRubric').value = cfg.rubric || '';
         scVer = cfg.version || null; scLoaded = true; scShowVersion();
@@ -1924,11 +2089,11 @@
         // workspace — and there is nothing to reset to what is already on screen.
         scIsDefault = cfg.is_default === true;
         $('scDefaultNote').classList.toggle('hidden', !scIsDefault);
-        $('scReset').classList.toggle('hidden', ro || scIsDefault);
+        $('scReset').classList.toggle('hidden', noReset || scIsDefault);
         $('bandsCard').classList.toggle('hidden', ro);
         if (!ro) bandsLoad();
         scRenderDims();
-      } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
+      } catch(e){ if (gen === SCOPE_GEN) scClear(e.message); }
     }
 
     /* Reset to the default rubric. This throws away a rubric someone may have spent a day
@@ -1951,11 +2116,17 @@
       $('bandGreenEcho').textContent = $('bandGreen').value || '—';
     }));
     async function bandsLoad() {
+      const gen = SCOPE_GEN;
       try {
-        const d = await CQ.readResp(await apiFetch(`${API}/scoring/bands`, { headers: authH() }));
+        const d = await CQ.readResp(await apiFetch(`${SCB()}/bands`, { headers: authH() }));
+        if (gen !== SCOPE_GEN) return;      // thresholds belong to one workspace, like the rubric
         bandsState = { amber_from: d.amber_from, green_from: d.green_from };
         bandsRender();
-      } catch (e) { $('bandsMsg').className = 'msg err'; $('bandsMsg').textContent = e.message; }
+      } catch (e) {
+        if (gen !== SCOPE_GEN) return;
+        $('bandsCard').classList.add('hidden');   // never offer Save over stale thresholds
+        $('bandsMsg').className = 'msg err'; $('bandsMsg').textContent = e.message;
+      }
     }
     async function bandsSubmit(url, init, btn, label) {
       const m = $('bandsMsg'); m.className = 'msg'; m.textContent = '';
@@ -1969,13 +2140,13 @@
       } catch (e) { m.className = 'msg err'; m.textContent = e.message; CQ.toast(e.message, 'err'); }
       finally { btn.disabled = false; btn.textContent = t(label); }
     }
-    $('bandsSave').addEventListener('click', () => bandsSubmit(`${API}/scoring/bands`, {
+    $('bandsSave').addEventListener('click', () => bandsSubmit(`${SCB()}/bands`, {
       method: 'PUT', headers: authH({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ amber_from: Number($('bandAmber').value), green_from: Number($('bandGreen').value) }),
     }, $('bandsSave'), 'tn.bands.save'));
     // No password and no confirmation: this is two numbers anyone can retype, unlike the
     // rubric reset next to it, which discards work.
-    $('bandsReset').addEventListener('click', () => bandsSubmit(`${API}/scoring/bands/reset`,
+    $('bandsReset').addEventListener('click', () => bandsSubmit(`${SCB()}/bands/reset`,
       { method: 'POST', headers: authH() }, $('bandsReset'), 'tn.bands.reset'));
 
     $('scReset').addEventListener('click', () => {
@@ -1994,7 +2165,7 @@
         msg.textContent = '';
         if (!pw.value) { msg.textContent = t('tn.sc.reset.needpw'); pw.focus(); return; }
         go.disabled = true; go.innerHTML = '<span class="spinner"></span>';
-        const r = await kbPost(`${API}/scoring/reset`, { password: pw.value });
+        const r = await kbPost(`${API}/scoring/reset`/* tenant-only, see below */, { password: pw.value });
         if (r.ok) { bg.remove(); CQ.toast(t('tn.sc.reset.done'), 'ok'); loadScoring(); return; }
         const d = await r.json().catch(() => ({}));
         // 403 is the wrong password — say so in this language, not in the server's English.
@@ -2011,7 +2182,7 @@
       if (Math.abs(total - 100) > 0.5) { $('scMsg').className='msg err'; $('scMsg').textContent = t('sc.mustbe100').replace('{total}', total); return; }
       const btn = $('scSave'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
       try {
-        const d = await CQ.readResp(await apiFetch(`${API}/scoring/config`, { method:'PUT',
+        const d = await CQ.readResp(await apiFetch(`${SCB()}/config`, { method:'PUT',
           headers: authH({'Content-Type':'application/json'}),
           body: JSON.stringify({ dimensions: scDims, rubric: $('scRubric').value }) }));
         CQ.toast(t('sc.saved'),'ok');
@@ -2019,7 +2190,7 @@
         $('scRubric').value = d.rubric||''; scVer = d.version||null; scShowVersion(); scRenderDims();
         // Saving is what forks the shared default into a rubric of this workspace's own.
         scIsDefault = false; $('scDefaultNote').classList.add('hidden');
-        $('scReset').classList.toggle('hidden', !scEditable());
+        $('scReset').classList.toggle('hidden', !scEditable() || adminMode());
       } catch(e){ $('scMsg').className='msg err'; $('scMsg').textContent = e.message; }
       finally { btn.disabled=false; btn.textContent=t('sc.save'); }
     });
@@ -2146,26 +2317,18 @@
           rb.addEventListener('click', () => location.reload());
           $('gateMsg').append(rb);
         });
-    } else if (sessionStorage.getItem('cq_admin_token')) {
-      // A superadmin who wandered to the public app and clicked "Sign in" still has a live
-      // console session — validate it and route them back instead of demanding a password.
-      fetch(`${API}/auth/me`, { headers: { 'X-Admin-Token': sessionStorage.getItem('cq_admin_token') } })
+    } else if (ADMIN) {
+      // A superadmin with a live console session gets the console itself — this page, in
+      // operator mode, with a tenant picker — instead of a password prompt for an account
+      // they do not have.
+      fetch(`${API}/auth/me`, { headers: { 'X-Admin-Token': ADMIN } })
         .then(r => r.ok ? r.json() : null)
         .then(me => {
-          if (me && me.kind === 'superadmin') {
-            const next = new URLSearchParams(location.search).get('next');
-            if (NEXT_OK.includes(next)) { location.replace(next); return; }
-            $('gateMsg').className = 'msg';
-            $('gateMsg').innerHTML = '';
-            $('gateMsg').append(t('login.asadmin') + ' ');
-            const a = document.createElement('a'); a.href = 'admin.html'; a.textContent = t('nav.console') + ' →';
-            $('gateMsg').append(a);
-          } else {
-            sessionStorage.removeItem('cq_admin_token');
-          }
+          if (me && me.kind === 'superadmin') return enterAsOperator();
+          sessionStorage.removeItem('cq_admin_token');
+          $('u').focus();
         })
-        .catch(() => {});
-      $('u').focus();
+        .catch(() => { $('u').focus(); });
     } else {
       $('u').focus();
     }

@@ -80,8 +80,10 @@ async def _scope(tenant_id: str, principal: Principal = Depends(resolve_principa
 
 @router.get("/admin/scoring/{tenant_id}/config")
 async def admin_get(tid: str = Depends(_scope)):
-    return await scoring_store.get_active_config(tid) or {"version": None, "dimensions": [],
-                                                          "weights": {}, "rubric": "", "is_active": False}
+    """The tenant's active rubric, or the shared default with `is_default` — exactly what
+    `GET /scoring/config` answers them. Returning a blank config instead made every tenant
+    who has never customised look, to the operator, like a tenant with no rubric at all."""
+    return await scoring_store.get_active_config_for(_as_tenant(tid))
 
 
 @router.put("/admin/scoring/{tenant_id}/config")
@@ -507,6 +509,38 @@ async def reset_bands(principal: Principal = Depends(_rubric_editor)):
     throws away work. Sharing one button (or one confirmation) between them would make the
     cheap action feel dangerous and the dangerous one routine."""
     return await scoring_store.reset_bands(principal)
+
+
+# ---- operator twins of the band routes --------------------------------------
+# The console and the portal render the SAME page, so every control on it needs a route
+# that works for a superadmin acting on a chosen tenant.
+def _as_tenant(tid: str) -> Principal:
+    """A tenant-shaped principal naming the scope a superadmin is acting on.
+
+    `scoring_store` keys bands by `owner_key(principal)` — by client_id — so this reads and
+    writes the very same row the tenant's own page does. It names a scope; it never grants
+    one: the superadmin gate already ran in `_scope`.
+    """
+    return Principal(kind="tenant", client_id=tid, via="admin")
+
+
+@router.get("/admin/scoring/{tenant_id}/bands")
+async def admin_get_bands(tid: str = Depends(_scope)):
+    return await scoring_store.get_bands(_as_tenant(tid))
+
+
+@router.put("/admin/scoring/{tenant_id}/bands")
+async def admin_put_bands(body: BandsBody, tid: str = Depends(_scope)):
+    try:
+        return await scoring_store.set_bands(_as_tenant(tid), body.amber_from,
+                                             body.green_from, "superadmin")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/admin/scoring/{tenant_id}/bands/reset")
+async def admin_reset_bands(tid: str = Depends(_scope)):
+    return await scoring_store.reset_bands(_as_tenant(tid))
 
 
 @router.post("/scoring/import")

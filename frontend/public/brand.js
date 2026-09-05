@@ -268,6 +268,8 @@ const CQ = (() => {
       'kb.files.progress':'Importing file {done} of {total}…',
       'kb.files.done':'{n} file(s) imported.',
       'kb.files.failed':'Failed:',
+      'con.tenant':'Workspace','con.tenant.none':'No workspaces yet — create one in the console.',
+      'con.tenant.pick':'Choose a workspace to see this.',
       'kb.restr.hint':'During import, Claude reads the document and rewrites it as clean, self-contained entries — every amount, term and number is kept exactly as written. The import takes a little longer.',
       /* ---- Audio converter (public page) ----
          Telephony formats are an expert vocabulary sold to non-experts: a call-centre
@@ -660,6 +662,8 @@ const CQ = (() => {
       'kb.files.progress':'იმპორტდება ფაილი {done} / {total}…',
       'kb.files.done':'დაიმპორტდა {n} ფაილი.',
       'kb.files.failed':'ვერ დაიმპორტდა:',
+      'con.tenant':'ორგანიზაცია','con.tenant.none':'ორგანიზაცია ჯერ არ არის — შექმენით კონსოლში.',
+      'con.tenant.pick':'ასარჩევად აირჩიეთ ორგანიზაცია.',
       'kb.restr.hint':'იმპორტისას Claude წაიკითხავს დოკუმენტს და გადააწყობს მას მკაფიო, დამოუკიდებელ ჩანაწერებად — ყველა თანხა, ვადა და რიცხვი ზუსტად ისე რჩება, როგორც წერია. იმპორტს ცოტა მეტი დრო სჭირდება.',
       'tab.convert':'აუდიო კონვერტერი',
       'cv.heading':'გადაიყვანეთ აუდიო თქვენი სატელეფონო სისტემისთვის',
@@ -1043,6 +1047,8 @@ const CQ = (() => {
       'kb.files.progress':'Импорт файла {done} из {total}…',
       'kb.files.done':'Импортировано файлов: {n}.',
       'kb.files.failed':'Не удалось:',
+      'con.tenant':'Организация','con.tenant.none':'Организаций пока нет — создайте в консоли.',
+      'con.tenant.pick':'Выберите организацию, чтобы увидеть это.',
       'kb.restr.hint':'При импорте Claude читает документ и переписывает его в виде отдельных, понятных записей — все суммы, сроки и числа сохраняются ровно как написано. Импорт занимает немного больше времени.',
       'tab.convert':'Конвертер аудио',
       'cv.heading':'Конвертация аудио для телефонной системы',

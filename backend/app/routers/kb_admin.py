@@ -147,7 +147,11 @@ async def public_count(tid: str = Depends(scope)):
 
 
 @router.put("/{tenant_id}/documents/{doc_id}/visibility")
+@router.patch("/{tenant_id}/documents/{doc_id}/visibility")
 async def set_visibility(doc_id: str, body: VisibilityBody, tid: str = Depends(scope)):
+    """PUT and PATCH both, because the tenant route accepts both and ONE page now calls
+    them. A twin that answers a different verb is not a twin — it is a 405 nobody sees
+    until an operator clicks Share with bot."""
     return await _call(kb_console.set_visibility(tid, doc_id, body.visibility, actor=ACTOR))
 
 
@@ -314,9 +318,20 @@ async def reembed_one(doc_id: str, tid: str = Depends(scope)):
     return await _call(kb_console.reembed_document(tid, doc_id, actor=ACTOR))
 
 
-@router.post("/{tenant_id}/reembed")
+@router.get("/{tenant_id}/reembed/status")
+async def reembed_status(tid: str = Depends(scope)):
+    """This tenant's active re-embed job, or the most recent one — the operator twin of
+    `GET /kb/reembed/status`. Both consoles run the same page, so both need this."""
+    return await _call(kb_console.reembed_status(tid))
+
+
+@router.post("/{tenant_id}/reembed", status_code=202)
 async def reembed_all(tid: str = Depends(scope)):
-    return await _call(kb_console.reembed_all(tid, actor=ACTOR))
+    """Queue a full-KB re-embed — the same contract as `POST /kb/reembed`: 202 with the job
+    row, 409 when one is already queued or running. It used to run the work inline and
+    return a summary, which left the shared progress panel permanently empty and allowed a
+    second full re-embed to start on top of the first."""
+    return await _call(kb_console.enqueue_reembed(tid, requested_by=ACTOR))
 
 
 # ---------------------------------------------------------------------------

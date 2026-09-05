@@ -568,15 +568,27 @@ def test_tenant_and_operator_see_the_same_stats(api, two_tenants):
             == admin_call(api, "GET", f"/admin/kb/{a['client_id']}/stats").json())
 
 
-def test_operator_full_kb_reembed_still_runs_inline_and_queues_nothing(api, two_tenants):
-    """The asymmetry is deliberate, so it is asserted rather than left to a comment: the tenant's
-    full-KB re-embed is queued to cq-worker; the operator's predates the queue, returns counts
-    inline, and `kb-admin.html` reads that shape."""
+def test_operator_full_kb_reembed_queues_exactly_like_the_tenant_route(api, two_tenants):
+    """The two full-KB re-embeds must be the SAME operation.
+
+    This test used to assert the opposite, and its reason was honest: the operator route
+    predated the queue, returned counts inline, and `kb-admin.html` was written for that
+    shape. That page is gone — one page now serves both audiences, and its Maintenance panel
+    polls `/reembed/status` for a job row. An operator whose re-embed ran inline and queued
+    nothing would watch a progress panel that could never fill in, and nothing would stop a
+    second full re-embed starting on top of the first.
+    """
     a, _ = two_tenants
     r = admin_call(api, "POST", f"/admin/kb/{a['client_id']}/reembed")
-    assert r.status_code == 200
-    assert r.json() == {"documents": 1, "reembedded_chunks": 1}
-    assert jobs_of(a["client_id"]) == [], "the operator path must not touch the tenant queue"
+    assert r.status_code == 202, r.text
+    jobs = jobs_of(a["client_id"])
+    assert len(jobs) == 1, "the operator path must queue the work, not run it in the request"
+    assert str(jobs[0]["client_id"]) == a["client_id"]
+
+    # ...and the queue's one-at-a-time guarantee holds for the operator too.
+    again = admin_call(api, "POST", f"/admin/kb/{a['client_id']}/reembed")
+    assert again.status_code == 409, again.text
+    assert len(jobs_of(a["client_id"])) == 1
 
 
 # --------------------------------------------------------------------------- #
