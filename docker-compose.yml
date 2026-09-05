@@ -111,7 +111,11 @@ services:
     restart: unless-stopped
 
   web:
-    image: nginx:alpine
+    # Built, not stock nginx: the Next app has to be compiled and the deploy runs
+    # `up -d --build`. See frontend/Dockerfile for why it is a STATIC export.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: cq-web
     depends_on:
       - api
@@ -123,7 +127,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./frontend/public:/usr/share/nginx/html:ro,z
+      # NOTE: frontend/public is no longer bind-mounted — it is baked into the image
+      # alongside the compiled Next output, because only one of them can own this path.
+      # Local edits to a legacy page need `docker compose up -d --build web` (seconds), or
+      # `npm --prefix frontend/next run dev` for a migrated page.
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
       # HTTPS server block + the startup switch that enables it only when certs exist,
       # so the stack still runs on HTTP where there are none (local dev / fresh clone).

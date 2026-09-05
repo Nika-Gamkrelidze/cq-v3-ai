@@ -145,7 +145,80 @@ def collect(public_dir: Path) -> dict[str, list[tuple[str, str]]]:
             label = f"{js.name} extendDict#{n + 1}"
             for lang, keys in block.items():
                 found.setdefault(lang, []).extend((k, label) for k in keys)
+
+    # The migrated frontend keeps its strings in TypeScript (frontend/next/lib/i18n.ts) as
+    # `const en: Dict = { ... }` per language. Both stacks are live during the migration and a
+    # key travels with its page, so parity has to be checked ACROSS them: a key that moved to
+    # the new file in English but not in Georgian is exactly the half-translated feature this
+    # lint exists to catch, and it would otherwise fall into the gap between the two.
+    ts = public_dir.parent / "next" / "lib" / "i18n.ts"
+    if ts.exists():
+        for lang, keys in parse_ts_dicts(ts.read_text(encoding="utf-8")).items():
+            found.setdefault(lang, []).extend((k, "next/lib/i18n.ts") for k in keys)
     return found
+
+
+def parse_ts_dicts(src: str) -> dict[str, list[str]]:
+    """`const <lang>: Dict = { ... }` blocks, one per language, from the TypeScript source.
+
+    Same character-walking approach as the JS parsers above and for the same reason: values
+    contain apostrophes, braces and colons, so this is not JSON and a regex over it would be
+    wrong in ways that only show up in Georgian.
+    """
+    out: dict[str, list[str]] = {}
+    for lang in ("en", "ka", "ru"):
+        needle = f"const {lang}: Dict = {{"
+        at = src.find(needle)
+        if at < 0:
+            continue
+        out[lang] = parse_flat_object(src, at + len(needle) - 1)
+    return out
+
+
+def parse_flat_object(src: str, i: int) -> list[str]:
+    """Keys of a FLAT `{ 'a': '...', "b": "..." }` literal whose opening brace is at src[i].
+
+    The JS dictionaries nest a language block inside an outer object; the TypeScript ones are
+    one flat object per language, so they need their own walk rather than `parse_object`.
+    """
+    if src[i] != "{":
+        raise SystemExit(f"check_i18n: expected '{{' at offset {i}")
+    keys: list[str] = []
+    depth = 0
+    quote = ""          # the quote character of the string being read, or "" outside one
+    buf = ""
+    expecting_key = False
+    esc = False
+    while i < len(src):
+        c = src[i]
+        if quote:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == quote:
+                quote = ""
+                if expecting_key and depth == 1:
+                    keys.append(buf)
+                    expecting_key = False
+                buf = ""
+            else:
+                buf += c
+        elif c in "'\"`":
+            quote = c
+            buf = ""
+        elif c == "{":
+            depth += 1
+            if depth == 1:
+                expecting_key = True
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return keys
+        elif c == "," and depth == 1:
+            expecting_key = True
+        i += 1
+    return keys
 
 
 def main(argv: list[str]) -> int:
@@ -162,16 +235,30 @@ def main(argv: list[str]) -> int:
 
     failures = 0
 
-    # duplicates within a language (same file or across files)
+    # Duplicates within a language. The rule differs by WHERE the two definitions live:
+    #
+    #   * both in the legacy stack — a real fault. brand.js's DICT and every extendDict block
+    #     are merged into one object at runtime, so the later registration silently wins and
+    #     the first translation is dead code that drifts.
+    #   * one legacy, one migrated — expected while the migration is in flight. The two
+    #     stacks never load together (a page is served by one or the other), so neither can
+    #     shadow the other; the shared chrome, the header above all, has to exist in both
+    #     until the last .html page is gone. Reported, not failed — but it IS drift bait, so
+    #     it stays visible and the list should shrink, never grow.
+    migrated = "next/lib/i18n.ts"
+    shared = 0
     for lang, entries in langs.items():
         first: dict[str, str] = {}
         for k, where in entries:
-            if k in first:
-                print(f"DUPLICATE  {lang}: '{k}' defined in {first[k]} and again in {where} "
+            prev = first.get(k)
+            if prev is None:
+                first[k] = where
+            elif migrated in (prev, where) and prev != where:
+                shared += 1
+            else:
+                print(f"DUPLICATE  {lang}: '{k}' defined in {prev} and again in {where} "
                       "(the later one silently wins)")
                 failures += 1
-            else:
-                first[k] = where
 
     # cross-language parity
     sets = {lang: {k for k, _ in entries} for lang, entries in langs.items()}
@@ -189,6 +276,9 @@ def main(argv: list[str]) -> int:
     if failures:
         print(f"check_i18n: FAILED — {failures} problem(s) ({counts}; {sources} source block(s)).")
         return 1
+    if shared:
+        print(f"check_i18n: {shared} key definition(s) shared between the legacy and migrated "
+              "stacks (expected during the migration — keep them in step).")
     print(f"check_i18n: OK — {len(union)} keys × {len(sets)} languages in sync ({counts}; "
           f"{sources} source block(s)).")
     return 0

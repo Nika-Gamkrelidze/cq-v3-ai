@@ -1,0 +1,589 @@
+/* The design system, carried across from the legacy brand.css.
+   ===========================================================
+   Taken WHOLE rather than in pieces. It is the product's identity — navy #07263C + red
+   #FA3B3C, the light/dark token pairs, the Georgian-capable font stack, and the component
+   vocabulary (.card, .tab, .msg, .quota, tables, the custom select) every screen is built
+   from. Re-deriving that during a framework migration would mean shipping a subtly different
+   product and calling it a port.
+
+   It will shrink, not grow: as each page moves to a component, the rules only that page used
+   are deleted from here. Anything genuinely new belongs in the component's own module, not
+   appended to this file.
+
+   Legacy pages keep loading /brand.css until they are gone, so for now both files define the
+   same custom properties. That is duplication with an end date rather than drift: a page is
+   served by one stack or the other, never both, so the two copies cannot disagree on screen.
+
+   ------------------------------------------------------------------------------------- */
+/* ==========================================================================
+   CommuniQ brand system for the CQ v3 AI app surfaces.
+   Tokens pulled from cq-v3-web/app/globals.css: navy #07263C + red #FA3B3C.
+   Theme-aware (dark default + light); red accent constant across both.
+   ========================================================================== */
+
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --ink:#02131f; --navy:#07263c; --navy-600:#0c3650; --navy-400:#15506f;
+  --surface:#07273d; --surface-2:#0b3650; --hairline:#1d4661;
+  --paper:#ffffff; --mist:#b8c6d0; --muted:#7e94a3;
+  --beam:#fa3b3c; --coral:#ff7a64; --ok:#2fb673; --pending:#e8a33d; --alert:#fa3b3c;
+  /* The middle band of a red/amber/green scale, for FILLS only (swatches, bars, timeline
+     spans). Separate from --pending because that one doubles as the "processing" colour
+     and is used as text, where a true yellow on a light ground is unreadable. What makes
+     a band legible here is its HUE against the red and green either side of it, not its
+     luminance against the track — and on light the spans already carry an outline. */
+  --mid:#f2c744;
+  --card-bg: rgba(7,39,61,.55); --card-solid:#07273d; --input-bg: rgba(2,19,31,.55);
+  --shadow: 0 18px 50px -24px rgba(0,0,0,.7);
+  --page:
+    radial-gradient(1200px 800px at 72% -10%, rgba(250,59,60,.12), transparent 60%),
+    radial-gradient(900px 700px at 8% 8%, rgba(7,38,60,.55), transparent 55%),
+    #02131f;
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --ink:#f4f7fa; --navy:#07263c; --navy-600:#c9d6df; --navy-400:#aebfcc;
+  --surface:#ffffff; --surface-2:#eaf1f6; --hairline:#c4d0da;
+  /* darker secondary/muted for WCAG-AA legibility on light backgrounds
+     (--mist ~7:1, --muted ~5:1 on white) */
+  --paper:#07263c; --mist:#2f4658; --muted:#48606f;
+  --beam:#fa3b3c; --coral:#ff5a44; --ok:#1f9b5f; --pending:#c9812a; --alert:#fa3b3c;
+  --mid:#eab308;
+  --card-bg: rgba(255,255,255,.8); --card-solid:#ffffff; --input-bg:#ffffff;
+  --shadow: 0 18px 44px -26px rgba(7,38,60,.35);
+  --page:
+    radial-gradient(1200px 800px at 72% -10%, rgba(250,59,60,.07), transparent 60%),
+    radial-gradient(900px 700px at 8% 8%, rgba(7,38,60,.05), transparent 55%),
+    #f4f7fa;
+}
+
+:root {
+  --font-display: "Manrope","Noto Sans Georgian",ui-sans-serif,system-ui,Segoe UI,Roboto,sans-serif;
+  --font-sans: "Inter","Noto Sans Georgian",ui-sans-serif,system-ui,Segoe UI,Roboto,sans-serif;
+  --ease: cubic-bezier(.16,1,.3,1);
+  --r-lg:18px; --r-md:12px; --r-sm:10px;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--ink); }
+body {
+  margin:0; min-height:100vh; background:var(--page); color:var(--paper);
+  font-family:var(--font-sans); line-height:1.55; -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility; overflow-x:hidden;
+}
+::selection { background:var(--beam); color:#fff; }
+h1,h2,h3,h4 { font-family:var(--font-display); letter-spacing:-.02em; }
+a { color:var(--mist); text-decoration:none; transition:color .2s var(--ease); }
+a:hover { color:var(--beam); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--coral);
+  background:var(--input-bg); border:1px solid var(--hairline); padding:2px 7px; border-radius:7px;
+  font-size:.82em; word-break:break-all; }
+:focus-visible { outline:2px solid var(--beam); outline-offset:2px; border-radius:6px; }
+
+/* ---- Header ----
+   Items must never squeeze or wrap mid-text: the bar keeps one row while there is room
+   (min-height, nowrap pills, flex:none controls, ellipsized .who) and on narrow screens
+   the nav drops below the brand as whole pills instead of crushing into the 62px bar. */
+.app-header {
+  position:sticky; top:0; z-index:40; display:flex; align-items:center; justify-content:space-between;
+  flex-wrap:wrap; gap:8px 16px; padding:12px clamp(16px,4vw,28px); min-height:62px;
+  background:color-mix(in oklab, var(--ink) 82%, transparent);
+  backdrop-filter:blur(16px); border-bottom:1px solid color-mix(in oklab,var(--hairline) 65%,transparent);
+}
+.brand { display:inline-flex; align-items:center; gap:10px; color:var(--paper); flex:none; }
+.brand:hover { color:var(--paper); }
+/* Official logo lockup: one asset per theme (colour on light, the white "logotetri" on
+   dark). The app always stamps data-theme on <html>, so exactly one is ever painted. */
+.brand-logo { flex:none; display:block; height:40px; width:auto; }
+[data-theme="dark"] .brand-logo.on-light,
+[data-theme="light"] .brand-logo.on-dark { display:none; }
+.brand-tag { font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--beam); border:1px solid color-mix(in oklab,var(--beam) 55%,transparent);
+  padding:2px 8px; border-radius:999px; white-space:nowrap; }
+.app-nav { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;
+  margin-left:auto; min-width:0; }
+.app-nav a { font-size:13.5px; color:var(--mist); padding:7px 11px; border-radius:9px;
+  white-space:nowrap; flex:none; }
+.app-nav a:hover { color:var(--paper); background:color-mix(in oklab,var(--surface-2) 60%,transparent); }
+.app-nav a.active { color:var(--paper); background:color-mix(in oklab,var(--surface-2) 75%,transparent);
+  box-shadow:inset 0 -2px 0 var(--beam); }
+.app-nav .who { color:var(--muted); font-size:13px; padding:0 4px;
+  max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lang-switch { flex:none; }
+.icon-btn { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px;
+  flex:none; border-radius:10px; border:1px solid var(--hairline); background:transparent; color:var(--mist);
+  cursor:pointer; transition:all .2s var(--ease); }
+.icon-btn:hover { color:var(--beam); border-color:color-mix(in oklab,var(--beam) 60%,transparent); }
+
+/* Side gutters scale with the viewport and are allowed to get properly wide: the console
+   pages run to 1500px, so a 28px gutter left the content sitting almost against the window
+   edge on a laptop. The 16px floor is what keeps a 375px phone from losing readable width. */
+main { max-width:960px; margin:0 auto; padding:clamp(18px,4vw,32px) clamp(16px,4.5vw,56px) 96px; }
+.narrow { max-width:760px; }
+/* Data consoles use the screen they are given — squeezing a 9-column table into a 960px
+   column on a 1900px monitor produced a pointless horizontal scrollbar next to acres of
+   empty margin. The public page stays narrow on purpose. */
+main.console { max-width:1500px; }
+
+/* ---- Cards ---- */
+.card {
+  background:var(--card-bg); border:1px solid var(--hairline); border-radius:var(--r-lg);
+  padding:clamp(16px,3vw,24px); margin-bottom:16px; backdrop-filter:blur(12px); box-shadow:var(--shadow);
+}
+.card.hover:hover { border-color:color-mix(in oklab,var(--beam) 45%,var(--hairline)); }
+h3 { margin:0 0 14px; font-size:16px; } h4 { margin:16px 0 8px; font-size:13px; color:var(--mist); }
+.eyebrow { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--beam); margin-bottom:8px; }
+.lead { color:var(--mist); font-size:15px; margin:2px 0 0; }
+
+/* ---- Forms ---- */
+label { display:block; font-size:12.5px; color:var(--muted); margin:14px 0 6px; font-weight:500; }
+/* Zero the leading gap ONLY where the label genuinely starts its container.
+   This used to be a blanket `label:first-of-type`, but :first-of-type is scoped to
+   siblings — a lone <label> in a field wrapper (<div><label>+<input></div>) is always
+   its parent's first label, so the reset fired on every single-field block. The gap
+   above them collapsed to 0 and each read as part of whatever sat above it: in the KB
+   importer the "File (PDF/DOCX…)" label sat flush against the category row and looked
+   like its caption. */
+.card > label:first-child,
+.row > div > label:first-of-type,
+.inline > label:first-of-type { margin-top:0; }
+input, textarea, select {
+  width:100%; padding:11px 13px; border-radius:var(--r-md); border:1px solid var(--hairline);
+  background:var(--input-bg); color:var(--paper); font-size:14px; font-family:inherit; transition:border-color .18s,box-shadow .18s;
+}
+input::placeholder, textarea::placeholder { color:color-mix(in oklab,var(--muted) 85%,transparent); }
+input:focus, textarea:focus, select:focus { outline:none; border-color:var(--beam);
+  box-shadow:0 0 0 3px rgba(250,59,60,.22); }
+textarea { min-height:110px; resize:vertical; }
+input[type=file] { padding:9px 11px; cursor:pointer; }
+input[type=checkbox] { width:auto; accent-color:var(--beam); }
+.hint { font-size:11.5px; color:var(--muted); margin-top:5px; }
+.muted { color:var(--muted); font-size:13px; }
+
+/* ---- Buttons (brand pill style) ---- */
+button, .btn { font-family:inherit; }
+button.primary, .btn-primary, button.ghost, .btn-ghost, button.danger, .btn-danger {
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:11px 20px; border-radius:999px; border:1px solid transparent; cursor:pointer;
+  font-size:13.5px; font-weight:600; transition:transform .16s var(--ease), background .2s, border-color .2s, color .2s;
+}
+button.primary, .btn-primary {
+  background:var(--beam); color:#0a1f30; border-color:var(--beam);
+  box-shadow:0 0 34px -8px rgba(250,59,60,.7);
+}
+button.primary:hover:not(:disabled), .btn-primary:hover { transform:translateY(-1px) scale(1.02); }
+button.ghost, .btn-ghost { background:transparent; border-color:var(--hairline); color:var(--paper); }
+button.ghost:hover:not(:disabled), .btn-ghost:hover { border-color:var(--beam); color:var(--beam); }
+button.danger, .btn-danger { background:color-mix(in oklab,var(--alert) 14%,transparent);
+  border-color:color-mix(in oklab,var(--alert) 40%,transparent); color:var(--coral); }
+button.danger:hover:not(:disabled) { background:color-mix(in oklab,var(--alert) 22%,transparent); }
+button:disabled { opacity:.5; cursor:default; }
+.actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+
+/* ---- Layout helpers ---- */
+.row { display:flex; gap:14px; flex-wrap:wrap; } .row > div { flex:1; min-width:180px; }
+.inline { display:flex; gap:8px; align-items:center; }
+.hidden { display:none !important; }
+
+/* ---- Tabs ---- */
+.tabs { display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+.tab { padding:9px 18px; border-radius:999px; border:1px solid var(--hairline); background:var(--card-bg);
+  color:var(--mist); cursor:pointer; font-size:13.5px; font-weight:600; transition:all .18s var(--ease); }
+.tab:hover { color:var(--paper); }
+.tab.active { background:var(--beam); border-color:var(--beam); color:#0a1f30; box-shadow:0 0 26px -10px rgba(250,59,60,.8); }
+.panel { display:none; } .panel.active { display:block; animation:fade .3s var(--ease); }
+@keyframes fade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.subtabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.subtab { padding:7px 14px; border-radius:9px; background:var(--input-bg); border:1px solid var(--hairline);
+  cursor:pointer; font-size:12.5px; color:var(--mist); font-weight:600; }
+.subtab.active { background:color-mix(in oklab,var(--beam) 16%,transparent); border-color:color-mix(in oklab,var(--beam) 55%,transparent); color:var(--beam); }
+
+/* ---- Pills / chips / dots ---- */
+.pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:600; }
+.pill.on, .pill.ready, .pill.done { background:color-mix(in oklab,var(--ok) 18%,transparent); color:var(--ok); }
+.pill.off, .pill.error, .pill.bad { background:color-mix(in oklab,var(--alert) 16%,transparent); color:var(--coral); }
+.pill.processing, .pill.pending { background:color-mix(in oklab,var(--pending) 18%,transparent); color:var(--pending); }
+.pill.supported { background:color-mix(in oklab,var(--ok) 18%,transparent); color:var(--ok); }
+.pill.contradicted { background:color-mix(in oklab,var(--alert) 16%,transparent); color:var(--coral); }
+.pill.notinkb { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+.pill.partial { background:color-mix(in oklab,var(--pending) 18%,transparent); color:var(--pending); }
+
+/* KB fact-check */
+.fc-claim { border:1px solid var(--hairline); border-left:3px solid var(--muted); border-radius:var(--r-md);
+  padding:12px 14px; margin-top:10px; background:var(--input-bg); }
+.fc-claim.v-SUPPORTED { border-left-color:var(--ok); }
+.fc-claim.v-CONTRADICTED { border-left-color:var(--alert); background:color-mix(in oklab,var(--alert) 7%,var(--input-bg)); }
+.fc-claim.v-PARTIALLY_SUPPORTED { border-left-color:var(--pending); }
+.fc-claim.v-NOT_IN_KB { border-left-color:var(--muted); }
+.fc-ev { margin-top:8px; padding:8px 11px; border-radius:8px; background:color-mix(in oklab,var(--surface-2) 40%,transparent);
+  border:1px solid var(--hairline); font-size:12.5px; color:var(--mist); }
+.fc-ev .fc-ev-src { color:var(--muted); font-size:11.5px; margin-bottom:3px; }
+
+/* Rubric EDITOR: each criterion is its own numbered card, visually distinct from the
+   card it sits in — the old flat rows all blurred into one another. */
+.sc-edit { border:1px solid var(--hairline); border-left:3px solid var(--beam); border-radius:var(--r-md);
+  padding:14px 16px; margin:14px 0; background:color-mix(in oklab,var(--surface-2) 30%,transparent); }
+.sc-edit-num { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
+  border-radius:50%; background:var(--beam); color:#0a1f30; font-weight:800; font-size:13px;
+  font-family:var(--font-display); }
+/* Section divider inside a card — where one concern ends and the next begins. */
+hr.sep { border:none; border-top:1px solid color-mix(in oklab,var(--hairline) 80%,transparent);
+  margin:22px 0 6px; }
+
+/* Rubric scorecard */
+.sc-total { text-align:right; } .sc-total .num { font-family:var(--font-display); font-weight:800; font-size:30px; line-height:1; }
+.sc-dim { border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px 14px; margin-top:10px; background:var(--input-bg); }
+.sc-dim-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.sc-dim-name { font-weight:700; color:var(--paper); }
+.sc-dim-score { font-family:var(--font-display); font-weight:800; font-size:18px; line-height:1; }
+.sc-meta { color:var(--muted); font-size:11.5px; }
+.sc-bar { height:8px; border-radius:999px; margin-top:8px; background:color-mix(in oklab,var(--muted) 22%,transparent); overflow:hidden; }
+.sc-bar > span { display:block; height:100%; border-radius:999px; background:var(--beam); }
+.sc-bar.good > span { background:var(--ok); } .sc-bar.mid > span { background:var(--mid); } .sc-bar.bad > span { background:var(--alert); }
+
+/* Rubric-import progress — reuses .sc-bar as the track, because a progress bar and a score
+   bar are the same object drawn twice otherwise. What is added here is the caption row and
+   the INDETERMINATE state: text extraction is one opaque pypdf/openpyxl/python-docx call
+   with no progress signal, so it gets a moving stripe and NO number. A percentage invented
+   for that stage is exactly the lie this bar exists to remove — a bar that stalls at 90%
+   teaches the reader that their eyes are lying to them. */
+.imp-prog { margin-top:12px; }
+.imp-prog-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+  font-size:12.5px; color:var(--mist); }
+.imp-prog-pct { font-family:var(--font-display); font-weight:700; color:var(--paper);
+  font-variant-numeric:tabular-nums; }
+.imp-prog .sc-bar > span { transition:width .3s var(--ease); }
+.sc-bar.indet > span { width:35%; animation:impslide 1.2s var(--ease) infinite; }
+@keyframes impslide { from { transform:translateX(-115%); } to { transform:translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  /* The global reduced-motion rule freezes the stripe where it starts, and a stalled 35%
+     stub reads as "35% done". Fill the whole track at low opacity instead: working, but
+     deliberately not a measurement. */
+  .sc-bar.indet > span { width:100%; opacity:.45; }
+}
+.sc-evid { margin-top:8px; padding:8px 11px; border-radius:8px; border:1px solid var(--hairline);
+  background:color-mix(in oklab,var(--surface-2) 40%,transparent); font-size:12.5px; color:var(--mist); }
+.sc-evid q { display:block; margin:2px 0; } .sc-evid q:before { content:'“'; } .sc-evid q:after { content:'”'; }
+.fc-accuracy { text-align:right; } .fc-accuracy .num { font-family:var(--font-display); font-weight:800; font-size:30px; line-height:1; }
+.chip { display:inline-block; white-space:nowrap; padding:4px 11px; border-radius:999px; font-size:12px; margin:3px 5px 0 0;
+  background:color-mix(in oklab,var(--beam) 12%,transparent); border:1px solid color-mix(in oklab,var(--beam) 40%,transparent); color:var(--paper); }
+.dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:var(--pending); }
+.dot.ok { background:var(--ok); } .dot.bad { background:var(--alert); } .dot.wait { background:var(--pending); }
+
+/* ---- Mic recorder (analyzer) ---- */
+.rec-row { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
+.rec-row .rec-off { opacity:.55; cursor:not-allowed; }
+.rec-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--coral); margin-right:7px; vertical-align:middle; animation:recpulse 1s ease-in-out infinite; }
+@keyframes recpulse { 0%,100%{opacity:1;} 50%{opacity:.25;} }
+.rec-status.rec-live { color:var(--coral); font-variant-numeric:tabular-nums; }
+.rec-status.ok { color:var(--ok); } .rec-status.err { color:var(--coral); }
+
+/* ---- Feedback ---- */
+.msg { margin-top:12px; font-size:13.5px; white-space:pre-wrap; }
+.msg.ok { color:var(--ok); } .msg.err, .err { color:var(--coral); }
+.test { margin-top:10px; padding:11px 13px; border-radius:var(--r-md); background:var(--input-bg);
+  border:1px solid var(--hairline); font-size:13px; }
+.sub { background:var(--input-bg); border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px; margin-top:8px; }
+.kv { margin:5px 0; } .kv b { color:var(--mist); min-width:96px; display:inline-block; font-weight:600; }
+ul.tight { margin:6px 0 0; padding-left:20px; } ul.tight li { margin:3px 0; }
+.score { font-size:30px; font-weight:800; font-family:var(--font-display); color:var(--beam); }
+
+/* ---- Tables ---- */
+.table-wrap { overflow-x:auto; border:1px solid color-mix(in oklab,var(--hairline) 80%,transparent);
+  border-radius:var(--r-md); }
+table { width:100%; border-collapse:collapse; font-size:13.5px; }
+th, td { text-align:left; padding:10px 12px; border-bottom:1px solid color-mix(in oklab,var(--hairline) 70%,transparent); vertical-align:middle; }
+thead th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+  background:color-mix(in oklab,var(--surface-2) 40%,transparent); }
+tbody tr:last-child td { border-bottom:none; }
+tbody tr:hover td { background:color-mix(in oklab,var(--surface-2) 35%,transparent); }
+/* An actions cell must STAY a table cell: display:flex on a <td> ejects it from table
+   layout and the buttons drift out of line with their rows. */
+td.inline { display:table-cell; white-space:nowrap; }
+td.inline > button { vertical-align:middle; }
+td.inline > button + button { margin-left:6px; }
+
+/* ---- Transcript / code blocks ---- */
+pre.tx, pre.transcript { white-space:pre-wrap; background:var(--input-bg); border:1px solid var(--hairline);
+  border-radius:var(--r-md); padding:14px; font-size:13px; max-height:320px; overflow:auto; color:var(--mist); }
+
+/* ---- Dropzone (file upload) ---- */
+.drop { position:relative; border:1.5px dashed color-mix(in oklab,var(--hairline) 90%,transparent);
+  border-radius:var(--r-md); padding:22px; text-align:center; cursor:pointer; transition:all .18s var(--ease);
+  background:color-mix(in oklab,var(--input-bg) 60%,transparent); }
+.drop:hover, .drop.drag { border-color:var(--beam); background:color-mix(in oklab,var(--beam) 8%,transparent); }
+.drop input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }
+.drop .drop-title { font-weight:600; color:var(--paper); }
+.drop .drop-sub { font-size:12px; color:var(--muted); margin-top:4px; }
+.drop .drop-file { color:var(--beam); font-weight:600; }
+
+/* ---- Audio ---- */
+audio { width:100%; margin-top:12px; border-radius:999px; }
+
+/* ---- Audio converter file list ----
+   Reuses the standard table; only the name cell needs its own rule. What lands here is
+   whatever the visitor's disk calls a file — a 90-character Georgian string with no spaces
+   is normal — and without an explicit break it pushes the status column off a phone screen
+   instead of wrapping. The per-file reason line sits under the name because a batch where
+   one file of forty failed has to say WHICH one and WHY, in the same row. */
+.cv-file { word-break:break-word; min-width:150px; }
+.cv-why { color:var(--coral); font-size:11.5px; margin-top:3px; }
+.cv-out { color:var(--muted); font-size:11.5px; margin-top:3px; word-break:break-word; }
+.cv-size { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* ---- Quota banner ---- */
+.quota { margin-bottom:16px; padding:12px 16px; border-radius:var(--r-md); font-size:13.5px;
+  background:var(--card-bg); border:1px solid var(--hairline); color:var(--mist); display:none; backdrop-filter:blur(10px); }
+.quota.show { display:block; } .quota a { color:var(--beam); font-weight:600; }
+.quota b { color:var(--paper); }
+.quota.warn { border-color:color-mix(in oklab,var(--alert) 55%,transparent); background:color-mix(in oklab,var(--alert) 10%,transparent); color:var(--coral); }
+.quota.warn b, .quota.warn a { color:var(--coral); }
+
+/* ---- Empty states ---- */
+.empty { text-align:center; padding:26px 16px; color:var(--muted); font-size:13.5px; }
+
+/* ---- Spinner ---- */
+.spinner { display:inline-block; width:15px; height:15px; border:2px solid currentColor; border-top-color:transparent;
+  border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:8px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ---- Auth gate ---- */
+.gate { max-width:420px; margin:8vh auto; }
+
+/* ---- Toasts ---- */
+#cq-toasts { position:fixed; right:18px; bottom:18px; z-index:100; display:flex; flex-direction:column; gap:10px;
+  max-width:min(92vw,360px); }
+.cq-toast { padding:12px 15px; border-radius:var(--r-md); font-size:13.5px; color:var(--paper);
+  background:var(--card-solid); border:1px solid var(--hairline); box-shadow:var(--shadow);
+  border-left:3px solid var(--beam); animation:toastIn .3s var(--ease); }
+.cq-toast.ok { border-left-color:var(--ok); } .cq-toast.err { border-left-color:var(--alert); }
+.cq-toast.leaving { animation:toastOut .25s var(--ease) forwards; }
+@keyframes toastIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:none; } }
+@keyframes toastOut { to { opacity:0; transform:translateX(16px); } }
+
+/* ---- Modal (confirm) ---- */
+.cq-modal-bg { position:fixed; inset:0; z-index:110; background:rgba(2,10,18,.6); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; padding:20px; animation:fade .2s var(--ease); }
+.cq-modal { background:var(--card-solid); border:1px solid var(--hairline); border-radius:var(--r-lg);
+  padding:22px; max-width:400px; width:100%; box-shadow:var(--shadow); }
+.cq-modal p { margin:0 0 18px; font-size:14.5px; }
+.cq-modal .actions { justify-content:flex-end; margin-top:0; }
+
+/* ---- Info tips (the ⓘ next to a label) ----
+   The one place a description is allowed to live now that the pages carry no standing
+   prose. Hover alone would have been half a feature: a phone has no hover and a keyboard
+   has no mouse, so the trigger is a real <button> that opens on hover, focus AND tap, and
+   the sentence is ALSO parked in a clipped .cq-sr span wired up with aria-describedby —
+   a screen reader reads it on focus whether or not the bubble ever paints.
+
+   The bubble is one element parked on <body> and positioned fixed, never a child of the
+   row it explains. Inside the card it would be clipped by .table-wrap's overflow, trapped
+   under the next backdrop-filtered .card (backdrop-filter makes a stacking context), and
+   worst of all it would push its neighbours down on open — a row of inputs that jumps
+   when you ask what a field means is not a hint, it is a trap. */
+.tip {
+  /* position:relative is load-bearing — the phone breakpoint hangs the enlarged hit area
+     off ::after and needs this element as its containing block. */
+  position:relative; display:inline-flex; align-items:center; justify-content:center; vertical-align:middle;
+  width:16px; height:16px; padding:0; margin:0 0 0 6px; flex:none;
+  border:1px solid color-mix(in oklab,var(--muted) 65%,transparent); border-radius:50%;
+  background:transparent; color:var(--muted); cursor:help;
+  font-family:var(--font-sans); font-size:10.5px; font-weight:700; line-height:1;
+  transition:color .16s var(--ease), border-color .16s var(--ease), background .16s var(--ease);
+}
+/* Drawn, not typed: the ⓘ character is missing from Noto Sans Georgian, so a Georgian
+   page would have rendered a tofu box. A bordered circle plus a latin "i" always paints. */
+.tip::before { content:'i'; }
+.tip[hidden] { display:none; }   /* inline-flex above would otherwise out-specify [hidden] */
+.tip:hover, .tip:focus-visible, .tip.on {
+  color:var(--beam); border-color:color-mix(in oklab,var(--beam) 70%,transparent);
+  background:color-mix(in oklab,var(--beam) 12%,transparent);
+}
+
+/* Screen-reader-only. Never display:none — a hidden node is what several screen readers
+   refuse to follow through aria-describedby, which is the whole point of this span. */
+.cq-sr { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
+
+/* z-index sits one rung above .cq-modal-bg (110): a tip inside a confirm dialog has to
+   clear the dialog, and nothing in the app is stacked higher than the dialog. */
+#cq-tip {
+  position:fixed; top:0; left:0; z-index:120; visibility:hidden; opacity:0;
+  pointer-events:none;   /* the bubble is never a hover target — leaving the ⓘ closes it */
+  max-width:min(320px, calc(100vw - 24px));
+  padding:10px 12px; border-radius:var(--r-md);
+  background:var(--card-solid); border:1px solid var(--hairline); box-shadow:var(--shadow);
+  color:var(--mist); font-family:var(--font-sans); font-size:12.5px; line-height:1.5;
+  /* Georgian runs ~1.5× the length of the English, so the box wraps rather than widens. */
+  white-space:normal; overflow-wrap:break-word; text-align:left;
+  /* visibility is in the transition so the fade-OUT is actually seen — flipping it at t=0
+     would snap the box away before the opacity had moved. */
+  transition:opacity .14s var(--ease), visibility .14s var(--ease);
+}
+#cq-tip.open { visibility:visible; opacity:1; }
+/* The caret keeps the bubble tied to its ⓘ after the bubble has been clamped to a screen
+   edge — at 375px a tip on a right-hand field is always clamped. JS sets --cq-tip-ax. */
+#cq-tip::after {
+  content:''; position:absolute; width:9px; height:9px; left:var(--cq-tip-ax,50%); margin-left:-5px;
+  background:var(--card-solid); border:1px solid var(--hairline); transform:rotate(45deg);
+}
+#cq-tip[data-place="below"]::after { top:-5px; border-right:0; border-bottom:0; }
+#cq-tip[data-place="above"]::after { bottom:-5px; border-left:0; border-top:0; }
+
+/* ---- Width utilities ----
+   Fixed field widths must live in classes, never inline style="min-width:…" — an inline
+   style can never be reached by a media query, so it breaks phone stacking. */
+.row > .w-num  { flex:0 1 120px; min-width:110px; }
+.row > .w-sel  { flex:0 1 200px; min-width:170px; }
+.row > .w-name { flex:1 1 240px; min-width:200px; }
+.inline.wrap { flex-wrap:wrap; row-gap:4px; }
+
+/* Compact icon actions for table rows: five text pills per row made the documents tables
+   ~1100px wide; 34px icon buttons keep every column on screen. Always give them a
+   title + aria-label — the icon alone is not a label. */
+button.act { width:34px; height:34px; padding:0; border-radius:9px; border:1px solid var(--hairline);
+  background:transparent; color:var(--mist); cursor:pointer; font-size:15px; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center; transition:all .16s var(--ease); }
+button.act:hover { color:var(--beam); border-color:color-mix(in oklab,var(--beam) 60%,transparent); }
+button.act.danger { color:var(--coral); border-color:color-mix(in oklab,var(--alert) 40%,transparent); background:color-mix(in oklab,var(--alert) 10%,transparent); }
+button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transparent); }
+
+/* Expanded sub-panels inside horizontally scrolling tables (e.g. the admin tenants table's
+   API-key/users panel) pin to the visible viewport instead of inheriting the table width. */
+.table-wrap .sub { position:sticky; left:0; max-width:min(100%, calc(100vw - 90px)); }
+
+/* ---- Responsive ----
+   Two breakpoints, used everywhere — do not invent a third:
+     ≤900px  tablet — tighter form grids, expendable table columns hidden (.hide-md),
+             trilingual/limit rows stack (.stack-md)
+     ≤640px  phone — everything stacks, tab rows become one swipeable line, 16px inputs
+             (kills iOS focus-zoom), ≥44px touch targets, compact one-row header */
+/* ---- Language switch ---- */
+.lang-switch { display:inline-flex; border:1px solid var(--hairline); border-radius:999px; overflow:hidden; }
+.lang-switch button { background:transparent; border:none; color:var(--muted); font-size:11.5px; font-weight:700;
+  letter-spacing:.04em; padding:6px 9px; cursor:pointer; transition:all .18s var(--ease); }
+.lang-switch button:hover { color:var(--paper); }
+.lang-switch button.active { background:var(--beam); color:#0a1f30; }
+
+/* ---- Custom select ---- */
+.cq-select { position:relative; }
+.cq-select-native { position:absolute !important; width:1px; height:1px; opacity:0; pointer-events:none; margin:0; }
+.cq-select-trigger { width:100%; display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:11px 13px; border-radius:var(--r-md); border:1px solid var(--hairline); background:var(--input-bg);
+  color:var(--paper); font-size:14px; font-family:inherit; cursor:pointer; text-align:left; transition:border-color .18s,box-shadow .18s; }
+.cq-select-trigger:focus-visible { outline:none; border-color:var(--beam); box-shadow:0 0 0 3px rgba(250,59,60,.22); }
+.cq-select.open .cq-select-trigger { border-color:var(--beam); box-shadow:0 0 0 3px rgba(250,59,60,.22); }
+.cq-select-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cq-select-arrow { color:var(--muted); font-size:11px; transition:transform .18s var(--ease); }
+.cq-select.open .cq-select-arrow { transform:rotate(180deg); }
+/* The menu is at LEAST as wide as its trigger and otherwise as wide as its content needs.
+   It used to be pinned to `left:0; right:0`, i.e. exactly the trigger's width — fine for a
+   full-width form field, but a compact trigger (the workspace picker sits in a flex row and
+   shrinks to the selected name) squeezed every option into a two-word column. Capped so a
+   long name cannot run off the screen, and `.rtl` flips the anchor when the trigger sits
+   near the right edge. */
+.cq-select-panel { display:none; position:absolute; left:0; right:auto; top:calc(100% + 6px); z-index:60;
+  min-width:100%; width:max-content; max-width:min(420px, calc(100vw - 32px));
+  max-height:300px; max-height:min(300px,52vh); overflow-y:auto; padding:6px; border-radius:var(--r-md);
+  background:var(--card-solid); border:1px solid var(--hairline); box-shadow:var(--shadow); }
+.cq-select-panel.up { top:auto; bottom:calc(100% + 6px); }
+.cq-select-panel.rtl { left:auto; right:0; }
+/* Set by brand.js while a menu inside this card is open — see the note there: a
+   backdrop-filtered .card traps its children's z-index, so the card must rise. */
+.card.cq-sel-open { position:relative; z-index:70; }
+.cq-select.open .cq-select-panel { display:block; animation:fade .16s var(--ease); }
+.cq-opt { padding:9px 11px; border-radius:8px; font-size:13.5px; color:var(--mist); cursor:pointer;
+  white-space:normal; overflow-wrap:anywhere; }
+.cq-opt:hover { background:color-mix(in oklab,var(--surface-2) 55%,transparent); color:var(--paper); }
+.cq-opt.sel { background:color-mix(in oklab,var(--beam) 14%,transparent); color:var(--paper); font-weight:600; }
+
+/* ---- Custom audio player ---- */
+.cq-player { display:flex; align-items:center; gap:10px; margin-top:12px; padding:8px 12px;
+  border:1px solid var(--hairline); border-radius:999px; background:var(--input-bg); }
+.cq-play { flex:none; width:38px; height:38px; border-radius:50%; border:none; cursor:pointer;
+  background:var(--beam); color:#0a1f30; font-size:13px; display:inline-flex; align-items:center; justify-content:center;
+  box-shadow:0 0 20px -8px rgba(250,59,60,.8); }
+.cq-play:hover { transform:scale(1.05); }
+.cq-time { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; min-width:38px; }
+.cq-dl { flex:none; width:34px; height:34px; text-decoration:none; font-size:15px; }
+.cq-seek { -webkit-appearance:none; appearance:none; flex:1; min-width:60px; height:5px; border-radius:999px; background:transparent; cursor:pointer; padding:0; border:none; }
+.cq-seek::-webkit-slider-runnable-track { height:5px; border-radius:999px; background:color-mix(in oklab,var(--hairline) 80%,transparent); }
+.cq-seek::-moz-range-track { height:5px; border-radius:999px; background:color-mix(in oklab,var(--hairline) 80%,transparent); }
+.cq-seek::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px; margin-top:-4.5px; border-radius:50%; background:var(--beam); border:2px solid var(--card-solid); }
+.cq-seek::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--beam); border:2px solid var(--card-solid); }
+.cq-seek:focus-visible { outline:none; } .cq-seek:focus-visible::-webkit-slider-thumb { box-shadow:0 0 0 3px rgba(250,59,60,.3); }
+
+/* ---- "Coming soon" placeholder (feature not launched yet) ---- */
+.soon-card { text-align:center; padding:52px 24px; border:1px dashed var(--hairline); border-radius:14px; }
+.soon-card .soon-emoji { font-size:44px; display:block; margin-bottom:12px; }
+.soon-card h3 { margin:0 0 8px; font-size:21px; }
+.soon-card p { margin:0 auto; max-width:520px; color:var(--muted); font-size:14px; line-height:1.55; }
+
+@media (max-width:900px) {
+  .row > div { min-width:150px; }
+  .stack-md > div { min-width:100% !important; }
+  .hide-md { display:none !important; }
+}
+@media (max-width:640px) {
+  .app-header { position:static; }
+  .app-nav a { padding:8px 8px; font-size:13px; }
+  .app-nav .who { display:none; }
+  .brand-tag { display:none; }
+  .brand-logo { height:28px; }
+  .app-header { gap:6px 10px; padding:10px 14px; }
+  .app-nav { gap:2px; }
+  .row > div { min-width:100% !important; }
+  .row > .w-num { flex-basis:calc(50% - 7px); min-width:calc(50% - 7px) !important; }
+  main { padding-bottom:80px; }
+  /* Tab pills: one swipeable row instead of a 4-row wall of buttons. Order is preserved,
+     so the active pill stays findable; the row bleeds to the screen edges on purpose. */
+  .tabs, .subtabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    margin-left:calc(-1*clamp(16px,4vw,28px)); margin-right:calc(-1*clamp(16px,4vw,28px));
+    padding-left:clamp(16px,4vw,28px); padding-right:clamp(16px,4vw,28px); padding-bottom:6px;
+    scrollbar-width:none; }
+  /* Subtab rows live inside .card, whose padding is clamp(16px,3vw,24px) — bleeding by
+     main's larger padding overshot the card border by a few px around 600px wide. */
+  .card .subtabs { margin-left:calc(-1*clamp(16px,3vw,24px)); margin-right:calc(-1*clamp(16px,3vw,24px));
+    padding-left:clamp(16px,3vw,24px); padding-right:clamp(16px,3vw,24px); }
+  .tabs::-webkit-scrollbar, .subtabs::-webkit-scrollbar { display:none; }
+  .tab, .subtab { flex:none; }
+  /* 16px is the iOS threshold below which focusing a field zooms the whole page in. */
+  input, textarea, select, .cq-select-trigger { font-size:16px; }
+  /* ≥44px effective touch targets for the primary controls. */
+  .subtab { padding:11px 14px; }
+  .lang-switch button { padding:10px 11px; }
+  .icon-btn { width:42px; height:42px; }
+  button.act { width:40px; height:40px; }
+  .cq-play { width:44px; height:44px; }
+  input[type=checkbox] { width:20px; height:20px; }
+  /* The ⓘ stays visually 16px — a thumb-sized circle beside a 12.5px label would read as
+     a button, not a footnote — so an invisible pseudo-element grows the HIT area to ~34px
+     instead. Padding would have grown the drawn circle with it (the border follows the
+     padding box) and pushed the label's line apart. */
+  .tip::after { content:''; position:absolute; inset:-9px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration:.001ms !important; transition-duration:.001ms !important; }
+}
+
+/* Score colour thresholds (tenant Rubric page). The dot is the colour being described, so the
+   row reads as a legend you can edit rather than a form with three unexplained numbers. */
+.bands-rows { display:flex; flex-direction:column; gap:10px; margin:12px 0 4px; }
+.bands-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.bands-dot { width:14px; height:14px; border-radius:4px; flex:0 0 auto; }
+.bands-dot.good { background:var(--ok); }
+.bands-dot.mid { background:var(--mid); }
+.bands-dot.bad { background:var(--alert); }
+.bands-name { min-width:74px; font-weight:600; color:var(--mist); }
+.bands-range { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; flex-wrap:wrap; }
+.bands-range input { width:74px; margin:0; }
+
+/* Manual score edits + their history (workbench Score tab). */
+.wb-sc-editcell { display:inline-flex; align-items:center; gap:4px; }
+.wb-sc-in { width:72px; margin:0; text-align:right; font-weight:700; }
+.wb-sc-tools { display:flex; align-items:center; gap:8px; margin-top:14px; flex-wrap:wrap; }
+.wb-sc-tools .wb-sc-note { flex:1 1 220px; margin:0; }
+.wb-sc-histbox { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.wb-rev { border:1px solid var(--hairline); border-radius:10px; padding:10px 12px; background:var(--input-bg); }
