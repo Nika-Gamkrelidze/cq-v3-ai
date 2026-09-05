@@ -43,7 +43,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from ..db import pool
-from ..services import kb_console, kb_ingest, kb_restructure, retrieval
+from ..services import kb_console, kb_events, kb_ingest, kb_restructure, retrieval
 from ..services.auth import Principal, resolve_principal
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -145,6 +145,7 @@ async def upload_document(
     metadata: str = Form(""),
     restructure: str = Form(""),
     client_id: str = Depends(require_tenant),
+    actor: str = Depends(tenant_actor),
 ):
     data = await file.read()
     if not data:
@@ -164,8 +165,10 @@ async def upload_document(
             (file.filename or "").lower().endswith(".csv") or "csv" in (file.content_type or "").lower()):
         doc_id = await _create_doc(client_id, doc_type, title or file.filename, "csv",
                                    file.filename, meta, tag_list)
+        ev = await kb_events.log(client_id, "import", document_id=doc_id, method="csv",
+                                 status="pending", actor=actor, detail=title or file.filename)
         bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "csv",
-                    csv_bytes=data, base_metadata=meta)
+                    csv_bytes=data, base_metadata=meta, event_id=ev)
         return {"id": doc_id, "status": "pending", "title": title or file.filename}
     try:
         # pypdf/python-docx parsing is synchronous and CPU-bound; running it inline here
@@ -184,8 +187,11 @@ async def upload_document(
         raise HTTPException(status_code=422, detail=kb_restructure.OVERSIZE_MESSAGE)
     doc_id = await _create_doc(client_id, doc_type, title or file.filename, "file",
                                file.filename, meta, tag_list)
+    ev = await kb_events.log(client_id, "import", document_id=doc_id, method="file",
+                             status="pending", actor=actor,
+                             detail=(title or file.filename) + (" [AI]" if want_ai else ""))
     bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "file", text=text,
-                base_metadata=meta, restructure=want_ai)
+                base_metadata=meta, restructure=want_ai, event_id=ev)
     return {"id": doc_id, "status": "pending", "title": title or file.filename}
 
 
@@ -199,14 +205,18 @@ class TextDoc(BaseModel):
 
 @router.post("/documents/text")
 async def paste_document(body: TextDoc, bg: BackgroundTasks,
-                         client_id: str = Depends(require_tenant)):
+                         client_id: str = Depends(require_tenant),
+                         actor: str = Depends(tenant_actor)):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    doc_id = await _create_doc(client_id, body.doc_type, body.title or "Pasted text",
+    title = body.title or "Pasted text"
+    doc_id = await _create_doc(client_id, body.doc_type, title,
                                "text", None, body.metadata, body.tags)
+    ev = await kb_events.log(client_id, "import", document_id=doc_id, method="paste",
+                             status="pending", actor=actor, detail=title)
     bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "text",
-                text=body.text, base_metadata=body.metadata)
-    return {"id": doc_id, "status": "pending", "title": body.title or "Pasted text"}
+                text=body.text, base_metadata=body.metadata, event_id=ev)
+    return {"id": doc_id, "status": "pending", "title": title}
 
 
 @router.post("/documents/csv")
@@ -218,6 +228,7 @@ async def csv_document(
     tags: str = Form(""),
     metadata: str = Form(""),
     client_id: str = Depends(require_tenant),
+    actor: str = Depends(tenant_actor),
 ):
     data = await file.read()
     if not data:
@@ -228,8 +239,10 @@ async def csv_document(
     meta = _parse_json(metadata, {})
     doc_id = await _create_doc(client_id, doc_type, title or file.filename, "csv",
                                file.filename, meta, tag_list)
+    ev = await kb_events.log(client_id, "import", document_id=doc_id, method="csv",
+                             status="pending", actor=actor, detail=title or file.filename)
     bg.add_task(kb_ingest.ingest_document, doc_id, client_id, "csv",
-                csv_bytes=data, base_metadata=meta)
+                csv_bytes=data, base_metadata=meta, event_id=ev)
     return {"id": doc_id, "status": "pending", "title": title or file.filename}
 
 

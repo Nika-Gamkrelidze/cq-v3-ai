@@ -1549,6 +1549,11 @@ const CQ = (() => {
       render(); wrap.classList.add('open');
       const r = wrap.getBoundingClientRect();
       panel.classList.toggle('up', r.bottom + 300 > window.innerHeight && r.top > 320);
+      // The panel may now be wider than its trigger, so anchor it to whichever edge keeps
+      // it on screen — measured after `open`, because a hidden panel has no width.
+      panel.classList.remove('rtl');
+      const pw = panel.getBoundingClientRect().width;
+      if (r.left + pw > window.innerWidth - 8 && r.right - pw > 8) panel.classList.add('rtl');
       document.addEventListener('click', outside, true);
       const s = panel.querySelector('.cq-opt.sel'); if (s) s.scrollIntoView({ block: 'nearest' });
     }
