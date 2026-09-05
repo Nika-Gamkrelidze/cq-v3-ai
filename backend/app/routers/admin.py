@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
-from ..services import chat_credentials, chat_store, claude, elevenlabs, limits, settings_store
+from ..services import (ai_config, chat_credentials, chat_store, claude, elevenlabs, limits,
+                        settings_store, usage)
 from .kb import count_public_documents
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -705,3 +706,53 @@ async def get_kill_switch():
 @router.put("/chat/kill-switch", dependencies=[Depends(require_admin)])
 async def put_kill_switch(body: KillSwitchBody):
     return await settings_store.set_autopilot_kill_switch(body.model_dump(exclude_none=True))
+
+
+# --------------------------------------------------------------------------- #
+# Token accounting + per-tenant AI configuration (superadmin only)
+#
+# Both answer commercial questions rather than operational ones: what a workspace consumed,
+# and which AI it runs on. They live behind the same admin gate as everything else here.
+# --------------------------------------------------------------------------- #
+@router.get("/usage/tenants", dependencies=[Depends(require_admin)])
+async def usage_tenants(window: str = usage.DEFAULT_WINDOW):
+    """Every tenant's token total for the window, biggest first."""
+    return {"window": window if window in usage.WINDOWS else usage.DEFAULT_WINDOW,
+            "windows": list(usage.WINDOWS),
+            "tenants": await usage.totals_by_tenant(window)}
+
+
+@router.get("/usage/tenants/{tenant_id}", dependencies=[Depends(require_admin)])
+async def usage_tenant(tenant_id: str, window: str = usage.DEFAULT_WINDOW):
+    """One tenant, split by user, feature, model and recording."""
+    return await usage.tenant_breakdown(tenant_id, window)
+
+
+@router.get("/ai-config/{tenant_id}", dependencies=[Depends(require_admin)])
+async def get_ai_config(tenant_id: str):
+    """A tenant's AI overrides. The stored key is never returned — only `has_key`."""
+    return await ai_config.public_config(tenant_id)
+
+
+class AiConfigBody(BaseModel):
+    enabled: bool = False
+    provider: str | None = "anthropic"
+    model: str | None = None
+    base_url: str | None = None
+    # Only sent when SETTING a new key. Absent means "leave whatever is stored alone", which
+    # is why clearing needs its own flag: the console cannot read the key back, so it cannot
+    # echo it, and treating absent as empty would wipe a tenant's credential on every edit.
+    api_key: str | None = None
+    clear_key: bool = False
+    notes: str | None = None
+
+
+@router.put("/ai-config/{tenant_id}", dependencies=[Depends(require_admin)])
+async def put_ai_config(tenant_id: str, body: AiConfigBody):
+    async with pool().acquire() as conn:
+        if not await conn.fetchval("SELECT 1 FROM clients WHERE id = $1::uuid", tenant_id):
+            raise HTTPException(status_code=404, detail="Tenant not found")
+    return await ai_config.save_config(
+        tenant_id, enabled=body.enabled, provider=body.provider, model=body.model,
+        base_url=body.base_url, api_key=body.api_key, clear_key=body.clear_key,
+        notes=body.notes, updated_by="superadmin")

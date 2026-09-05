@@ -239,7 +239,8 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
                     integration_id: str | None = None,
                     admit_timeout_s: float = ADMIT_TIMEOUT_S,
                     stream: bool = False,
-                    on_progress: Callable[[int], None] | None = None) -> dict:
+                    on_progress: Callable[[int], None] | None = None,
+                    actor: str | None = None, job_id: str | None = None) -> dict:
     """The house forced-tool-use pattern: one tool, tool_choice pinned to it, strict schema.
 
     Returns the tool_use block's input as a plain dict. Raises LLMError if the model answered
@@ -280,12 +281,14 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
         except anthropic.APIError as exc:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
                     model=model, message=None,
-                    latency_ms=int((time.monotonic() - started) * 1000), ok=False)
+                    latency_ms=int((time.monotonic() - started) * 1000), ok=False,
+                    actor=actor, job_id=job_id)
             raise _wrap(exc) from exc
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
             model=model, message=message,
-            latency_ms=int((time.monotonic() - started) * 1000), ok=True)
+            latency_ms=int((time.monotonic() - started) * 1000), ok=True,
+            actor=actor, job_id=job_id)
 
     if getattr(message, "stop_reason", None) == "max_tokens":
         raise LLMTruncatedError(

@@ -107,6 +107,10 @@ async def run_startup_migrations() -> list[str]:
         await _apply(conn, "score_bands.sql")
         # actor.sql: the name of whoever created a recording or summary.
         await _apply(conn, "actor.sql")
+        # ai_usage.sql: who/which-recording columns on llm_usage, plus per-tenant AI
+        # overrides. After chat.sql, which created llm_usage, and after analyzer.sql, whose
+        # audio_jobs the new job_id refers to (by value — deliberately not a FK).
+        await _apply(conn, "ai_usage.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)
