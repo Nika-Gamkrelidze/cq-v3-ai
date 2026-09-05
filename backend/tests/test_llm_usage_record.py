@@ -159,3 +159,98 @@ def test_both_entry_points_apply_the_overlay():
                   if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == name)
         body = ast.dump(fn)
         assert "'overlay'" in body, f"{name} does not apply the tenant AI overlay"
+
+
+# --------------------------------------------------------------------------- #
+# Attribution: who ran it, and which recording it belongs to.
+# --------------------------------------------------------------------------- #
+def test_every_principal_path_publishes_an_actor():
+    """`resolve_principal` must route EVERY return through `_remember`.
+
+    A path that returned a bare Principal would attribute that request's Claude calls to
+    nobody — indistinguishable in the console from work that genuinely had no actor, which is
+    the worst kind of wrong number: quietly plausible.
+    """
+    from app.services import auth
+
+    tree = ast.parse(Path(auth.__file__).read_text(encoding="utf-8"))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
+              and n.name == "resolve_principal")
+    returns = [n for n in ast.walk(fn) if isinstance(n, ast.Return)]
+    assert returns, "no returns found — did resolve_principal move?"
+    for r in returns:
+        call = r.value
+        assert isinstance(call, ast.Call) and getattr(call.func, "id", None) == "_remember", (
+            f"auth.py:{r.lineno} returns a Principal without publishing its actor"
+        )
+
+
+@pytest.mark.parametrize("principal, expect", [
+    (dict(kind="anonymous"), "anonymous"),
+    (dict(kind="superadmin", role="superadmin"), "superadmin"),
+    (dict(kind="user", user_id="u1"), "user:u1"),
+    (dict(kind="integration", client_id="c1", integration_id="i1"), "integration:i1"),
+    # An operator driving a customer's workspace is never recorded as one of their people.
+    (dict(kind="tenant", client_id="c1", role="superadmin"), "tenant:superadmin"),
+    (dict(kind="tenant", client_id="c1", role="apikey"), "tenant:apikey"),
+    (dict(kind="tenant", client_id="c1", user_id="u9", role="owner"), "tenant:u9"),
+])
+def test_audit_actor_vocabulary(principal, expect):
+    from app.services.auth import Principal
+    assert Principal(**principal).audit_actor == expect
+
+
+def test_attribution_defaults_to_unattributed():
+    """No request context (a migration, a worker, a script) records honestly as nobody."""
+    from app.services import attribution
+    attribution.set_actor(None)
+    attribution.set_job(None)
+    assert attribution.current() == (None, None)
+
+
+def test_record_takes_actor_from_the_request_context(monkeypatch):
+    """The whole point of the contextvar: a call site that passes nothing still attributes."""
+    from app.services import attribution
+
+    captured = {}
+
+    async def capture(row):
+        captured["row"] = row
+
+    monkeypatch.setattr(llm, "_write_usage", capture)
+
+    async def go():
+        attribution.set_actor("tenant:u42")
+        attribution.set_job("11111111-2222-3333-4444-555555555555")
+        llm._record(feature="scoring", client_id="c1", integration_id=None, model="m",
+                    message=None, latency_ms=1, ok=True)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    row = captured["row"]
+    assert "tenant:u42" in row, row
+    assert "11111111-2222-3333-4444-555555555555" in row, row
+
+
+def test_explicit_actor_beats_the_context(monkeypatch):
+    from app.services import attribution
+
+    captured = {}
+
+    async def capture(row):
+        captured["row"] = row
+
+    monkeypatch.setattr(llm, "_write_usage", capture)
+
+    async def go():
+        attribution.set_actor("tenant:ambient")
+        llm._record(feature="scoring", client_id="c1", integration_id=None, model="m",
+                    message=None, latency_ms=1, ok=True, actor="tenant:explicit")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    assert "tenant:explicit" in captured["row"]
+    assert "tenant:ambient" not in captured["row"]

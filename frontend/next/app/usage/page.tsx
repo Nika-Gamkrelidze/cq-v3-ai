@@ -21,6 +21,7 @@ interface Totals {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_tokens: number;
+  byo_tokens: number;
   calls: number;
   failed: number;
   last_used?: string | null;
@@ -90,6 +91,20 @@ export default function UsagePage() {
       setError(e instanceof Error ? e.message : t('usage.loadfail'));
     }
   }, [window_, t]);
+
+  // The AI-setup console links here as /usage#<client_id>. Honoured once, after the list has
+  // loaded, so the link lands on the workspace it names instead of on the list.
+  const [deepLink, setDeepLink] = useState<string | null>(null);
+  useEffect(() => { setDeepLink(window.location.hash.slice(1) || null); }, []);
+  useEffect(() => {
+    if (!deepLink || !rows) return;
+    const row = rows.find(r => r.client_id === deepLink);
+    setDeepLink(null);
+    history.replaceState(null, '', window.location.pathname);
+    // A workspace with no usage in this window is simply not in `rows`; the list stays open
+    // rather than showing an empty drill-down for a tenant that spent nothing.
+    if (row) void open(row);
+  }, [deepLink, rows, open]);
 
   if (!ready) return <><Header tag="Console" /><main /></>;
 
@@ -186,21 +201,34 @@ export default function UsagePage() {
         ) : (
           <>
             <div className="card">
-              <h3>{openName}</h3>
+              <div className="inline" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <h3 style={{ margin: 0 }}>{openName}</h3>
+                <a className="ghost" href={`/ai-config#${openId}`}>{t('usage.configure')}</a>
+              </div>
               {!detail ? (
                 <div className="empty"><span className="spinner" /></div>
               ) : (
-                <div className="stat-row">
-                  <Stat label={t('usage.th.total')} value={fmt(detail.total.total_tokens)} />
-                  <Stat label={t('usage.th.in')} value={fmt(detail.total.input_tokens)} />
-                  <Stat label={t('usage.th.out')} value={fmt(detail.total.output_tokens)} />
-                  <Stat
-                    label={t('usage.th.cache')}
-                    value={fmt(detail.total.cache_read_tokens + detail.total.cache_creation_tokens)}
-                  />
-                  <Stat label={t('usage.th.calls')} value={fmt(detail.total.calls)} />
-                  <Stat label={t('usage.th.failed')} value={fmt(detail.total.failed)} />
-                </div>
+                <>
+                  <div className="stat-row">
+                    <Stat label={t('usage.th.total')} value={fmt(detail.total.total_tokens)} />
+                    <Stat label={t('usage.th.in')} value={fmt(detail.total.input_tokens)} />
+                    <Stat label={t('usage.th.out')} value={fmt(detail.total.output_tokens)} />
+                    <Stat
+                      label={t('usage.th.cache')}
+                      value={fmt(detail.total.cache_read_tokens + detail.total.cache_creation_tokens)}
+                    />
+                    <Stat label={t('usage.th.calls')} value={fmt(detail.total.calls)} />
+                    <Stat label={t('usage.th.failed')} value={fmt(detail.total.failed)} />
+                  </div>
+                  {/* Only shown when there IS spend on the customer's own key: on the ordinary
+                      workspace it would be a permanent zero explaining a distinction that does
+                      not apply to them. */}
+                  {detail.total.byo_tokens ? (
+                    <p className="hint" style={{ marginTop: 10 }}>
+                      <b>{t('usage.th.byo')}: {fmt(detail.total.byo_tokens)}</b> — {t('usage.byo.hint')}
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
 

@@ -16,7 +16,7 @@ import logging
 import time
 
 from ..db import pool
-from . import (claude, elevenlabs, factcheck, media, retrieval, scoring,
+from . import (attribution, claude, elevenlabs, factcheck, media, retrieval, scoring,
                scoring_store, segments, sentiment, settings_store)
 
 log = logging.getLogger("cq")
@@ -75,7 +75,7 @@ async def create_job(*, filename, content_type, size_bytes, client_id, principal
             media.save, audio, content_type=content_type, filename=filename)
         purge_after = media.deadline(storage["retention_days"])
     async with pool().acquire() as conn:
-        return str(await conn.fetchval(
+        job_id = str(await conn.fetchval(
             """
             INSERT INTO audio_jobs
                 (filename, content_type, size_bytes, status, stt_model, llm_model,
@@ -89,6 +89,12 @@ async def create_job(*, filename, content_type, size_bytes, client_id, principal
             client_id, principal_kind, anon_key, batch_id, external_ref,
             client_ip, stored.get("path"), stored.get("bytes"), stored.get("sha256"),
             purge_after, user_id, source, created_by))
+    # Every AI call that follows in this request belongs to this recording, so the token
+    # accounting can show a customer the call a line on their bill came from. Set HERE, the
+    # one place a job id comes into existence, rather than in the ten routers that call this
+    # — a router that forgot would record work against no recording at all.
+    attribution.set_job(job_id)
+    return job_id
 
 
 async def mark_error(job_id: str, msg: str) -> None:

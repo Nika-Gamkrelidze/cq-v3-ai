@@ -23,6 +23,7 @@ const ITEMS: Item[] = [
   { key: 'nav.public', href: '/index.html', roles: 'all' },
   { key: 'nav.editor', href: '/editor.html', roles: 'all' },
   { key: 'nav.usage', href: '/usage', roles: ['superadmin'] },
+  { key: 'nav.aicfg', href: '/ai-config', roles: ['superadmin'] },
   { key: 'nav.console', href: '/admin.html', roles: ['superadmin'] },
   { key: 'nav.kb', href: '/tenant.html', roles: ['superadmin'] },
   { key: 'nav.workspace', href: '/tenant.html', roles: ['tenant'] },

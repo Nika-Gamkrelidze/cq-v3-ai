@@ -43,6 +43,12 @@ _SUMS = """
         COALESCE(SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0)
                    + COALESCE(cache_read_tokens,0) + COALESCE(cache_creation_tokens,0)),
                  0)::bigint                             AS total_tokens,
+        -- Of that total, the part that ran on the TENANT'S own key. Reported separately, never
+        -- subtracted here: "what did this workspace consume" and "what did it cost us" are
+        -- different questions and the console answers both from the same row.
+        COALESCE(SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0)
+                   + COALESCE(cache_read_tokens,0) + COALESCE(cache_creation_tokens,0))
+                 FILTER (WHERE byo), 0)::bigint         AS byo_tokens,
         COUNT(*)::bigint                                AS calls,
         COUNT(*) FILTER (WHERE NOT ok)::bigint          AS failed
 """
@@ -132,7 +138,8 @@ async def tenant_breakdown(client_id: str, window: str = DEFAULT_WINDOW) -> dict
 
 def _empty() -> dict:
     return {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
-            "cache_creation_tokens": 0, "total_tokens": 0, "calls": 0, "failed": 0}
+            "cache_creation_tokens": 0, "total_tokens": 0, "byo_tokens": 0,
+            "calls": 0, "failed": 0}
 
 
 def _row(r) -> dict:

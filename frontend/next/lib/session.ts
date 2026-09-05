@@ -56,14 +56,13 @@ export class ApiError extends Error {
   }
 }
 
-/** GET JSON from the API.
+/** Read the body of an API response.
 
-    Errors are thrown as `ApiError` with the server's own `detail` when it sent one: the
-    backend is careful to write messages a person can act on, and replacing them with
-    "Request failed" throws that work away. A non-JSON body (an nginx 502 page) becomes the
-    status, not a JSON parse error. */
-export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`, { headers: authHeaders() });
+    Errors carry the server's own `detail` when it sent one: the backend is careful to write
+    messages a person can act on, and replacing them with "Request failed" throws that work
+    away. A non-JSON body (an nginx 502 page, an HTML error) becomes the status rather than a
+    JSON parse error. */
+async function parse<T>(r: Response): Promise<T> {
   const text = await r.text().catch(() => '');
   let data: unknown = null;
   const trimmed = text.trimStart();
@@ -75,4 +74,17 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new ApiError(typeof detail === 'string' && detail ? detail : `HTTP ${r.status}`, r.status);
   }
   return data as T;
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  return parse<T>(await fetch(`${API}${path}`, { headers: authHeaders() }));
+}
+
+/** PUT/POST/DELETE JSON. */
+export async function apiSend<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  return parse<T>(await fetch(`${API}${path}`, {
+    method,
+    headers: authHeaders(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }));
 }

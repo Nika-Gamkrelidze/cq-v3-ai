@@ -43,7 +43,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import (analysis, elevenlabs, factcheck, limits, llm, media,
+from ..services import (analysis, attribution, elevenlabs, factcheck, limits, llm, media,
                         scoring, scoring_store, segments, semantic, sentiment_config,
                         settings_store, summarise)
 from ..services.auth import Principal, client_ip, resolve_principal
@@ -235,6 +235,12 @@ async def _load(job_id: str, principal: Principal, cols: str) -> dict:
             f"SELECT {cols} FROM audio_jobs WHERE id = $1 AND {where}", job_id, *args)
     if row is None:
         raise HTTPException(status_code=404, detail="Recording not found")
+    # The analysers (/factcheck, /score, /semantic) run against a recording that already
+    # exists, so `analysis.create_job` — which attributes the tokens of an UPLOAD — never fires
+    # for them. This is the gate all of them pass through, and the caller has just been proven
+    # entitled to the row, so it is also the right place: attribute after the scope check,
+    # never before.
+    attribution.set_job(job_id)
     data = dict(row)
     for k in _JSON_COLS:
         if k in data:
@@ -857,6 +863,10 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
 
     if emit is not None:
         emit("stage", {"stage": "summarising"})
+    # The summary spans the whole batch, so it belongs to no single recording. Without this the
+    # tokens would be attributed to whichever one happened to be created last, which reads as a
+    # fact and is not one. `create_job` set it per recording during the loop above.
+    attribution.set_job(None)
     try:
         summary = await summarise.summarise(
             [{"job_id": r["id"], "filename": r["filename"], "language": r["language"],

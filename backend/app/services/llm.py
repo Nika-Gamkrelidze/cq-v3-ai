@@ -27,7 +27,7 @@ import anthropic
 
 from ..config import settings
 from ..db import pool
-from . import ai_config
+from . import ai_config, attribution
 
 log = logging.getLogger("cq")
 
@@ -155,7 +155,15 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
     Every argument is optional-with-a-default for a reason learned the hard way: this is
     called from an `except` path, so a signature mismatch here does not surface as a broken
     metric — it replaces the real API error with a TypeError and takes the whole feature down.
+
+    `actor` and `job_id` normally come from the request context rather than the call site
+    (see `attribution`): the fifteen places that reach Anthropic sit several frames below the
+    request and would each have to thread two arguments they otherwise have no use for. An
+    explicit argument still wins, for a caller that genuinely knows better.
     """
+    ctx_actor, ctx_job = attribution.current()
+    actor = actor or ctx_actor
+    job_id = job_id or ctx_job
     usage = getattr(message, "usage", None)
     row = (
         client_id,

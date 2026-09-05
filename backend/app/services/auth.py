@@ -37,6 +37,7 @@ from fastapi import Header, HTTPException, Request
 
 from ..config import settings
 from ..db import pool
+from . import attribution
 
 # ---- password hashing ------------------------------------------------------
 _PBKDF2_ROUNDS = 200_000
@@ -165,6 +166,27 @@ class Principal:
     def has_scope(self, scope: str) -> bool:
         return scope in (self.scopes or [])
 
+    @property
+    def audit_actor(self) -> str:
+        """Who to name in an audit or usage row.
+
+        Same vocabulary `kb_events` already uses, so the two logs can be read side by side:
+        a person is `tenant:<user_id>`, a server-to-server key is `tenant:apikey`, and an
+        operator driving a customer's workspace is `tenant:superadmin` — never one of the
+        customer's own people, which is the distinction that keeps the trail honest.
+        """
+        if self.kind == "anonymous":
+            return "anonymous"
+        if self.kind == "superadmin":
+            return "superadmin"
+        if self.kind == "user":
+            return f"user:{self.user_id}"
+        if self.kind == "integration":
+            return f"integration:{self.integration_id}"
+        if self.is_operator:
+            return "tenant:superadmin"
+        return f"tenant:{self.user_id or self.role or 'user'}"
+
 
 async def _client_by_api_key(api_key: str):
     async with pool().acquire() as conn:
@@ -199,6 +221,18 @@ async def _superadmin(via: str, act_as: str) -> Principal:
                      via=via, tenant_sel=act_as)
 
 
+def _remember(principal: Principal) -> Principal:
+    """Publish who this request is, so AI usage can be attributed without being passed down.
+
+    EVERY return path of `resolve_principal` goes through here — a test enforces that — because
+    a path that forgot would record its Claude calls as unattributed, which looks identical to
+    a call that genuinely had no actor. See `attribution` for why this is ambient rather than a
+    parameter.
+    """
+    attribution.set_actor(principal.audit_actor)
+    return principal
+
+
 async def resolve_principal(
     request: Request,
     authorization: str = Header(default=""),
@@ -220,7 +254,7 @@ async def resolve_principal(
     # 1. Superadmin via admin token
     if x_admin_token:
         if hmac.compare_digest(x_admin_token, settings.admin_token):
-            return await _superadmin("admin", x_act_as_tenant.strip())
+            return _remember(await _superadmin("admin", x_act_as_tenant.strip()))
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     # 2.5 Integration (the chat site). Placed AFTER the admin check and BEFORE the Bearer branch
@@ -234,7 +268,7 @@ async def resolve_principal(
             # inactive tenant, missing selector. The caller must not be able to tell them apart.
             raise HTTPException(status_code=401,
                                 detail="Invalid integration credential or tenant selector.")
-        return principal
+        return _remember(principal)
 
     # 2. Tenant user via bearer token
     if authorization:
@@ -245,7 +279,7 @@ async def resolve_principal(
             # not fall through to the X-API-Key branch.
             raise HTTPException(status_code=401, detail="Invalid or expired session token")
         if payload.get("role") == "superadmin":
-            return await _superadmin("token", x_act_as_tenant.strip())
+            return _remember(await _superadmin("token", x_act_as_tenant.strip()))
         if payload.get("kind") == "user":
             # A registered-user token never carries a client_id, and must not be allowed to
             # become a tenant principal by falling through to the branch below. A user token
@@ -253,8 +287,8 @@ async def resolve_principal(
             # same rule as an expired one.
             if not payload.get("user_id"):
                 raise HTTPException(status_code=401, detail="Invalid or expired session token")
-            return Principal(kind="user", user_id=str(payload["user_id"]), role="user",
-                             via="token")
+            return _remember(Principal(kind="user", user_id=str(payload["user_id"]), role="user",
+                             via="token"))
         # A PURPOSE-SCOPED token is not a session. `make_token` signs every kind of token
         # with one secret, and a chat stream ticket carries `{"scope": "chat_stream",
         # "client_id": ...}` — so without this guard it fell through here and became a full
@@ -268,9 +302,9 @@ async def resolve_principal(
         if payload.get("scope"):
             raise HTTPException(status_code=401,
                                 detail="This token is not valid for API access")
-        return Principal(kind="tenant", client_id=payload.get("client_id"),
+        return _remember(Principal(kind="tenant", client_id=payload.get("client_id"),
                          user_id=payload.get("user_id"), role=payload.get("role", "member"),
-                         via="token")
+                         via="token"))
 
     # 3. Tenant via API key
     if x_api_key:
@@ -279,7 +313,7 @@ async def resolve_principal(
             # Same rule as the Bearer branch: a presented-but-invalid credential is an error,
             # never a quiet demotion to the anonymous quota bucket.
             raise HTTPException(status_code=401, detail="Invalid API key")
-        return Principal(kind="tenant", client_id=str(row["id"]), role="apikey", via="apikey")
+        return _remember(Principal(kind="tenant", client_id=str(row["id"]), role="apikey", via="apikey"))
 
     # 4. Anonymous — keyed by client IP.
     # The IP is a quota key, so a caller must not be able to choose it. Both nginx configs set
@@ -289,7 +323,7 @@ async def resolve_principal(
     # quota bucket per request) while the LAST element is the one our own proxy added. Hence:
     # X-Real-IP, then the last XFF element, then the socket peer.
     # App-side fix only: no nginx change and no container recreate needed to close this.
-    return Principal(kind="anonymous", via="none", anon_key=client_ip(request))
+    return _remember(Principal(kind="anonymous", via="none", anon_key=client_ip(request)))
 
 
 def client_ip(request: Request) -> str:
