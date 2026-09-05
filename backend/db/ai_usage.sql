@@ -9,11 +9,17 @@
 
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS actor text;
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS job_id uuid;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS byo boolean NOT NULL DEFAULT false;
 
 COMMENT ON COLUMN llm_usage.actor IS
   'Who ran it, in the same vocabulary as kb_events: tenant:<user_id> for a person, '
   'tenant:apikey for a server-to-server key, tenant:superadmin for an operator acting on '
   'the workspace, anonymous for the public app. NULL on rows written before this column.';
+COMMENT ON COLUMN llm_usage.byo IS
+  'True when the call ran on the TENANT''s own provider key: the tokens were consumed, but '
+  'the charge landed on their account, not ours. The console keeps the two apart — summing '
+  'them would overstate what the deployment actually pays for. False on rows written before '
+  'this column, which is correct: bring-your-own-key did not exist yet.';
 COMMENT ON COLUMN llm_usage.job_id IS
   'The recording (audio_jobs.id) this call was part of, when there is one — so a tenant '
   'querying a line on their bill can be shown the call it came from. Deliberately NOT a '

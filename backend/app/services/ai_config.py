@@ -1,8 +1,8 @@
-"""Which AI a given tenant runs on, and what their usage cost.
+"""Which AI a given tenant runs on.
 
-Two halves of one question. `resolve()` answers "whose model and whose key does this call
-use", and `usage.py`'s reports answer "what did that come to" — they share this module
-because the second is only meaningful if the first is honest about who paid.
+`overlay()` answers "whose model and whose key does this call use", and `usage.py` answers
+"what did that come to" — the second is only meaningful if the first is honest about who paid,
+which is why the overlay reports `byo` and the usage rows carry it.
 
 THE DEFAULT IS THE DEPLOYMENT'S OWN. Almost every tenant has no row here at all: they run on
 the model and key in the admin settings, and their spend is ours. A row appears when a tenant
@@ -11,9 +11,9 @@ their account. Both are superadmin-managed on purpose: a tenant able to set its 
 could point the product at an endpoint that keeps every transcript it is handed.
 """
 import logging
+from typing import NamedTuple
 
 from ..db import pool
-from . import settings_store
 
 log = logging.getLogger("cq")
 
@@ -103,30 +103,35 @@ async def save_config(client_id: str, *, enabled: bool, provider: str | None,
     return await public_config(client_id)
 
 
-async def resolve(client_id: str | None) -> dict:
-    """The api_key / model / base_url this call should actually use.
+class Overlay(NamedTuple):
+    """What a call should actually run on, after the tenant's row is applied."""
+    api_key: str
+    model: str
+    base_url: str | None
+    byo: bool          # the spend is on the TENANT'S key, not ours
 
-    Returns `{"api_key", "model", "base_url", "provider", "byo"}` where `byo` says the spend
-    is on the TENANT'S key — the flag the usage report needs to separate "what this workspace
-    consumed" from "what it cost us".
 
-    Falls back to the deployment default whenever there is no row, the row is disabled, or a
-    field is blank. A tenant may override the model alone and still run on our key, which is
-    the common request; overriding the key without a model is equally fine.
+async def overlay(client_id: str | None, api_key: str, model: str) -> Overlay:
+    """Apply a tenant's overrides on top of the deployment default.
+
+    `api_key` and `model` are the default the caller already resolved from settings, so this
+    does not re-read them; it only fetches the tenant's row (cached) and substitutes the
+    fields that row actually sets. A tenant may override the model alone and still run on our
+    key — the common request — or bring only a key, which is equally fine.
+
+    THIS IS THE ONE PLACE THE OVERRIDE IS APPLIED. `llm.py` calls it for every Claude request,
+    which is why the ~15 call sites do not each have to remember to. Anything that reads a key
+    from settings and talks to Anthropic WITHOUT going through `llm.py` would silently bypass
+    a tenant's configuration, so new AI code goes through `llm.py`.
+
+    Never raises: a tenant whose config cannot be read runs on the default rather than losing
+    the request, and the failure is logged.
     """
-    cfg = await settings_store.get_effective()
-    out = {
-        "api_key": cfg.get("anthropic_api_key"),
-        "model": cfg.get("llm_model"),
-        "base_url": None,
-        "provider": "anthropic",
-        "byo": False,
-    }
+    default = Overlay(api_key=api_key, model=model, base_url=None, byo=False)
     if not client_id:
-        return out
+        return default
 
     hit = _CACHE.get(client_id)
-    row = None
     if hit and (_now() - hit[0]) < _TTL_S:
         row = hit[1]
     else:
@@ -134,21 +139,17 @@ async def resolve(client_id: str | None) -> dict:
             row = await get_config(client_id) or {}
         except Exception:  # noqa: BLE001 — a config lookup must never break an AI call
             log.exception("tenant AI config lookup failed for %s", client_id)
-            return out
+            return default
         _CACHE[client_id] = (_now(), row)
 
     if not row or not row.get("enabled"):
-        return out
-    if row.get("model"):
-        out["model"] = row["model"]
-    if row.get("base_url"):
-        out["base_url"] = row["base_url"]
-    if row.get("provider"):
-        out["provider"] = row["provider"]
-    if row.get("api_key"):
-        out["api_key"] = row["api_key"]
-        out["byo"] = True
-    return out
+        return default
+    return Overlay(
+        api_key=row.get("api_key") or api_key,
+        model=row.get("model") or model,
+        base_url=row.get("base_url") or None,
+        byo=bool(row.get("api_key")),
+    )
 
 
 def forget(client_id: str | None = None) -> None:

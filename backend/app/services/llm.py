@@ -27,6 +27,7 @@ import anthropic
 
 from ..config import settings
 from ..db import pool
+from . import ai_config
 
 log = logging.getLogger("cq")
 
@@ -101,11 +102,14 @@ _LLM_SEM = asyncio.Semaphore(settings.llm_max_concurrency)
 _usage_tasks: set[asyncio.Task] = set()
 
 
-def client(api_key: str, *, timeout, max_retries: int) -> anthropic.AsyncAnthropic:
-    key = (api_key, repr(timeout), max_retries)
+def client(api_key: str, *, timeout, max_retries: int,
+           base_url: str | None = None) -> anthropic.AsyncAnthropic:
+    key = (api_key, repr(timeout), max_retries, base_url)
     inst = _clients.get(key)
     if inst is None:
-        inst = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=max_retries)
+        inst = anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout,
+                                        max_retries=max_retries,
+                                        **({"base_url": base_url} if base_url else {}))
         _clients[key] = inst
     return inst
 
@@ -141,11 +145,16 @@ def _system_param(system: str, cache_system: bool):
 
 
 def _record(*, feature: str, client_id: str | None, integration_id: str | None, model: str,
-            message, latency_ms: int, ok: bool) -> None:
+            message, latency_ms: int, ok: bool, byo: bool = False,
+            actor: str | None = None, job_id: str | None = None) -> None:
     """Fire-and-forget one `llm_usage` row. Accounting must never fail a turn.
 
     Deliberately not awaited and deliberately not holding a pool connection across the LLM
     call itself: the write happens after the response is already in hand.
+
+    Every argument is optional-with-a-default for a reason learned the hard way: this is
+    called from an `except` path, so a signature mismatch here does not surface as a broken
+    metric — it replaces the real API error with a TypeError and takes the whole feature down.
     """
     usage = getattr(message, "usage", None)
     row = (
@@ -160,6 +169,9 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
         getattr(usage, "cache_creation_input_tokens", None),
         latency_ms,
         ok,
+        actor,
+        job_id,
+        byo,
     )
     try:
         task = asyncio.create_task(_write_usage(row))
@@ -176,8 +188,9 @@ async def _write_usage(row: tuple) -> None:
                 """
                 INSERT INTO llm_usage (client_id, integration_id, feature, model,
                                        input_tokens, output_tokens,
-                                       cache_read_tokens, cache_creation_tokens, latency_ms, ok)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                       cache_read_tokens, cache_creation_tokens, latency_ms, ok,
+                                       actor, job_id, byo)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13)
                 """, *row)
     except Exception as exc:  # noqa: BLE001 — cost accounting can never break a turn
         log.warning("llm_usage write failed: %s", exc)
@@ -258,8 +271,14 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
     (`stream=True` only — a blocking call has nothing to say until it is over). Without it
     the deltas are consumed by the SDK and discarded, which is what every other caller here
     still does: when it is None this function runs the code path it has always run.
+
+    `api_key` and `model` are the DEPLOYMENT default; if the tenant has configured their own,
+    it is substituted here (see `ai_config.overlay`). Doing it at this one chokepoint is why
+    the call sites do not each have to remember to.
     """
-    cl = client(api_key, **opts)
+    use = await ai_config.overlay(client_id, api_key, model)
+    api_key, model = use.api_key, use.model
+    cl = client(api_key, base_url=use.base_url, **opts)
     started = time.monotonic()
     kwargs = dict(
         model=model,
@@ -282,13 +301,13 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
                     model=model, message=None,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
-                    actor=actor, job_id=job_id)
+                    actor=actor, job_id=job_id, byo=use.byo)
             raise _wrap(exc) from exc
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
             model=model, message=message,
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
-            actor=actor, job_id=job_id)
+            actor=actor, job_id=job_id, byo=use.byo)
 
     if getattr(message, "stop_reason", None) == "max_tokens":
         raise LLMTruncatedError(
@@ -304,8 +323,12 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
                       max_tokens: int = 1024,
                       integration_id: str | None = None) -> AsyncIterator[str]:
     """Yield plain text deltas. The admission slot is held for the whole stream, because an
-    open stream is exactly as much upstream concurrency as a blocking call."""
-    cl = client(api_key, **opts)
+    open stream is exactly as much upstream concurrency as a blocking call.
+
+    Applies the tenant's AI overrides for the same reason `call_tool` does."""
+    use = await ai_config.overlay(client_id, api_key, model)
+    api_key, model = use.api_key, use.model
+    cl = client(api_key, base_url=use.base_url, **opts)
     started = time.monotonic()
     async with _admit(feature):
         try:
@@ -321,9 +344,11 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
         except anthropic.APIError as exc:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
                     model=model, message=None,
-                    latency_ms=int((time.monotonic() - started) * 1000), ok=False)
+                    latency_ms=int((time.monotonic() - started) * 1000), ok=False,
+                    byo=use.byo)
             raise _wrap(exc) from exc
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
             model=model, message=message,
-            latency_ms=int((time.monotonic() - started) * 1000), ok=True)
+            latency_ms=int((time.monotonic() - started) * 1000), ok=True,
+            byo=use.byo)
