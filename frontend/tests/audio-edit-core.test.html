@@ -101,6 +101,35 @@
     ok('a zero-width edit changes nothing', A.cut(b, 2, 2) === b);
     ok('operations do not mutate their input', b.getChannelData(0)[0] === 0.5);
 
+    // ---- layers ----
+    const l1 = buf(2, 0.5), l2 = buf(2, 0.25);
+    ok('mixdown of one layer is that layer', near(A.mixdown([{buffer: l1, offset: 0}]).getChannelData(0)[0], 0.5));
+    ok('offset extends the timeline',
+       near(A.mixdown([{buffer: l1, offset: 0}, {buffer: l2, offset: 3}]).duration, 5, 0.01));
+    ok('an offset layer is silent before it starts',
+       A.mixdown([{buffer: l2, offset: 3}]).getChannelData(0)[rate] === 0);
+    ok('...and present once it does',
+       near(A.mixdown([{buffer: l2, offset: 3}]).getChannelData(0)[rate * 3 + 10], 0.25));
+    ok('overlapping layers SUM', near(A.mixdown([{buffer: l1, offset: 0}, {buffer: l2, offset: 0}]).getChannelData(0)[0], 0.75));
+    ok('layer gain applies', near(A.mixdown([{buffer: l1, offset: 0, gain: 0.5}]).getChannelData(0)[0], 0.25));
+    ok('a muted layer is not in the mix',
+       A.mixdown([{buffer: l1, offset: 0, muted: true}, {buffer: l2, offset: 0}]).getChannelData(0)[0] === 0.25);
+    ok('all-muted mixes to nothing', A.mixdown([{buffer: l1, offset: 0, muted: true}]) === null);
+    // Two loud layers would sum past full scale; the mix is scaled to fit rather than wrapped.
+    const hot = A.mixdown([{buffer: buf(1, 0.9), offset: 0}, {buffer: buf(1, 0.9), offset: 0}]);
+    ok('a clipping mix is scaled, not wrapped', near(A.peak(hot), 1, 1e-3));
+    ok('...and keeps its shape (no sign flips)', hot.getChannelData(0)[0] > 0);
+    // A mono bed under a stereo call must be heard on both sides.
+    const mixed = A.mixdown([{buffer: buf(1, 0.4, 2), offset: 0}, {buffer: buf(1, 0.2), offset: 0}]);
+    ok('a mono layer plays on every channel',
+       near(mixed.getChannelData(0)[0], 0.6) && near(mixed.getChannelData(1)[0], 0.6));
+    // Different sample rates are the normal case: a music bed over a phone capture.
+    const slow = new OfflineAudioContext(1, 8000, 8000).createBuffer(1, 8000, 8000);
+    slow.getChannelData(0).fill(0.5);
+    const rs = A.mixdown([{buffer: slow, offset: 0}, {buffer: buf(1, 0.2), offset: 0}]);
+    ok('mixdown resamples up to the highest rate', rs.sampleRate === rate);
+    ok('...and the resampled layer is still there', near(rs.getChannelData(0)[100], 0.7, 0.02));
+
     // ---- encoding ----
     ok('wav is header + 16-bit frames', A.toWav(b).size === 44 + rate * 4 * 2);
     ok('wav of stereo counts both channels', A.toWav(st).size === 44 + rate * 2 * 2 * 2);

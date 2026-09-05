@@ -269,10 +269,7 @@
        header the tenant portal uses, and the server decides which of the two kinds it is.
        ================================================================================== */
     const API = CQ.API, t = CQ.t;
-    CQ.mountHeader({ tag: 'Account', who: 'who', nav: [
-      { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
-      { i18n: 'nav.public', href: 'index.html' },
-    ]});
+    CQ.mountHeader({ tag: 'Account', who: 'who' });
 
     let TOKEN = sessionStorage.getItem('cq_user_token') || '';
     let ME = null;              // {id, email, display_name}
@@ -421,6 +418,7 @@
     function whoLabel() { return (ME && (ME.display_name || ME.email)) || ''; }
     async function enter(user) {
       ME = user || ME;
+      CQ.refreshNav();   // signed in without a reload: the bar must follow
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
       $('who').textContent = whoLabel();
       document.title = 'CommuniQ — ' + (whoLabel() || t('ac.tab.profile'));

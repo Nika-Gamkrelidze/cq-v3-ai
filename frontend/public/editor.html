@@ -33,6 +33,14 @@
     .ed-drop { border:1px dashed var(--hairline); border-radius:var(--r-md); padding:22px;
       text-align:center; color:var(--muted); font-size:13.5px; transition:border-color .18s,color .18s; }
     .ed-drop.over { border-color:var(--beam); color:var(--paper); }
+    .ed-layers { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .ed-layer { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+      border:1px solid var(--hairline); border-radius:var(--r-sm); padding:8px 10px; }
+    .ed-layer.on { border-color:var(--beam); background:color-mix(in oklab,var(--beam) 8%,transparent); }
+    .ed-layer .nm { font-weight:600; font-size:13.5px; flex:1; min-width:120px;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ed-layer .meta { color:var(--muted); font-size:12px; }
+    .ed-layer input[type=number] { width:86px; }
     @media (max-width:640px) { .ed-wrap { height:200px; } }
   </style>
 </head>
@@ -54,9 +62,11 @@
         <div class="actions" style="justify-content:center; margin-top:10px">
           <button class="primary" id="pick" data-i18n="ed.choose"></button>
         </div>
-        <input type="file" id="file" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.oga,.wav,.mp3,.ogg,.webm" class="hidden" />
+        <input type="file" id="file" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.oga,.wav,.mp3,.ogg,.webm" class="hidden" multiple />
       </div>
       <div class="msg" id="msg"></div>
+      <div class="ed-layers" id="layers"></div>
+      <p class="hint" style="margin-top:10px" data-i18n="ed.layers.hint"></p>
     </div>
 
     <div class="card">
@@ -65,17 +75,23 @@
       <div class="ed-bar">
         <button class="ghost" id="playBtn" disabled data-i18n="ed.play"></button>
         <button class="ghost" id="stopBtn" disabled data-i18n="ed.stop"></button>
+        <button class="ghost" id="playSel" disabled data-i18n="ed.playsel"></button>
+        <span class="sep"></span>
+        <button class="ghost" id="markIn" disabled data-i18n="ed.markin"></button>
+        <button class="ghost" id="markOut" disabled data-i18n="ed.markout"></button>
         <span class="sep"></span>
         <button class="ghost" id="zoomIn" disabled>＋</button>
         <button class="ghost" id="zoomOut" disabled>－</button>
         <button class="ghost" id="zoomFit" disabled data-i18n="ed.fit"></button>
         <button class="ghost" id="zoomSel" disabled data-i18n="ed.zoomsel"></button>
         <button class="ghost" id="clearSel" disabled data-i18n="ed.selectall"></button>
+        <button class="ghost" id="flatten" disabled data-i18n="ed.flatten"></button>
         <span class="sep"></span>
         <button class="ghost" id="undoBtn" disabled data-i18n="ed.undo"></button>
         <button class="ghost" id="redoBtn" disabled data-i18n="ed.redo"></button>
       </div>
       <p class="hint" style="margin-top:10px" data-i18n="ed.selhint"></p>
+      <p class="hint" data-i18n="ed.markhint"></p>
     </div>
 
     <div class="ed-grid">
@@ -140,11 +156,7 @@
   <script src="audio-editor.js"></script>
   <script>
     const API = CQ.API, t = CQ.t, $ = id => document.getElementById(id);
-    CQ.mountHeader({ tag: 'Voice AI', nav: [
-      { i18n: 'nav.public', href: 'index.html' },
-      { i18n: 'ed.nav', href: 'editor.html' },
-      { i18n: 'nav.signin', href: 'tenant.html' },
-    ]});
+    CQ.mountHeader({ tag: 'Voice AI' });
     CQ.enhanceSelects();
 
     const ed = CQEditor($('wave'), { t, onChange: render });
@@ -155,43 +167,53 @@
     // a sentence up front, not a tab the browser kills half way through a cut.
     const MAX_BYTES = 120 * 1024 * 1024;
 
-    async function loadFile(f) {
+    async function loadFiles(files) {
       const m = $('msg'); m.className = 'msg'; m.textContent = '';
-      if (!f) return;
-      if (f.size > MAX_BYTES) {
-        m.className = 'msg err';
-        m.textContent = t('ed.err.big').replace('{mb}', () => Math.round(MAX_BYTES / 1048576));
-        return;
+      const list = [...(files || [])];
+      if (!list.length) return;
+      const failed = [];
+      for (const f of list) {
+        if (f.size > MAX_BYTES) {
+          failed.push(f.name + ' — ' + t('ed.err.big').replace('{mb}', () => Math.round(MAX_BYTES / 1048576)));
+          continue;
+        }
+        m.className = 'msg'; m.textContent = t('ed.loading');
+        try {
+          // Each file becomes its own layer; after the first, it lands at the cursor so a
+          // jingle or a bed drops exactly where you were listening.
+          await ed.add(f, true);
+        } catch (e) {
+          // decodeAudioData refuses telephony codecs (gsm, alaw, amr, sln) — which is
+          // exactly what the server-side converter is for, so say that instead of "failed".
+          failed.push(f.name + ' — ' + t('ed.err.decode'));
+        }
       }
-      m.textContent = t('ed.loading');
-      try {
-        await ed.load(f);
-        m.className = 'msg ok'; m.textContent = t('ed.loaded').replace('{name}', () => f.name);
-      } catch (e) {
-        // decodeAudioData refuses telephony codecs (gsm, alaw, amr, sln) — which is exactly
-        // what the server-side converter is for, so say that instead of "failed".
-        m.className = 'msg err'; m.textContent = t('ed.err.decode');
-      }
+      if (failed.length) { m.className = 'msg err'; m.textContent = failed.join(' · '); }
+      else { m.className = 'msg ok'; m.textContent = t('ed.added').replace('{n}', () => list.length); }
     }
 
     $('pick').addEventListener('click', () => $('file').click());
-    $('file').addEventListener('change', () => loadFile($('file').files[0]));
+    $('file').addEventListener('change', () => { loadFiles($('file').files); $('file').value = ''; });
     const drop = $('drop');
     ['dragenter','dragover'].forEach(k => drop.addEventListener(k, e => {
       e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave','drop'].forEach(k => drop.addEventListener(k, e => {
       e.preventDefault(); drop.classList.remove('over'); }));
-    drop.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+    drop.addEventListener('drop', e => loadFiles(e.dataTransfer.files));
 
     // ---- toolbar --------------------------------------------------------
     const bind = (id, fn) => $(id).addEventListener('click', fn);
     bind('playBtn', () => ed.toggle());
     bind('stopBtn', () => ed.stop());
+    bind('playSel', () => ed.playSelection());
+    bind('markIn', () => ed.markIn());
+    bind('markOut', () => ed.markOut());
+    bind('flatten', () => ed.flatten());
     bind('zoomIn', () => ed.zoomIn());
     bind('zoomOut', () => ed.zoomOut());
     bind('zoomFit', () => ed.zoomFit());
     bind('zoomSel', () => ed.zoomSelection());
-    bind('clearSel', () => ed.selectAll());
+    bind('clearSel', () => ed.clearSelection());
     bind('undoBtn', () => ed.undo());
     bind('redoBtn', () => ed.redo());
 
@@ -215,16 +237,24 @@
     document.addEventListener('keydown', e => {
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      const k = e.key.toLowerCase();
       if (e.key === ' ') { e.preventDefault(); ed.toggle(); }
-      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      // [ and ] are the marks; i/o are the same thing in the editors most people have used.
+      else if (k === '[' || k === 'i') { e.preventDefault(); ed.markIn(); }
+      else if (k === ']' || k === 'o') { e.preventDefault(); ed.markOut(); }
+      else if (k === 'escape') { ed.clearSelection(); }
+      else if ((e.ctrlKey || e.metaKey) && k === 'z') {
         e.preventDefault(); e.shiftKey ? ed.redo() : ed.undo();
       }
     });
 
     function render(s) {
       const off = !s.loaded;
-      ['playBtn','stopBtn','zoomIn','zoomOut','zoomFit','clearSel','dlWav','dlFmt']
-        .forEach(id => $(id).disabled = off);
+      ['playBtn','stopBtn','zoomIn','zoomOut','zoomFit','clearSel','dlWav','dlFmt',
+       'markIn','markOut'].forEach(id => $(id).disabled = off);
+      $('playSel').disabled = off || !s.hasSelection;
+      $('flatten').disabled = off || s.layers.length < 2;
+      paintLayers(s);
       document.querySelectorAll('.op').forEach(b => b.disabled = off);
       $('zoomSel').disabled = off || !s.hasSelection;
       $('undoBtn').disabled = !s.canUndo;
@@ -255,6 +285,51 @@
       }
     }
 
+    /* One row per layer: which one edits land on, where it starts, how loud, and whether it
+       is heard. Rebuilt only when the SHAPE changes — rewriting it on every repaint would
+       fight the number inputs the user is typing into. */
+    function paintLayers(s) {
+      const host = $('layers');
+      const sig = s.layers.map(l => `${l.id}:${l.active}:${l.muted}:${l.solo}`).join('|');
+      if (host.dataset.sig === sig) {
+        s.layers.forEach((l, i) => {
+          const off = host.querySelector(`[data-off="${i}"]`);
+          if (off && document.activeElement !== off) off.value = l.offset.toFixed(2);
+        });
+        return;
+      }
+      host.dataset.sig = sig;
+      host.innerHTML = '';
+      s.layers.forEach((l, i) => {
+        const row = document.createElement('div');
+        row.className = 'ed-layer' + (l.active ? ' on' : '');
+        row.innerHTML = `
+          <span class="nm"></span>
+          <span class="meta">${l.duration.toFixed(1)}s · ${l.channels}ch</span>
+          <label class="meta" style="margin:0">${CQ.t('ed.startsat')}</label>
+          <input type="number" step="0.1" min="0" data-off="${i}" value="${l.offset.toFixed(2)}" />
+          <button class="ghost" data-up="${i}">+3 dB</button>
+          <button class="ghost" data-dn="${i}">−3 dB</button>
+          <button class="ghost" data-mute="${i}">${l.muted ? CQ.t('ed.unmute') : CQ.t('ed.mute')}</button>
+          <button class="ghost" data-solo="${i}">${l.solo ? CQ.t('ed.unsolo') : CQ.t('ed.solo')}</button>
+          <button class="act danger" data-del="${i}" title="${CQ.t('ed.removelayer')}">🗑</button>`;
+        // textContent, never innerHTML: the name comes from a filename the user chose.
+        row.querySelector('.nm').textContent = l.name;
+        row.addEventListener('click', e => {
+          if (e.target.closest('button') || e.target.tagName === 'INPUT') return;
+          ed.selectLayer(i);
+        });
+        host.appendChild(row);
+      });
+      host.querySelectorAll('[data-off]').forEach(inp => inp.addEventListener('change',
+        () => ed.moveLayer(+inp.dataset.off, parseFloat(inp.value) || 0)));
+      host.querySelectorAll('[data-up]').forEach(b => b.addEventListener('click', () => ed.layerGainDb(+b.dataset.up, 3)));
+      host.querySelectorAll('[data-dn]').forEach(b => b.addEventListener('click', () => ed.layerGainDb(+b.dataset.dn, -3)));
+      host.querySelectorAll('[data-mute]').forEach(b => b.addEventListener('click', () => ed.toggleMute(+b.dataset.mute)));
+      host.querySelectorAll('[data-solo]').forEach(b => b.addEventListener('click', () => ed.toggleSolo(+b.dataset.solo)));
+      host.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => ed.removeLayer(+b.dataset.del)));
+    }
+
     // ---- export ---------------------------------------------------------
     function save(blob, filename) {
       const url = URL.createObjectURL(blob);
@@ -265,7 +340,8 @@
     }
 
     bind('dlWav', () => {
-      const { blob, name } = ed.wav();
+      const w = ed.wav(); if (!w) return;
+      const { blob, name } = w;
       save(blob, name + '-edited.wav');
       const m = $('expMsg'); m.className = 'msg ok'; m.textContent = t('ed.saved');
     });
@@ -289,7 +365,8 @@
       const m = $('expMsg'); m.className = 'msg'; m.textContent = t('ed.converting');
       const btn = $('dlFmt'); btn.disabled = true;
       try {
-        const { blob, name } = ed.wav();
+        const w = ed.wav(); if (!w) throw new Error(t('ed.err.convert'));
+        const { blob, name } = w;
         const fd = new FormData();
         fd.append('files', new File([blob], name + '.wav', { type: 'audio/wav' }));
         fd.append('format', $('fmt').value);

@@ -288,6 +288,71 @@
     return new Blob([view.buffer], { type: 'audio/wav' });
   }
 
+  // ---- layers ------------------------------------------------------------
+
+  /** Mix layers onto one timeline.
+
+      `layers` are `{buffer, offset, gain, muted}` — offset in SECONDS from the start of the
+      timeline, which is what makes overlaying possible at all: a jingle at 0:00, the call at
+      0:02, a bed of room tone under both. Sample rates are allowed to differ (a 8 kHz
+      telephony capture under a 44.1 kHz music bed is the normal case), so everything is
+      resampled to `rate` — the highest input rate unless the caller names one, because
+      resampling UP is lossless-ish and resampling everything down to the phone call's rate
+      would quietly destroy the music.
+
+      Summing clips: two layers at full scale add to 2.0. The mix is scaled down only when it
+      would actually clip, and by the amount needed — never a blanket /n, which would make a
+      single quiet layer inexplicably quieter just because an empty second one exists. */
+  function mixdown(layers, rate) {
+    const live = (layers || []).filter(l => l && l.buffer && !l.muted);
+    if (!live.length) return null;
+    const sr = rate || live.reduce((m, l) => Math.max(m, l.buffer.sampleRate), 0);
+    const channels = live.reduce((m, l) => Math.max(m, l.buffer.numberOfChannels), 1);
+    const end = live.reduce((m, l) =>
+      Math.max(m, (l.offset || 0) + l.buffer.duration), 0);
+    const frames = Math.max(1, Math.ceil(end * sr));
+    const out = ctx(channels, frames, sr).createBuffer(channels, frames, sr);
+
+    for (const l of live) {
+      const b = l.buffer;
+      const g = l.gain == null ? 1 : l.gain;
+      const at = Math.round((l.offset || 0) * sr);
+      const ratio = b.sampleRate / sr;
+      const n = Math.min(frames - at, Math.round(b.duration * sr));
+      for (let c = 0; c < channels; c++) {
+        // A mono layer plays on every channel; a stereo layer keeps its sides.
+        const src = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+        const dst = out.getChannelData(c);
+        if (ratio === 1) {
+          for (let i = 0; i < n; i++) dst[at + i] += src[i] * g;
+        } else {
+          // Linear interpolation. Not a windowed sinc, deliberately: this runs on every
+          // redraw of a multi-layer timeline, and for speech under a music bed the
+          // difference is inaudible where the cost is not.
+          for (let i = 0; i < n; i++) {
+            const p = i * ratio, j = p | 0, f = p - j;
+            const a = src[j] || 0, bb = src[j + 1] === undefined ? a : src[j + 1];
+            dst[at + i] += (a + (bb - a) * f) * g;
+          }
+        }
+      }
+    }
+
+    let m = 0;
+    for (let c = 0; c < channels; c++) {
+      const d = out.getChannelData(c);
+      for (let i = 0; i < frames; i++) { const v = Math.abs(d[i]); if (v > m) m = v; }
+    }
+    if (m > 1) {
+      const k = 1 / m;
+      for (let c = 0; c < channels; c++) {
+        const d = out.getChannelData(c);
+        for (let i = 0; i < frames; i++) d[i] *= k;
+      }
+    }
+    return out;
+  }
+
   /** Peak pairs per pixel column, for drawing. Returns [{min,max}] of length `width`.
       Computed from the buffer rather than re-decoding, so redrawing after an edit costs a
       scan and not another decode of a thirty-minute call. */
@@ -313,7 +378,7 @@
     cut, trim, silence, insertSilence,
     gain, dbToGain, peak, normalize, fade, invert, reverse,
     extractChannel, toMono, toStereo, swapChannels, channelGain, muteChannel,
-    toWav, peaks,
+    mixdown, toWav, peaks,
     _internals: { idx, span, make, blit },
   };
 })(window);

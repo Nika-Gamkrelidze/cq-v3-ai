@@ -519,19 +519,9 @@
     // into a workspace stays that workspace's user, exactly as before.
     const adminMode = () => !!ADMIN && !TOKEN;
     let TID = '';                      // the tenant an operator is currently looking at
-    CQ.mountHeader(adminMode()
-      ? { tag: 'Console', nav: [
-          { i18n: 'nav.console', href: 'admin.html' },
-          // Self-link on purpose: it is what marks the nav pill active, and it points
-          // at the real page rather than bouncing through the old console's redirect.
-          { i18n: 'nav.kb', href: 'tenant.html' },
-          { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
-          { i18n: 'nav.public', href: 'index.html' },
-        ] }
-      : { tag: 'Tenant', who: 'who', nav: [
-          { i18n: 'nav.logout', href: '#', id: 'logout', cls: 'hidden' },
-          { i18n: 'nav.public', href: 'index.html' },
-        ] });
+    // Only the TAG differs by mode; the navigation itself is the shared, role-derived list
+    // (CQ.navFor), so a person sees the same options here as on every other page.
+    CQ.mountHeader(adminMode() ? { tag: 'Console' } : { tag: 'Tenant', who: 'who' });
     let ROLE = '';   // tenant user role (owner|member) — owners can edit the scoring rubric
     // Mirrors the server's `may_configure_workspace`: an operator acting on a workspace
     // has the same authority over its settings as the account's own owner.
@@ -629,6 +619,7 @@
       finally { b.disabled = false; b.textContent = t('btn.signin'); }
     }
     async function enterAsOperator() {
+      CQ.refreshNav();
       // Every tab works for an operator now: the scope header means the call workbench,
       // history and bot config run the customer's own routes against the chosen workspace.
       $('tenantBar').classList.remove('hidden');
@@ -678,6 +669,7 @@
 
     function enter(client, role) {
       ROLE = role || '';
+      CQ.refreshNav();   // signed in without a reload: the bar must follow
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
       if (client) { $('who').textContent = client.name; document.title = 'CommuniQ — ' + client.name; }
       CQ.enhanceSelects($('panel-kb'));

@@ -284,12 +284,7 @@
 
   <script>
     const API = CQ.API, t = CQ.t;
-    CQ.mountHeader({ tag: 'Console', nav: [
-      { i18n: 'nav.console', href: 'admin.html' },
-      { i18n: 'nav.kb', href: 'tenant.html' },
-      { i18n: 'nav.logout', href: '#', id: 'logout' },
-      { i18n: 'nav.public', href: 'index.html' },
-    ]});
+    CQ.mountHeader({ tag: 'Console' });
     let TOKEN = sessionStorage.getItem('cq_admin_token') || '';
     const $ = id => document.getElementById(id);
     const hdr = (extra={}) => ({ 'X-Admin-Token': TOKEN, ...extra });

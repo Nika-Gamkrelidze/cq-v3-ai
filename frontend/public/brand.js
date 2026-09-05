@@ -268,6 +268,12 @@ const CQ = (() => {
       'kb.files.progress':'Importing file {done} of {total}…',
       'kb.files.done':'{n} file(s) imported.',
       'kb.files.failed':'Failed:',
+      'ed.playsel':'Play selection','ed.markin':'Mark in  [','ed.markout':'Mark out  ]',
+      'ed.markhint':'To select by ear: press Play, then Mark in when the part begins and Mark out when it ends — the keys are [ and ] (or i and o). Both work while the audio is playing, so you never have to guess from the picture. Esc clears the selection.',
+      'ed.at':'at','ed.flatten':'Flatten layers','ed.mixname':'Mix',
+      'ed.added':'Added {n} layer(s).',
+      'ed.startsat':'starts at','ed.mute':'Mute','ed.unmute':'Unmute','ed.solo':'Solo','ed.unsolo':'Unsolo','ed.removelayer':'Remove layer',
+      'ed.layers.hint':'Each file you open becomes a layer on one timeline. Set where a layer starts to place a jingle or lay a bed of room tone under a call; edits apply to the selected layer, and Play always mixes what you can hear.',
       'ed.nav':'Audio editor','ed.eyebrow':'Audio tools','ed.title':'Audio editor',
       'ed.lead':'Trim, cut, level and convert a recording. The audio is edited in your browser — nothing is uploaded unless you export to a format we encode on the server.',
       'ed.source':'Recording','ed.drop':'Drop an audio or video file here','ed.choose':'Choose a file',
@@ -685,6 +691,12 @@ const CQ = (() => {
       'kb.files.progress':'იმპორტდება ფაილი {done} / {total}…',
       'kb.files.done':'დაიმპორტდა {n} ფაილი.',
       'kb.files.failed':'ვერ დაიმპორტდა:',
+      'ed.playsel':'მონიშნულის დაკვრა','ed.markin':'საწყისი წერტილი  [','ed.markout':'ბოლო წერტილი  ]',
+      'ed.markhint':'ყურით მონიშვნისთვის: დააჭირეთ დაკვრას, შემდეგ „საწყისი წერტილი“ იქ, სადაც მონაკვეთი იწყება, და „ბოლო წერტილი“ იქ, სადაც მთავრდება — კლავიშებია [ და ] (ან i და o). ორივე მუშაობს დაკვრის დროს, ამიტომ სურათზე გამოცნობა აღარ გჭირდებათ. Esc ხსნის მონიშვნას.',
+      'ed.at':'პოზიცია','ed.flatten':'ფენების გაერთიანება','ed.mixname':'მიქსი',
+      'ed.added':'დაემატა {n} ფენა.',
+      'ed.startsat':'იწყება','ed.mute':'დადუმება','ed.unmute':'ხმის დაბრუნება','ed.solo':'მხოლოდ ეს','ed.unsolo':'ყველა','ed.removelayer':'ფენის წაშლა',
+      'ed.layers.hint':'ყოველი გახსნილი ფაილი ხდება ცალკე ფენა ერთ ტაიმლაინზე. მიუთითეთ, სად იწყება ფენა, რომ განათავსოთ ჯინგლი ან ზარის ქვეშ ფონური ხმა; რედაქტირება ვრცელდება არჩეულ ფენაზე, დაკვრა კი ყოველთვის ურევს იმას, რასაც ისმენთ.',
       'ed.nav':'აუდიო რედაქტორი','ed.eyebrow':'აუდიო ხელსაწყოები','ed.title':'აუდიო რედაქტორი',
       'ed.lead':'შეასწორეთ, ამოჭერით, დაარეგულირეთ ხმა და გადაიყვანეთ ჩანაწერი. აუდიო მუშავდება თქვენს ბრაუზერში — არაფერი იტვირთება სერვერზე, სანამ არ აირჩევთ ფორმატს, რომელსაც სერვერი ამუშავებს.',
       'ed.source':'ჩანაწერი','ed.drop':'ჩააგდეთ აუდიო ან ვიდეო ფაილი აქ','ed.choose':'ფაილის არჩევა',
@@ -1093,6 +1105,12 @@ const CQ = (() => {
       'kb.files.progress':'Импорт файла {done} из {total}…',
       'kb.files.done':'Импортировано файлов: {n}.',
       'kb.files.failed':'Не удалось:',
+      'ed.playsel':'Воспроизвести выделение','ed.markin':'Начало  [','ed.markout':'Конец  ]',
+      'ed.markhint':'Чтобы выделить на слух: нажмите «Воспроизвести», затем «Начало» там, где фрагмент начинается, и «Конец» там, где заканчивается — клавиши [ и ] (или i и o). Обе работают во время воспроизведения, так что угадывать по картинке не нужно. Esc снимает выделение.',
+      'ed.at':'позиция','ed.flatten':'Свести слои','ed.mixname':'Микс',
+      'ed.added':'Добавлено слоёв: {n}.',
+      'ed.startsat':'начало','ed.mute':'Заглушить','ed.unmute':'Вернуть звук','ed.solo':'Только этот','ed.unsolo':'Все','ed.removelayer':'Удалить слой',
+      'ed.layers.hint':'Каждый открытый файл становится слоем на одной шкале. Укажите, где слой начинается, чтобы поставить джингл или подложить фон под звонок; правки применяются к выбранному слою, а воспроизведение всегда сводит то, что вы слышите.',
       'ed.nav':'Аудиоредактор','ed.eyebrow':'Аудиоинструменты','ed.title':'Аудиоредактор',
       'ed.lead':'Обрежьте, вырежьте, выровняйте громкость и сконвертируйте запись. Аудио обрабатывается в вашем браузере — на сервер ничего не загружается, пока вы не выберете формат, который кодирует сервер.',
       'ed.source':'Запись','ed.drop':'Перетащите сюда аудио- или видеофайл','ed.choose':'Выбрать файл',
@@ -1336,7 +1354,81 @@ const CQ = (() => {
       <nav class="app-nav">${nav}${opts.extra || ''}${who}${langSwitch}${theme}</nav>
     </header>`;
   }
+  /** Every navigation item this visitor is allowed, in one place.
+
+      The nav used to be hand-written per page, so it changed shape as you moved: the editor
+      vanished once you signed in, the console appeared only on the console, and "where can I
+      go from here" had a different answer on every screen. A person's options do not change
+      because of which page they happen to be on — only their ROLE decides that — so the list
+      is derived from the session once and every page shows the same thing, with the current
+      page marked active.
+
+      Order is stable across roles (tools first, then the visitor's own area, then account
+      actions) so the bar does not reshuffle when someone signs in.
+
+      Sessions are read from sessionStorage exactly as each page already reads them; this
+      changes what is DISPLAYED and nothing about what is permitted — every destination
+      re-checks the credential server-side. */
+  function session() {
+    try {
+      return {
+        admin: sessionStorage.getItem('cq_admin_token') || '',
+        tenant: sessionStorage.getItem('cq_tenant_token') || '',
+        user: sessionStorage.getItem('cq_user_token') || '',
+      };
+    } catch (e) { return { admin: '', tenant: '', user: '' }; }   // private mode
+  }
+
+  /** Every navigation item, and which of them this visitor may use.
+
+      The nav used to be hand-written per page, so it changed shape as you moved: the editor
+      vanished once you signed in, the console appeared only on the console, and "where can I
+      go from here" had a different answer on every screen. A person's options follow their
+      ROLE, not the page they happen to be on — so this is derived once and every page mounts
+      the same bar, with the current page marked active.
+
+      Items a session may not use are RENDERED AND HIDDEN rather than omitted, for two
+      reasons: several pages sign a user in without reloading and then unhide their links, so
+      the elements must exist to be found; and toggling a class keeps the click handlers a
+      page has already bound. Nothing here is a permission — every destination re-checks the
+      credential server-side, and these hrefs are public URLs either way. */
+  function navFor() {
+    const { admin, tenant, user } = session();
+    const signedIn = !!(admin || tenant || user);
+    const items = [
+      { id: 'navPublic', i18n: 'nav.public', href: 'index.html', show: true },
+      { id: 'navEditor', i18n: 'ed.nav', href: 'editor.html', show: true },
+      { id: 'navConsole', i18n: 'nav.console', href: 'admin.html', show: !!admin },
+      { id: 'navKb', i18n: 'nav.kb', href: 'tenant.html', show: !!admin },
+      { id: 'navWorkspace', i18n: 'nav.workspace', href: 'tenant.html', show: !admin && !!tenant },
+      { id: 'navAccount', i18n: 'pb.nav.account', href: 'account.html', show: !!user },
+      { id: 'logout', i18n: 'nav.logout', href: '#', show: signedIn },
+      { id: 'navSignin', i18n: 'nav.signin', href: 'tenant.html', show: !signedIn },
+      { id: 'navCreate', i18n: 'pb.nav.create', href: 'account.html', show: !signedIn },
+    ];
+    return items.map(n => ({ id: n.id, i18n: n.i18n, href: n.href,
+                             cls: n.show ? '' : 'hidden' }));
+  }
+
+  /** Re-evaluate which nav items apply, after a sign-in or sign-out that did not reload.
+
+      Toggles classes on the links already in the bar — it does NOT rebuild them. Rebuilding
+      would drop the `.who` label and silently unbind the logout handler each page attaches,
+      which is exactly the kind of breakage that only shows up when someone clicks it. */
+  function refreshNav() {
+    const nav = document.querySelector('.app-header .app-nav');
+    if (!nav) return;
+    navFor().forEach(n => {
+      const a = nav.querySelector('#' + n.id);
+      if (a) a.classList.toggle('hidden', n.cls === 'hidden');
+    });
+  }
+
   function mountHeader(opts) {
+    opts = opts || {};
+    // A page may still pass its own nav (the copilot demo is not part of the product's
+    // navigation), but by default every page gets the same role-derived list.
+    if (!opts.nav) opts = Object.assign({}, opts, { nav: navFor() });
     const el = document.getElementById('cq-header');
     if (el) el.outerHTML = header(opts);
     document.querySelectorAll('[data-theme-btn]').forEach(b => {
@@ -1919,7 +2011,7 @@ const CQ = (() => {
     });
   }
 
-  return { API, LOGO, ICON_DL, t, lang, setLang, extendDict, applyI18n, toggleTheme, currentTheme, header, mountHeader,
+  return { API, LOGO, ICON_DL, t, lang, setLang, extendDict, applyI18n, toggleTheme, currentTheme, header, mountHeader, navFor, refreshNav,
            toast, confirm, tip, mountTips, select, enhanceSelects, syncSelect, player, attachRecorder,
            analysisHTML, scorecardHTML, factcheckHTML, sentimentHTML, readResp,
            autogrow, autogrowBind };
