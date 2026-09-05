@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CQ — audio editing core: self-test</title>
+  <style>
+    body { font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; background:#0b1520; color:#dfe8ef;
+           margin:0; padding:24px; }
+    h1 { font-size:16px; margin:0 0 4px; }
+    p.note { color:#8aa; margin:0 0 18px; max-width:70ch; font-family:system-ui, sans-serif; }
+    .pass { color:#2fb673; } .fail { color:#fa3b3c; font-weight:700; }
+    #sum { margin:16px 0; padding:10px 14px; border-radius:8px; background:#0f2233; }
+  </style>
+</head>
+<body>
+  <h1>audio-edit-core.js — self-test</h1>
+  <p class="note">
+    These assertions need a real Web Audio implementation (<code>OfflineAudioContext</code>,
+    <code>AudioBuffer</code>), which the Python test suite has no way to provide — so this is a
+    page you open rather than a pytest file. It lives in <code>frontend/tests/</code>, OUTSIDE
+    <code>frontend/public/</code>, so nginx never serves it: the deployment gets the editor,
+    not its test harness.
+    <br><br>
+    Run it after touching <code>audio-edit-core.js</code>: open this file directly
+    (<code>file://</code> works — nothing here needs the API), or serve the repo locally.
+    Every operation is checked for what it does to LENGTH, to the SAMPLES, and to the
+    channels it should not have touched.
+  </p>
+  <div id="sum">running…</div>
+  <div id="out"></div>
+
+  <script src="../public/audio-edit-core.js"></script>
+  <script>
+    const A = window.CQAudio;
+    const rate = 8000;
+    const out = document.getElementById('out');
+    let pass = 0, fail = 0;
+
+    function ok(name, cond, detail) {
+      (cond ? pass++ : fail++);
+      const d = document.createElement('div');
+      d.className = cond ? 'pass' : 'fail';
+      d.textContent = (cond ? '✓ ' : '✗ ') + name + (cond || detail === undefined ? '' : '  → ' + detail);
+      out.appendChild(d);
+    }
+    const near = (a, b, eps) => Math.abs(a - b) < (eps || 1e-6);
+
+    /** A buffer of `secs` seconds where every channel holds `val`. */
+    function buf(secs, val, channels) {
+      const ch = channels || 1;
+      const oc = new OfflineAudioContext(ch, rate * secs, rate);
+      const b = oc.createBuffer(ch, rate * secs, rate);
+      for (let c = 0; c < ch; c++) b.getChannelData(c).fill(val);
+      return b;
+    }
+
+    const b = buf(4, 0.5);
+
+    // ---- structure ----
+    ok('cut removes exactly the selection', A.cut(b, 1, 3).length === rate * 2, A.cut(b, 1, 3).length);
+    ok('cut joins what was either side', A.cut(b, 1, 3).getChannelData(0)[rate] === 0.5);
+    ok('trim keeps exactly the selection', A.trim(b, 1, 3).length === rate * 2);
+    ok('silence preserves length', A.silence(b, 1, 3).length === b.length);
+    ok('silence zeroes inside', A.silence(b, 1, 3).getChannelData(0)[rate * 2] === 0);
+    ok('silence spares outside', A.silence(b, 1, 3).getChannelData(0)[0] === 0.5);
+    ok('insert lengthens by the gap', A.insertSilence(b, 2, 1).length === rate * 5);
+    ok('insert leaves a hole of zeros', A.insertSilence(b, 2, 1).getChannelData(0)[rate * 2 + 10] === 0);
+
+    // ---- level ----
+    ok('gain scales', near(A.gain(b, 2, null, null).getChannelData(0)[0], 1));
+    ok('gain CLAMPS instead of wrapping', A.gain(b, 4, null, null).getChannelData(0)[0] === 1);
+    ok('negative clamp too', A.gain(buf(1, -0.5), 4, null, null).getChannelData(0)[0] === -1);
+    ok('dbToGain(6) ≈ 2', near(A.dbToGain(6), 1.9953, 1e-3));
+    ok('dbToGain(0) === 1', A.dbToGain(0) === 1);
+    ok('peak reports the level', near(A.peak(b), 0.5));
+    ok('normalize lifts to just under full scale', near(A.normalize(b).getChannelData(0)[0], 0.891, 1e-3));
+    ok('normalize will not divide by silence', A.normalize(buf(1, 0)).getChannelData(0)[0] === 0);
+    const fi = A.fade(b, 0, 4, 'in'), fo = A.fade(b, 0, 4, 'out');
+    ok('fade in starts silent', fi.getChannelData(0)[0] === 0);
+    ok('fade in reaches full', near(fi.getChannelData(0)[rate * 4 - 1], 0.5));
+    ok('fade out ends silent', fo.getChannelData(0)[rate * 4 - 1] === 0);
+    ok('invert flips the sign', A.invert(b).getChannelData(0)[0] === -0.5);
+    ok('reverse twice is the original', A.reverse(A.reverse(b)).getChannelData(0)[0] === 0.5);
+
+    // ---- channels ----
+    const st = buf(2, 0.3, 2); st.getChannelData(1).fill(0.7);
+    ok('extract takes the asked-for channel', near(A.extractChannel(st, 1).getChannelData(0)[0], 0.7));
+    ok('extract yields mono', A.extractChannel(st, 1).numberOfChannels === 1);
+    ok('mono averages the channels', near(A.toMono(st).getChannelData(0)[0], 0.5));
+    ok('stereo duplicates mono', A.toStereo(buf(1, 0.4)).numberOfChannels === 2);
+    ok('stereo is a no-op on stereo', A.toStereo(st) === st);
+    ok('swap exchanges the channels', near(A.swapChannels(st).getChannelData(0)[0], 0.7));
+    ok('mute silences ONLY its channel',
+       A.muteChannel(st, 0).getChannelData(0)[0] === 0 && near(A.muteChannel(st, 0).getChannelData(1)[0], 0.7));
+    ok('channel gain touches ONLY its channel',
+       near(A.channelGain(st, 0, 2).getChannelData(0)[0], 0.6) && near(A.channelGain(st, 0, 2).getChannelData(1)[0], 0.7));
+
+    // ---- edges: the arguments a dragged selection actually produces ----
+    ok('a backwards selection is normalised', A.trim(b, 3, 1).length === rate * 2);
+    ok('a selection past the end is clamped', A.cut(b, -5, 99).length === 1);
+    ok('a zero-width edit changes nothing', A.cut(b, 2, 2) === b);
+    ok('operations do not mutate their input', b.getChannelData(0)[0] === 0.5);
+
+    // ---- encoding ----
+    ok('wav is header + 16-bit frames', A.toWav(b).size === 44 + rate * 4 * 2);
+    ok('wav of stereo counts both channels', A.toWav(st).size === 44 + rate * 2 * 2 * 2);
+    ok('peaks returns one column per pixel', A.peaks(b, 120).length === 120);
+    ok('peaks bracket the signal', A.peaks(b, 10)[0].max >= 0.49 && A.peaks(b, 10)[0].min <= 0);
+
+    const sum = document.getElementById('sum');
+    sum.textContent = `${pass} passed, ${fail} failed`;
+    sum.style.color = fail ? '#fa3b3c' : '#2fb673';
+  </script>
+</body>
+</html>

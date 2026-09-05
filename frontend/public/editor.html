@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommuniQ — Audio editor</title>
+  <meta name="description" content="Trim, cut, level and convert call recordings in the browser. Nothing is uploaded until you choose a format we encode on the server." />
+  <script>document.documentElement.setAttribute('data-theme', (function(){try{return localStorage.getItem('cq_theme')||'dark'}catch(e){return 'dark'}})());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="brand.css" />
+  <link rel="icon" href="favicon.png" />
+  <script src="brand.js"></script>
+
+  <!-- Page-scoped: the waveform is the only surface in the app that needs a canvas lane
+       vocabulary, so it is not promoted into brand.css. Colours all come from the existing
+       theme tokens, so light/dark and the red accent follow the rest of the product. -->
+  <style>
+    main { max-width: 1200px; }
+    .ed-wrap { position:relative; height:280px; border:1px solid var(--hairline);
+      border-radius:var(--r-md); overflow:hidden; background:var(--input-bg); }
+    .ed-canvas { display:block; width:100%; height:100%; cursor:crosshair; touch-action:none; }
+    .ed-canvas:focus-visible { outline:2px solid var(--beam); outline-offset:-2px; }
+    .ed-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      color:var(--muted); font-size:13.5px; text-align:center; padding:0 20px; pointer-events:none; }
+    .ed-time { margin-top:8px; font-size:12.5px; color:var(--muted); min-height:18px; }
+    .ed-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:14px; }
+    .ed-bar .sep { width:1px; align-self:stretch; background:var(--hairline); margin:0 4px; }
+    .ed-group { border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px 14px; }
+    .ed-group h4 { margin:0 0 10px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+    .ed-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+    .ed-drop { border:1px dashed var(--hairline); border-radius:var(--r-md); padding:22px;
+      text-align:center; color:var(--muted); font-size:13.5px; transition:border-color .18s,color .18s; }
+    .ed-drop.over { border-color:var(--beam); color:var(--paper); }
+    @media (max-width:640px) { .ed-wrap { height:200px; } }
+  </style>
+</head>
+<body>
+  <div id="cq-header"></div>
+  <main>
+    <div class="quota" id="quota"></div>
+
+    <div style="margin-bottom:18px">
+      <span class="eyebrow" data-i18n="ed.eyebrow"></span>
+      <h1 style="margin:0; font-size:clamp(24px,4vw,32px)" data-i18n="ed.title"></h1>
+      <p class="lead" data-i18n="ed.lead"></p>
+    </div>
+
+    <div class="card">
+      <label data-i18n="ed.source"></label>
+      <div class="ed-drop" id="drop">
+        <div data-i18n="ed.drop"></div>
+        <div class="actions" style="justify-content:center; margin-top:10px">
+          <button class="primary" id="pick" data-i18n="ed.choose"></button>
+        </div>
+        <input type="file" id="file" accept="audio/*,video/*,.m4a,.aac,.flac,.opus,.wma,.oga,.wav,.mp3,.ogg,.webm" class="hidden" />
+      </div>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div class="card">
+      <div id="wave"></div>
+
+      <div class="ed-bar">
+        <button class="ghost" id="playBtn" disabled data-i18n="ed.play"></button>
+        <button class="ghost" id="stopBtn" disabled data-i18n="ed.stop"></button>
+        <span class="sep"></span>
+        <button class="ghost" id="zoomIn" disabled>＋</button>
+        <button class="ghost" id="zoomOut" disabled>－</button>
+        <button class="ghost" id="zoomFit" disabled data-i18n="ed.fit"></button>
+        <button class="ghost" id="zoomSel" disabled data-i18n="ed.zoomsel"></button>
+        <button class="ghost" id="clearSel" disabled data-i18n="ed.selectall"></button>
+        <span class="sep"></span>
+        <button class="ghost" id="undoBtn" disabled data-i18n="ed.undo"></button>
+        <button class="ghost" id="redoBtn" disabled data-i18n="ed.redo"></button>
+      </div>
+      <p class="hint" style="margin-top:10px" data-i18n="ed.selhint"></p>
+    </div>
+
+    <div class="ed-grid">
+      <div class="ed-group">
+        <h4 data-i18n="ed.g.edit"></h4>
+        <div class="ed-bar" style="margin:0">
+          <button class="ghost op" id="opCut" disabled data-i18n="ed.cut"></button>
+          <button class="ghost op" id="opTrim" disabled data-i18n="ed.trim"></button>
+          <button class="ghost op" id="opSilence" disabled data-i18n="ed.silence"></button>
+          <button class="ghost op" id="opReverse" disabled data-i18n="ed.reverse"></button>
+        </div>
+        <label for="insSecs" style="margin-top:12px" data-i18n="ed.insert"></label>
+        <div class="inline" style="gap:8px">
+          <input type="number" id="insSecs" value="1" min="0.1" max="60" step="0.1" class="w-num" />
+          <button class="ghost op" id="opInsert" disabled data-i18n="ed.insert.go"></button>
+        </div>
+      </div>
+
+      <div class="ed-group">
+        <h4 data-i18n="ed.g.level"></h4>
+        <div class="ed-bar" style="margin:0">
+          <button class="ghost op" id="opUp" disabled>+3 dB</button>
+          <button class="ghost op" id="opDown" disabled>−3 dB</button>
+          <button class="ghost op" id="opNorm" disabled data-i18n="ed.normalize"></button>
+        </div>
+        <div class="ed-bar">
+          <button class="ghost op" id="opFadeIn" disabled data-i18n="ed.fadein"></button>
+          <button class="ghost op" id="opFadeOut" disabled data-i18n="ed.fadeout"></button>
+          <button class="ghost op" id="opInvert" disabled data-i18n="ed.invert"></button>
+        </div>
+        <p class="hint" style="margin-top:10px" data-i18n="ed.level.hint"></p>
+      </div>
+
+      <div class="ed-group">
+        <h4 data-i18n="ed.g.channels"></h4>
+        <div class="ed-bar" style="margin:0">
+          <button class="ghost op" id="opMono" disabled data-i18n="ed.mono"></button>
+          <button class="ghost op" id="opStereo" disabled data-i18n="ed.stereo"></button>
+          <button class="ghost op" id="opSwap" disabled data-i18n="ed.swap"></button>
+        </div>
+        <div class="ed-bar" id="chanOps"></div>
+        <p class="hint" style="margin-top:10px" data-i18n="ed.channels.hint"></p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 data-i18n="ed.g.export"></h3>
+      <p class="hint" data-i18n="ed.export.hint"></p>
+      <div class="ed-bar">
+        <button class="primary" id="dlWav" disabled data-i18n="ed.dl.wav"></button>
+        <span class="sep"></span>
+        <label for="fmt" style="margin:0" data-i18n="ed.format"></label>
+        <select id="fmt" style="min-width:190px"></select>
+        <button class="ghost" id="dlFmt" disabled data-i18n="ed.dl.convert"></button>
+      </div>
+      <div class="msg" id="expMsg"></div>
+    </div>
+  </main>
+
+  <div id="modalHost"></div>
+  <script src="audio-edit-core.js"></script>
+  <script src="audio-editor.js"></script>
+  <script>
+    const API = CQ.API, t = CQ.t, $ = id => document.getElementById(id);
+    CQ.mountHeader({ tag: 'Voice AI', nav: [
+      { i18n: 'nav.public', href: 'index.html' },
+      { i18n: 'ed.nav', href: 'editor.html' },
+      { i18n: 'nav.signin', href: 'tenant.html' },
+    ]});
+    CQ.enhanceSelects();
+
+    const ed = CQEditor($('wave'), { t, onChange: render });
+
+    // ---- loading --------------------------------------------------------
+    // A generous ceiling rather than none: everything here holds the decoded audio in memory
+    // as float32 (a 30-minute stereo 48k call is ~700 MB decoded), and the honest failure is
+    // a sentence up front, not a tab the browser kills half way through a cut.
+    const MAX_BYTES = 120 * 1024 * 1024;
+
+    async function loadFile(f) {
+      const m = $('msg'); m.className = 'msg'; m.textContent = '';
+      if (!f) return;
+      if (f.size > MAX_BYTES) {
+        m.className = 'msg err';
+        m.textContent = t('ed.err.big').replace('{mb}', () => Math.round(MAX_BYTES / 1048576));
+        return;
+      }
+      m.textContent = t('ed.loading');
+      try {
+        await ed.load(f);
+        m.className = 'msg ok'; m.textContent = t('ed.loaded').replace('{name}', () => f.name);
+      } catch (e) {
+        // decodeAudioData refuses telephony codecs (gsm, alaw, amr, sln) — which is exactly
+        // what the server-side converter is for, so say that instead of "failed".
+        m.className = 'msg err'; m.textContent = t('ed.err.decode');
+      }
+    }
+
+    $('pick').addEventListener('click', () => $('file').click());
+    $('file').addEventListener('change', () => loadFile($('file').files[0]));
+    const drop = $('drop');
+    ['dragenter','dragover'].forEach(k => drop.addEventListener(k, e => {
+      e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave','drop'].forEach(k => drop.addEventListener(k, e => {
+      e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+
+    // ---- toolbar --------------------------------------------------------
+    const bind = (id, fn) => $(id).addEventListener('click', fn);
+    bind('playBtn', () => ed.toggle());
+    bind('stopBtn', () => ed.stop());
+    bind('zoomIn', () => ed.zoomIn());
+    bind('zoomOut', () => ed.zoomOut());
+    bind('zoomFit', () => ed.zoomFit());
+    bind('zoomSel', () => ed.zoomSelection());
+    bind('clearSel', () => ed.selectAll());
+    bind('undoBtn', () => ed.undo());
+    bind('redoBtn', () => ed.redo());
+
+    bind('opCut', () => ed.cut());
+    bind('opTrim', () => ed.trim());
+    bind('opSilence', () => ed.silence());
+    bind('opReverse', () => ed.reverse());
+    bind('opInsert', () => ed.insertSilence(parseFloat($('insSecs').value) || 0));
+    bind('opUp', () => ed.gainDb(3));
+    bind('opDown', () => ed.gainDb(-3));
+    bind('opNorm', () => ed.normalize());
+    bind('opFadeIn', () => ed.fadeIn());
+    bind('opFadeOut', () => ed.fadeOut());
+    bind('opInvert', () => ed.invert());
+    bind('opMono', () => ed.toMono());
+    bind('opStereo', () => ed.toStereo());
+    bind('opSwap', () => ed.swapChannels());
+
+    // Space plays, and the usual undo/redo keys work — but never while the caret is in an
+    // input, or typing "1.5" into the silence box would start playback.
+    document.addEventListener('keydown', e => {
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (e.key === ' ') { e.preventDefault(); ed.toggle(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault(); e.shiftKey ? ed.redo() : ed.undo();
+      }
+    });
+
+    function render(s) {
+      const off = !s.loaded;
+      ['playBtn','stopBtn','zoomIn','zoomOut','zoomFit','clearSel','dlWav','dlFmt']
+        .forEach(id => $(id).disabled = off);
+      document.querySelectorAll('.op').forEach(b => b.disabled = off);
+      $('zoomSel').disabled = off || !s.hasSelection;
+      $('undoBtn').disabled = !s.canUndo;
+      $('redoBtn').disabled = !s.canRedo;
+      $('playBtn').textContent = s.playing ? t('ed.pause') : t('ed.play');
+      $('opStereo').disabled = off || s.channels >= 2;
+      $('opMono').disabled = off || s.channels < 2;
+      $('opSwap').disabled = off || s.channels < 2;
+
+      // Per-channel controls are built from the file that is actually open: a mono recording
+      // has no "channel 2" to mute, and offering one would be a button that does nothing.
+      const host = $('chanOps');
+      const want = s.loaded ? s.channels : 0;
+      if (host.dataset.n !== String(want)) {
+        host.dataset.n = String(want);
+        host.innerHTML = '';
+        for (let c = 0; c < want; c++) {
+          for (const [label, fn] of [
+            [t('ed.ch.keep').replace('{n}', () => c + 1), () => ed.extractChannel(c)],
+            [t('ed.ch.mute').replace('{n}', () => c + 1), () => ed.muteChannel(c)],
+          ]) {
+            const b = document.createElement('button');
+            b.className = 'ghost op'; b.textContent = label;
+            b.addEventListener('click', fn);
+            host.appendChild(b);
+          }
+        }
+      }
+    }
+
+    // ---- export ---------------------------------------------------------
+    function save(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+
+    bind('dlWav', () => {
+      const { blob, name } = ed.wav();
+      save(blob, name + '-edited.wav');
+      const m = $('expMsg'); m.className = 'msg ok'; m.textContent = t('ed.saved');
+    });
+
+    /* Anything that is not WAV goes to the SERVER's converter — the same endpoint, catalogue
+       and quota the Convert tab uses. Two reasons, and neither is laziness: a second encoder
+       in the browser would eventually disagree with the server about what a `.gsm` is, and
+       the daily allowance for signed-out visitors is only enforceable where the server does
+       the work. Editing itself stays free and local; it costs us nothing. */
+    let FORMATS = [];
+    fetch(`${API}/convert/formats`).then(r => r.json()).then(d => {
+      FORMATS = d.formats || [];
+      $('fmt').innerHTML = FORMATS.map(f =>
+        `<option value="${f.id}"${f.id === d.default ? ' selected' : ''}>${f.label || f.id}</option>`).join('');
+      CQ.enhanceSelects();
+    }).catch(() => {
+      $('fmt').innerHTML = `<option value="">${t('ed.fmt.unavailable')}</option>`;
+    });
+
+    bind('dlFmt', async () => {
+      const m = $('expMsg'); m.className = 'msg'; m.textContent = t('ed.converting');
+      const btn = $('dlFmt'); btn.disabled = true;
+      try {
+        const { blob, name } = ed.wav();
+        const fd = new FormData();
+        fd.append('files', new File([blob], name + '.wav', { type: 'audio/wav' }));
+        fd.append('format', $('fmt').value);
+        const r = await fetch(`${API}/convert`, { method: 'POST', body: fd });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.detail || t('ed.err.convert'));
+        }
+        const out = await r.blob();
+        save(out, name + '-edited.zip');
+        m.className = 'msg ok'; m.textContent = t('ed.saved');
+        loadQuota();
+      } catch (e) {
+        m.className = 'msg err'; m.textContent = e.message || t('ed.err.convert');
+      } finally { btn.disabled = false; }
+    });
+
+    /* The same allowance banner the public app shows, refreshed after a conversion so a
+       visitor can see what a download cost them. Only `conversions` is quoted here: editing
+       is local and free, so counting down anything else on this page would be inventing a
+       limit the editor does not have. An absent key means "claim nothing", never zero. */
+    async function loadQuota() {
+      const el = $('quota');
+      try {
+        const r = await fetch(`${API}/limits`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!d.anonymous) { el.className = 'quota'; el.innerHTML = ''; return; }
+        if (!d.enabled) {
+          el.className = 'quota warn show';
+          el.innerHTML = `${t('quota.disabled')} <a href="tenant.html">${t('nav.signin')}</a>`;
+          return;
+        }
+        const left = (d.remaining || {}).conversions;
+        if (left == null) { el.className = 'quota'; el.innerHTML = ''; return; }
+        el.className = 'quota show' + (left <= 0 ? ' warn' : '');
+        el.innerHTML = `${t('quota.using')} <b>${left}</b> ${t('quota.conversions')} `
+          + `${t('quota.left')} <a href="tenant.html">${t('nav.signin')}</a> ${t('quota.more')}`;
+      } catch {}
+    }
+    document.addEventListener('cq:lang', () => { loadQuota(); render(ed.state()); });
+    loadQuota();
+    render(ed.state());
+  </script>
+</body>
+</html>

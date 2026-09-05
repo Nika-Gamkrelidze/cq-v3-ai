@@ -166,10 +166,13 @@
     // goes to the workspace login (which also routes superadmins), while "Create account"
     // is the self-serve one — the only door a visitor with no invitation can open.
     const USER_TOKEN = sessionStorage.getItem('cq_user_token') || '';
-    const _nav = sessionStorage.getItem('cq_admin_token') ? [{ i18n: 'nav.console', href: 'admin.html' }]
-               : sessionStorage.getItem('cq_tenant_token') ? [{ i18n: 'nav.workspace', href: 'tenant.html' }]
-               : USER_TOKEN ? [{ i18n: 'pb.nav.account', href: 'account.html' }]
-               : [{ i18n: 'nav.signin', href: 'tenant.html' }, { i18n: 'pb.nav.create', href: 'account.html' }];
+    // The editor is a tool anyone may use, so it sits in the nav for every kind of visitor
+    // rather than behind a sign-in — the daily allowance only bites on server-side export.
+    const _edNav = { i18n: 'ed.nav', href: 'editor.html' };
+    const _nav = sessionStorage.getItem('cq_admin_token') ? [_edNav, { i18n: 'nav.console', href: 'admin.html' }]
+               : sessionStorage.getItem('cq_tenant_token') ? [_edNav, { i18n: 'nav.workspace', href: 'tenant.html' }]
+               : USER_TOKEN ? [_edNav, { i18n: 'pb.nav.account', href: 'account.html' }]
+               : [_edNav, { i18n: 'nav.signin', href: 'tenant.html' }, { i18n: 'pb.nav.create', href: 'account.html' }];
     // A registered account has its OWN daily allowance and its own history, so its token
     // rides on the requests this page makes that spend that allowance. Admin and tenant
     // sessions deliberately do not: their surfaces are admin.html and tenant.html, and the
