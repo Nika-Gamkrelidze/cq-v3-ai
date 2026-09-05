@@ -211,6 +211,13 @@ async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
         # of having to remember it.
         raise _integration_refused()
     if principal.kind == "tenant" and principal.client_id:
+        # An operator is tenant-SHAPED but is not the customer: metering their support work
+        # against the customer's paid allowance would bill the customer for CQ's own
+        # troubleshooting, and — worse — would let a customer who has spent their day's
+        # quota lock support out of the very account that needs looking at. Their spend is
+        # still recorded per-workspace in `llm_usage`; it just does not consume the plan.
+        if getattr(principal, "is_operator", False):
+            return
         await reserve_counter(f"tenant:{principal.client_id}", kind,
                               await _tenant_limit(principal.client_id, max_key))
         return

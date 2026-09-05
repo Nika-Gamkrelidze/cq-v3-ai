@@ -118,15 +118,25 @@ def _tenant_write(principal: Principal = Depends(resolve_principal)) -> Scope:
         carries a `user_id` to write into `reviewed_by`. `clients.api_key` is plaintext,
         non-expiring and full-privilege (see ADR-001's constraints table); a server-to-server key
         silently approving KB rewrites is the same failure mode as an integration key doing it.
-      * `role == "owner"` — a member can watch the queue; the tenant admin owns the KB.
+      * `role == "owner"` — a member can watch the queue; the tenant admin owns the KB. An
+        operator acting on the workspace (`role == "superadmin"`) counts as its admin; they
+        carry no `user_id`, so the reviewer string falls back to the ROLE, never to the
+        customer's owner.
     """
     _deny_integration(principal)
     if not principal.is_tenant:
         raise HTTPException(status_code=401, detail="Tenant login required")
-    if principal.via != "token" or principal.role != "owner":
+    # An operator acting on this workspace counts as its admin; an API key still does not
+    # (accepting or declining a proposal is a judgement call, not an integration's job).
+    if not (principal.role == "superadmin"
+            or (principal.via == "token" and principal.role == "owner")):
         raise HTTPException(status_code=403,
                             detail="Reviewing KB proposals requires a tenant admin (owner) login.")
-    return Scope(principal.client_id, f"tenant:{principal.user_id or 'owner'}")
+    # `or principal.role` before the default, like every sibling helper: an operator has no
+    # user_id, and without the role term they would be written into `reviewed_by` — and from
+    # there onto the KB document they approve — as the CUSTOMER'S OWN owner.
+    return Scope(principal.client_id,
+                 f"tenant:{principal.user_id or principal.role or 'owner'}")
 
 
 # --------------------------------------------------------------------------- #

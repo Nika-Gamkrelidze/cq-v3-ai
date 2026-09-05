@@ -93,6 +93,22 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - **Tenant** — `Authorization: Bearer <token>` (from tenant login) **or** `X-API-Key` (tenant api_key).
 - **Anonymous** — no creds → identified by IP, allowed within admin-set limits.
 - Unified login: `POST /auth/login` returns `scope: admin|tenant` and routes the UI accordingly.
+- **Operator scope (`X-Act-As-Tenant`)** — a *verified superadmin* may add this header (tenant uuid
+  or slug) to get a **tenant-shaped principal** for that one workspace, so the ordinary tenant
+  routes serve the operator console. This is why there is ONE page: `tenant.html` is both the
+  customer portal and the superadmin console (`kb-admin.html` is now just a redirect), and the
+  operator issues literally the same requests the customer does — no parallel twins to drift.
+  Rules that must not regress (pinned by `backend/tests/test_act_as_tenant.py`):
+  - The header is **inert for everyone else** — a tenant key asking to act as another workspace
+    silently gets its *own* data back, so it cannot even probe whether that workspace exists.
+  - Scoping trades the superadmin principal for a tenant one, so **`/admin/*` refuses it** — the
+    console sends the header on tenant calls only (`adminOnlyH()` for the workspace list).
+  - `role="superadmin"` is carried through rather than faked to `owner`, so audit actors
+    (`user_id or role`) record `tenant:superadmin` and never a customer's user.
+  - Authority is one predicate, `Principal.may_configure_workspace` (owner|apikey|superadmin) —
+    do not re-introduce per-router `role not in (...)` tuples.
+  - Anything guarded by the account holder's **own password** (`POST /scoring/reset`) stays closed
+    to an operator: it requires `user_id`, which an operator does not have.
 
 ---
 

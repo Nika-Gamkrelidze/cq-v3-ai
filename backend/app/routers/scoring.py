@@ -373,7 +373,7 @@ def _tenant_owner(principal: Principal = Depends(resolve_principal)) -> str:
     """Editing the rubric needs full tenant authority: an owner login or the tenant API key."""
     if not principal.is_tenant:
         raise HTTPException(status_code=401, detail="Tenant login or API key required")
-    if principal.role not in ("owner", "apikey"):
+    if not principal.may_configure_workspace:
         raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
     return principal.client_id
 
@@ -391,7 +391,7 @@ def _rubric_editor(principal: Principal = Depends(resolve_principal)) -> Princip
         return principal
     if not principal.is_tenant:
         raise HTTPException(status_code=401, detail="Tenant login, API key or user login required")
-    if principal.role not in ("owner", "apikey"):
+    if not principal.may_configure_workspace:
         raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
     return principal
 
@@ -413,6 +413,14 @@ def _rubric_resetter(principal: Principal = Depends(resolve_principal)) -> Princ
 
 
 def _updated_by(principal: Principal) -> str:
+    """Who a saved rubric or band change belongs to.
+
+    An operator must be named as one: `updated_by` is surfaced in the console, and recording
+    CQ staff's edit as the customer's own "tenant" is how a workspace ends up unable to
+    explain who changed their scoring.
+    """
+    if principal.is_operator:
+        return "superadmin"
     return "user" if _is_user(principal) else "tenant"
 
 
@@ -495,7 +503,7 @@ async def put_bands(body: BandsBody, principal: Principal = Depends(_rubric_edit
     how every past scorecard reads, not just future ones."""
     try:
         return await scoring_store.set_bands(principal, body.amber_from, body.green_from,
-                                             "tenant" if principal.kind == "tenant" else "user")
+                                             _updated_by(principal))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

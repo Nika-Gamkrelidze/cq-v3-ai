@@ -533,15 +533,24 @@
           { i18n: 'nav.public', href: 'index.html' },
         ] });
     let ROLE = '';   // tenant user role (owner|member) — owners can edit the scoring rubric
+    // Mirrors the server's `may_configure_workspace`: an operator acting on a workspace
+    // has the same authority over its settings as the account's own owner.
+    const canConfigure = () => adminMode() || ROLE === 'owner';
     const $ = id => document.getElementById(id);
-    const authH = (extra={}) => adminMode() ? { 'X-Admin-Token': ADMIN, ...extra }
+    /* An operator drives the CUSTOMER'S OWN routes, naming the workspace in a header the
+       server honours only for a verified superadmin. That is why every URL below is the
+       tenant URL in both modes: there is no second set of paths to keep in step, and no
+       way for the operator's view to answer differently from the customer's — the two
+       literally issue the same request. Calls to `/admin/...` (the workspace list) must
+       NOT carry the scope header, or they would present as a tenant and be refused. */
+    const authH = (extra={}) => adminMode()
+      ? { 'X-Admin-Token': ADMIN, ...(TID ? { 'X-Act-As-Tenant': TID } : {}), ...extra }
       : (TOKEN ? { 'Authorization': 'Bearer ' + TOKEN, ...extra } : extra);
-    // Every route family this page uses, and its operator twin. Nothing else in the file
-    // builds a KB/scoring/curation/sentiment URL by hand — add a call site, use these.
-    const KBB  = () => adminMode() ? `${API}/admin/kb/${TID}`                 : `${API}/kb`;
-    const SCB  = () => adminMode() ? `${API}/admin/scoring/${TID}`            : `${API}/scoring`;
-    const CURB = () => adminMode() ? `${API}/admin/curation/${TID}/proposals` : `${API}/v1/curation/proposals`;
-    const SENB = () => adminMode() ? `${API}/admin/sentiment/${TID}/config`   : `${API}/sentiment/config`;
+    const adminOnlyH = (extra={}) => ({ 'X-Admin-Token': ADMIN, ...extra });
+    const KBB  = () => `${API}/kb`;
+    const SCB  = () => `${API}/scoring`;
+    const CURB = () => `${API}/v1/curation/proposals`;
+    const SENB = () => `${API}/sentiment/config`;
     /* Switching workspace starts fresh loads while the previous ones are still in flight.
        Whichever lands last wins the DOM, so without this an operator who switches quickly
        can end up reading workspace A's documents under workspace B's name. Every load
@@ -619,20 +628,15 @@
       } catch(e){ $('gateMsg').textContent = e.message; }
       finally { b.disabled = false; b.textContent = t('btn.signin'); }
     }
-    /* Tabs whose operator twin does not exist yet: the call workbench and history run on
-       /recordings and the bot on /v1/chat, both tenant-scoped by the caller's token. Hiding
-       them is the honest option — an operator never meets a control that would 404. */
-    const ADMIN_TABS = ['kb', 'rubric', 'health'];
-
     async function enterAsOperator() {
-      document.querySelectorAll('.tab').forEach(tb =>
-        tb.classList.toggle('hidden', !ADMIN_TABS.includes(tb.dataset.tab)));
+      // Every tab works for an operator now: the scope header means the call workbench,
+      // history and bot config run the customer's own routes against the chosen workspace.
       $('tenantBar').classList.remove('hidden');
       $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
       $('logout').classList.remove('hidden');
       document.title = 'CommuniQ — ' + t('nav.kb');
 
-      const list = await kbJson(`${API}/admin/tenants`, { headers: authH() });
+      const list = await kbJson(`${API}/admin/tenants`, { headers: adminOnlyH() });
       const sel = $('tenantPick');
       // null means the request failed. Saying "no workspaces yet" then would be a claim
       // about the customer list made from a request that never reached it.
@@ -656,6 +660,9 @@
         reloadActive(active && active.dataset.tab);
       });
       CQ.enhanceSelects($('panel-kb'));
+      // Only now: the workbench starts fetching as soon as it mounts, and a call issued
+      // before a workspace is chosen would carry no scope header at all.
+      mountWorkbench();
       reloadActive('kb');
     }
 
@@ -692,8 +699,11 @@
       // `else if`, deliberately: sessionExpired() clears TOKEN, which would make adminMode()
       // flip true inside the SAME call and tear down a still-valid console session too.
       if (r.status === 401 && TOKEN) sessionExpired();
-      else if (r.status === 401 && adminMode()) {
+      else if (r.status === 401 && adminMode() && TID) {
         // An expired admin token must not leave every panel failing in its own way either.
+        // Guarded on TID: a 401 from a call made before a workspace was chosen means that
+        // call forgot its scope header — throwing away a perfectly good console session
+        // over it would turn one caller's bug into a mystery logout.
         sessionStorage.removeItem('cq_admin_token');
         location.replace('tenant.html');
       }
@@ -1341,7 +1351,7 @@
       get: async () => {
         const d = await CQ.readResp(await apiFetch(`${SENB()}`, { headers: authH() }));
         snEnabled = d.enabled !== false;
-        const ro = ROLE !== 'owner';
+        const ro = !canConfigure();
         const ck = $('wbHost') && $('wbHost').querySelector('#snEnabled');
         if (ck) { ck.checked = snEnabled; ck.disabled = ro; }
         return { guidance: d.guidance || '', readonly: ro };
@@ -1366,7 +1376,7 @@
         // Overriding a score changes how an agent's work is judged, so it is the owner's
         // call. The server enforces this too; hiding the control just avoids offering a
         // member a button that would only ever answer 403.
-        canEditScores: ROLE === 'owner',
+        canEditScores: canConfigure(),
         // XHR uploads bypass apiFetch, so the workbench reports its own 401s back here —
         // one expired session, one gate, exactly as everywhere else on this page.
         onUnauthorized: sessionExpired,
@@ -1836,7 +1846,7 @@
     // ---- Scoring rubric (self-serve config; view-only for members, editable by owners) ----
     let scDims = [], scLoaded = false, scVer = null, scIsDefault = false;
     // An operator editing on a tenant's behalf has the same authority as its owner.
-    const scEditable = () => adminMode() || ROLE === 'owner';
+    const scEditable = () => canConfigure();
     function scShowVersion(){ $('scVersion').textContent = scVer ? `${t('sc.version')} ${scVer}` : t('sc.none'); }
     function scRow(d, i) {
       const dis = scEditable() ? '' : ' disabled';
@@ -2205,7 +2215,13 @@
        results they carry (no stored audio, so those play as text).
        ================================================================================== */
     $('reloadHist').addEventListener('click', loadHistory);
-    function loadHistory() { loadRecordings(); loadSummaries(); }
+    function loadHistory() {
+      // Without a workspace there is no scope header, and the recordings route answers an
+      // unscoped superadmin with EVERY tenant's calls — a listing from all customers under
+      // one workspace's name. Nothing loads until a workspace is chosen.
+      if (adminMode() && !TID) { $('recList').innerHTML = `<div class="empty">${esc(t('con.tenant.pick'))}</div>`; return; }
+      loadRecordings(); loadSummaries();
+    }
 
     const fmtSecs = s => (s == null || !isFinite(s)) ? '—'
       : Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');

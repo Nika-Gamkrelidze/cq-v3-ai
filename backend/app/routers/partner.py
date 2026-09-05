@@ -44,7 +44,7 @@ def require_tenant(principal: Principal = Depends(resolve_principal)) -> Princip
 def require_tenant_owner(principal: Principal = Depends(require_tenant)) -> Principal:
     """Full tenant authority (owner login or the tenant API key) — same policy as
     PUT /scoring/config in routers/scoring.py; keep the two in sync."""
-    if principal.role not in ("owner", "apikey"):
+    if not principal.may_configure_workspace:
         raise HTTPException(status_code=403, detail="Owner role required to edit the scoring rubric")
     return principal
 

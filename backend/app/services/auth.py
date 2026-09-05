@@ -138,6 +138,27 @@ class Principal:
         return self.kind == "superadmin"
 
     @property
+    def is_operator(self) -> bool:
+        """A superadmin acting on one workspace (see `X-Act-As-Tenant`).
+
+        `is_tenant` is true for these, deliberately — that is the whole point: the operator
+        drives the customer's own routes. This flag is what lets the code still tell the two
+        apart where it matters: audit strings, and the few actions that belong to the
+        account holder alone (resetting a rubric behind their own password).
+        """
+        return self.kind == "tenant" and self.role == "superadmin"
+
+    @property
+    def may_configure_workspace(self) -> bool:
+        """Authority to change this workspace's settings — rubric, bands, bot, sentiment.
+
+        One predicate instead of a `role not in ("owner", "apikey")` tuple repeated across
+        six routers: a role added in one place and forgotten in another is how a permission
+        gap gets shipped.
+        """
+        return self.role in ("owner", "apikey", "superadmin")
+
+    @property
     def is_integration(self) -> bool:
         return self.kind == "integration" and self.client_id is not None
 
@@ -152,6 +173,32 @@ async def _client_by_api_key(api_key: str):
         )
 
 
+async def _superadmin(via: str, act_as: str) -> Principal:
+    """The operator principal — scoped to one workspace when they asked for it.
+
+    Without `X-Act-As-Tenant` this is the plain superadmin every `/admin/...` route expects.
+    With it, the caller gets a TENANT-shaped principal for that one workspace, so the
+    ordinary tenant routes serve the operator console exactly as they serve the customer.
+
+    That is a real grant, so it is narrow. Only an already-verified superadmin credential
+    reaches this function; the workspace must exist and be active; and `role="superadmin"`
+    is carried through rather than faked to "owner", which keeps the audit trail honest —
+    `kb_events` and friends derive their actor from `user_id or role`, so an operator's
+    edits record as `tenant:superadmin` and never as one of the customer's own people.
+    """
+    if not act_as:
+        return Principal(kind="superadmin", role="superadmin", via=via)
+    # Matched as TEXT against both id and slug: casting a non-uuid selector to uuid would
+    # raise instead of simply not matching (same shape as the integration selector).
+    async with pool().acquire() as conn:
+        client_id = await conn.fetchval(
+            "SELECT id FROM clients WHERE (id::text = $1 OR slug = $1) AND is_active", act_as)
+    if not client_id:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return Principal(kind="tenant", client_id=str(client_id), role="superadmin",
+                     via=via, tenant_sel=act_as)
+
+
 async def resolve_principal(
     request: Request,
     authorization: str = Header(default=""),
@@ -159,6 +206,7 @@ async def resolve_principal(
     x_admin_token: str = Header(default=""),
     x_cq_key: str = Header(default=""),
     x_cq_tenant: str = Header(default=""),
+    x_act_as_tenant: str = Header(default=""),
 ) -> Principal:
     # 0. Credential exclusivity. Ambiguity is rejected before anything is verified, so the
     # resolution ORDER below can never be the thing that picks a tenant.
@@ -172,7 +220,7 @@ async def resolve_principal(
     # 1. Superadmin via admin token
     if x_admin_token:
         if hmac.compare_digest(x_admin_token, settings.admin_token):
-            return Principal(kind="superadmin", role="superadmin", via="admin")
+            return await _superadmin("admin", x_act_as_tenant.strip())
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
     # 2.5 Integration (the chat site). Placed AFTER the admin check and BEFORE the Bearer branch
@@ -197,7 +245,7 @@ async def resolve_principal(
             # not fall through to the X-API-Key branch.
             raise HTTPException(status_code=401, detail="Invalid or expired session token")
         if payload.get("role") == "superadmin":
-            return Principal(kind="superadmin", role="superadmin", via="token")
+            return await _superadmin("token", x_act_as_tenant.strip())
         if payload.get("kind") == "user":
             # A registered-user token never carries a client_id, and must not be allowed to
             # become a tenant principal by falling through to the branch below. A user token
@@ -207,6 +255,19 @@ async def resolve_principal(
                 raise HTTPException(status_code=401, detail="Invalid or expired session token")
             return Principal(kind="user", user_id=str(payload["user_id"]), role="user",
                              via="token")
+        # A PURPOSE-SCOPED token is not a session. `make_token` signs every kind of token
+        # with one secret, and a chat stream ticket carries `{"scope": "chat_stream",
+        # "client_id": ...}` — so without this guard it fell through here and became a full
+        # tenant principal for that workspace. Those tickets are deliberately put in a URL
+        # query string (EventSource cannot set headers), which means they reach nginx access
+        # logs, the browser history of every visitor to a customer's public chat widget, and
+        # the Referer of any subresource. Verified: such a ticket returned the tenant's
+        # entire knowledge base from `GET /kb/documents`.
+        #
+        # Any future purpose-built token inherits the refusal simply by carrying a `scope`.
+        if payload.get("scope"):
+            raise HTTPException(status_code=401,
+                                detail="This token is not valid for API access")
         return Principal(kind="tenant", client_id=payload.get("client_id"),
                          user_id=payload.get("user_id"), role=payload.get("role", "member"),
                          via="token")

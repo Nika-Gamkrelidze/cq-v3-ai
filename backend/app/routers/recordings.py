@@ -509,6 +509,8 @@ async def _actor_name(principal: Principal) -> str | None:
             if principal.kind == "tenant" and principal.user_id:
                 return await conn.fetchval(
                     "SELECT username FROM tenant_users WHERE id = $1", principal.user_id)
+            if principal.is_operator:                # CQ staff acting on this workspace
+                return "CommuniQ support"
             if principal.kind == "tenant":           # an API key has no person behind it
                 return "API key"
             if principal.kind == "user" and principal.user_id:
@@ -536,7 +538,7 @@ def _require_score_editor(principal: Principal) -> None:
     so a plain workspace MEMBER cannot: it is the owner's call (or the operator's). A
     registered user editing their own recording is their own owner."""
     _require(principal, ("tenant", "user", "superadmin"), "edit scores")
-    if principal.kind == "tenant" and principal.role not in ("owner", "apikey"):
+    if principal.kind == "tenant" and not principal.may_configure_workspace:
         raise HTTPException(status_code=403,
                             detail="Only a workspace owner can change a score.")
 

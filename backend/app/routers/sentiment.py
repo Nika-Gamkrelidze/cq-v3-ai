@@ -97,7 +97,7 @@ def _tenant_owner(principal: Principal = Depends(resolve_principal)) -> str:
     """Same owner|apikey policy as scoring.py's rubric editor — keep the two in sync."""
     if not principal.is_tenant:
         raise HTTPException(status_code=401, detail="Tenant login or API key required")
-    if principal.role not in ("owner", "apikey"):
+    if not principal.may_configure_workspace:
         raise HTTPException(status_code=403, detail="Owner role required to edit sentiment settings")
     return principal.client_id
 
@@ -108,9 +108,14 @@ async def tenant_get_config(client_id: str = Depends(_tenant)):
 
 
 @router.put("/sentiment/config")
-async def tenant_put_config(body: SentimentConfigBody, client_id: str = Depends(_tenant_owner)):
+async def tenant_put_config(body: SentimentConfigBody,
+                            client_id: str = Depends(_tenant_owner),
+                            principal: Principal = Depends(resolve_principal)):
+    # The actor is DERIVED, not a per-route literal: this route is reachable by an operator
+    # too, and `updated_by` is the only record of who changed a workspace's sentiment rules.
     return await sentiment_config.save_tenant_config(
-        client_id, enabled=body.enabled, guidance=body.guidance, actor="tenant")
+        client_id, enabled=body.enabled, guidance=body.guidance,
+        actor="superadmin" if principal.is_operator else "tenant")
 
 
 # --------------------------------------------------------------------------- #
