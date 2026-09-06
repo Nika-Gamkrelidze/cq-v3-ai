@@ -12,11 +12,20 @@ import { currentLang, setLang as persist, translate, type Lang } from './i18n';
 export function useI18n() {
   const [lang, setLangState] = useState<Lang>('en');
 
+  // BOTH targets. A `CustomEvent` is non-bubbling unless asked, and brand.js dispatches
+  // `cq:lang` on `document` with the default — so a document dispatch never reaches a window
+  // listener, and vice versa. Listening on one side only means the two stacks cannot tell each
+  // other about a language change at all. It costs nothing to hear both: the handler re-reads
+  // the stored value, so a doubled event sets identical state and React drops the re-render.
   useEffect(() => {
     setLangState(currentLang());
     const onLang = () => setLangState(currentLang());
+    document.addEventListener('cq:lang', onLang as EventListener);
     window.addEventListener('cq:lang', onLang as EventListener);
-    return () => window.removeEventListener('cq:lang', onLang as EventListener);
+    return () => {
+      document.removeEventListener('cq:lang', onLang as EventListener);
+      window.removeEventListener('cq:lang', onLang as EventListener);
+    };
   }, []);
 
   const t = useCallback(

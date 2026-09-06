@@ -1,0 +1,19 @@
+// The tests' own program, run by `npm run test:types`.
+//
+// It exists because the root tsconfig cannot see these files: its include pattern for `.ts`
+// does not match `.mts`, and widening it would make `tsc` read the `../format.ts` specifiers
+// that Node's ESM resolver requires and reject them. Rather than turn
+// `allowImportingTsExtensions` on for the whole app — where an app file importing `./foo.ts`
+// would then typecheck and break the Next build — it is switched on here, over the test
+// files only.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // Off, or the inherited setting drops a `tsconfig.tsbuildinfo` into the test directory.
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": ["*.mts"]
+}

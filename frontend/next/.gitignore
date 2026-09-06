@@ -3,3 +3,8 @@ node_modules/
 out/
 next-env.d.ts
 *.tsbuildinfo
+
+# Local API-base override (see .env.local.example). The repo-root .gitignore has `.env` and
+# `*.env`, and NEITHER matches `.env.local` — so without this line the file .env.local.example
+# tells every developer to create lands in the next `git add -A`, on a public repo.
+.env*.local

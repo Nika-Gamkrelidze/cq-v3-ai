@@ -6,7 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"lib/__tests__/*.test.*\"",
+    "test:types": "tsc --noEmit -p lib/__tests__"
   },
   "dependencies": {
     "next": "15.1.6",
