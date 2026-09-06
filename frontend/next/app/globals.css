@@ -587,3 +587,41 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
 .wb-sc-tools .wb-sc-note { flex:1 1 220px; margin:0; }
 .wb-sc-histbox { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
 .wb-rev { border:1px solid var(--hairline); border-radius:10px; padding:10px 12px; background:var(--input-bg); }
+
+/* ---- Stat tiles, form fields, warning counts -------------------------------------------
+   These four were used by the first two migrated pages before they existed here, so /usage's
+   drill-down tiles and /ai-config's form rows shipped unstyled — the markup was right and
+   nothing rendered wrong enough to notice in a screenshot. Carried over from brand.css rather
+   than invented, so a ported page and a legacy one still look like one product. */
+
+/* auto-fit rather than a fixed column count: the same row holds six tiles on the usage
+   drill-down and three on a workspace summary, and a fixed grid leaves the short row with
+   holes in it. */
+.stat-row, .stat-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  gap:10px; margin-top:14px;
+}
+.stat {
+  display:flex; flex-direction:column; gap:2px; padding:12px 14px;
+  border:1px solid color-mix(in oklab,var(--hairline) 80%,transparent);
+  border-radius:var(--r-md); background:color-mix(in oklab,var(--surface-2) 35%,transparent);
+}
+.stat b { font-size:20px; font-weight:700; line-height:1.15; font-variant-numeric:tabular-nums; }
+.stat span { color:var(--muted); font-size:12px; }
+
+/* A labelled form row. The label is a block so the control starts on its own line, and the
+   trailing .hint sits under the control it explains — putting it above reads as a heading for
+   the NEXT field. */
+.field { margin:14px 0 0; }
+.field > label { display:block; margin-bottom:6px; font-weight:600; font-size:13.5px; }
+.field > .hint { margin:6px 0 0; }
+.field input, .field textarea, .field select { width:100%; }
+
+/* A non-zero count of something that went wrong. Deliberately NOT the alert colour on its own:
+   a failure count is information, not an error state, and a red number in a table of black
+   ones reads as "this row is broken" when it means "5 of 17 calls retried". */
+.warn-flag {
+  display:inline-block; padding:1px 7px; border-radius:999px;
+  background:color-mix(in oklab,var(--mid) 22%,transparent);
+  color:var(--mid); font-weight:600; font-variant-numeric:tabular-nums;
+}
