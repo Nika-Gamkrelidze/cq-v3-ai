@@ -22,7 +22,6 @@ export const en: Dict = {
   'nav.usage': 'AI usage',
   'nav.aicfg': 'AI setup',
   'nav.signin': 'Sign in',
-  'nav.create': 'Create account',
   'nav.logout': 'Log out',
 
   'login.heading': 'Sign in',
@@ -190,7 +189,6 @@ export const ka: Dict = {
   'nav.usage': 'AI-ს ხარჯვა',
   'nav.aicfg': 'AI-ს პარამეტრები',
   'nav.signin': 'შესვლა',
-  'nav.create': 'ანგარიშის შექმნა',
   'nav.logout': 'გასვლა',
 
   'login.heading': 'შესვლა',
@@ -362,7 +360,6 @@ export const ru: Dict = {
   'nav.usage': 'Расход ИИ',
   'nav.aicfg': 'Настройка ИИ',
   'nav.signin': 'Войти',
-  'nav.create': 'Создать аккаунт',
   'nav.logout': 'Выйти',
 
   'login.heading': 'Войти',

@@ -72,10 +72,11 @@ export default function Header({ tag }: { tag?: string }) {
             {t('nav.logout')}
           </a>
         ) : (
-          <>
-            <a href="/tenant.html">{t('nav.signin')}</a>
-            <a href="/account.html">{t('nav.create')}</a>
-          </>
+          // account.html is the one sign-in gate now — its own subtabs cover both signing in
+          // (any role: registered user, workspace user, or operator) and registering, so a
+          // second top-nav link just for "create account" duplicated a door that page already
+          // has.
+          <a href="/account.html">{t('nav.signin')}</a>
         )}
 
         <div className="lang-switch" role="group" aria-label="Language">

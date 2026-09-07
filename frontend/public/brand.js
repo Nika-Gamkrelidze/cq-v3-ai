@@ -23,7 +23,7 @@ const CQ = (() => {
   /* ---------------- i18n ---------------- */
   const DICT = {
     en: {
-      'nav.public':'Public app','nav.signin':'Sign in','nav.logout':'Log out','nav.kb':'Knowledge Base',
+      'nav.public':'Public app','nav.signin':'Sign in','nav.logout':'Log out','nav.kb':'AI Services',
       'f.username':'Username','f.password':'Password','f.language':'Language','f.voice':'Voice','f.text':'Text',
       'f.category':'Category','f.title':'Title','f.tags':'Tags (comma-separated)','f.name':'Name','f.industry':'Industry','f.region':'Region',
       'f.audiofile':'Audio or video file','f.provider':'Provider','f.dimension':'Dimension','f.model':'Model','f.baseurl':'Base URL',
@@ -357,7 +357,6 @@ const CQ = (() => {
          personal rubric, profile. Prefix ac. */
       'ac.gate.heading':'Your CommuniQ account',
       'ac.gate.signin':'Sign in','ac.gate.register':'Create account',
-      'ac.gate.tenant':'Workspace user? Sign in here →',
       'ac.gate.istenant':'Workspace account — opening your portal…','ac.gate.isadmin':'Operator account — opening the console…',
       'ac.f.email':'Email','ac.f.signinid':'Email or username','ac.f.name':'Display name','ac.f.name.hint':'Optional — the name shown in the header.',
       'ac.f.curpw':'Current password','ac.f.newpw':'New password','ac.f.pw2':'Repeat the new password',
@@ -399,7 +398,6 @@ const CQ = (() => {
       'tn.sc.reset.bad':'That password does not match.','tn.sc.reset.done':'The rubric was reset to the default.',
       'tn.sc.isdefault':'You are looking at the shared default rubric — this workspace has none of its own yet. Saving creates your own copy, which later changes to the default will not touch.',
       /* ---- public page + admin console (pb.*) — owned by the public+admin page agent ---- */
-      'pb.nav.create':'Create account',
       'pb.nav.account':'My account',
       'pb.users':'Users',
       'pb.storage':'Storage',
@@ -455,7 +453,7 @@ const CQ = (() => {
       'pb.defrubric.saved':'Default rubric saved',
     },
     ka: {
-      'nav.public':'საჯარო აპლიკაცია','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'ცოდნის ბაზა',
+      'nav.public':'საჯარო აპლიკაცია','nav.signin':'შესვლა','nav.logout':'გასვლა','nav.kb':'AI სერვისები',
       'f.username':'მომხმარებლის სახელი','f.password':'პაროლი','f.language':'ენა','f.voice':'ხმა','f.text':'ტექსტი',
       'f.category':'კატეგორია','f.title':'სათაური','f.tags':'ტეგები (მძიმით გამოყოფილი)','f.name':'სახელი','f.industry':'ინდუსტრია','f.region':'რეგიონი',
       'f.audiofile':'აუდიო ან ვიდეო ფაილი','f.provider':'პროვაიდერი','f.dimension':'განზომილება','f.model':'მოდელი','f.baseurl':'საბაზო URL',
@@ -771,7 +769,6 @@ const CQ = (() => {
          personal rubric, profile. Prefix ac. */
       'ac.gate.heading':'თქვენი CommuniQ ანგარიში',
       'ac.gate.signin':'შესვლა','ac.gate.register':'ანგარიშის შექმნა',
-      'ac.gate.tenant':'სამუშაო სივრცის მომხმარებელი ხართ? შედით აქ →',
       'ac.gate.istenant':'სამუშაო სივრცის ანგარიში — იხსნება თქვენი პორტალი…','ac.gate.isadmin':'ოპერატორის ანგარიში — იხსნება კონსოლი…',
       'ac.f.email':'ელფოსტა','ac.f.signinid':'ელფოსტა ან მომხმარებელი','ac.f.name':'საჩვენებელი სახელი','ac.f.name.hint':'არასავალდებულო — სახელი, რომელიც თავსართში გამოჩნდება.',
       'ac.f.curpw':'მიმდინარე პაროლი','ac.f.newpw':'ახალი პაროლი','ac.f.pw2':'გაიმეორეთ ახალი პაროლი',
@@ -813,7 +810,6 @@ const CQ = (() => {
       'tn.sc.reset.bad':'პაროლი არ ემთხვევა.','tn.sc.reset.done':'რუბრიკა დაბრუნდა ნაგულისხმევზე.',
       'tn.sc.isdefault':'ხედავთ საერთო ნაგულისხმევ რუბრიკას — ამ სამუშაო სივრცეს ჯერ საკუთარი არ აქვს. შენახვისას შეიქმნება თქვენი ასლი, რომელსაც ნაგულისხმევის შემდგომი ცვლილებები აღარ შეეხება.',
       /* ---- public page + admin console (pb.*) ---- */
-      'pb.nav.create':'ანგარიშის შექმნა',
       'pb.nav.account':'ჩემი ანგარიში',
       'pb.users':'მომხმარებლები',
       'pb.storage':'შენახვა',
@@ -869,7 +865,7 @@ const CQ = (() => {
       'pb.defrubric.saved':'ნაგულისხმევი რუბრიკა შენახულია',
     },
     ru: {
-      'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'База знаний',
+      'nav.public':'Публичное приложение','nav.signin':'Войти','nav.logout':'Выйти','nav.kb':'AI Сервисы',
       'f.username':'Имя пользователя','f.password':'Пароль','f.language':'Язык','f.voice':'Голос','f.text':'Текст',
       'f.category':'Категория','f.title':'Заголовок','f.tags':'Теги (через запятую)','f.name':'Название','f.industry':'Отрасль','f.region':'Регион',
       'f.audiofile':'Аудио- или видеофайл','f.provider':'Провайдер','f.dimension':'Размерность','f.model':'Модель','f.baseurl':'Базовый URL',
@@ -1185,7 +1181,6 @@ const CQ = (() => {
          personal rubric, profile. Prefix ac. */
       'ac.gate.heading':'Ваш аккаунт CommuniQ',
       'ac.gate.signin':'Вход','ac.gate.register':'Создать аккаунт',
-      'ac.gate.tenant':'Пользователь рабочего пространства? Войдите здесь →',
       'ac.gate.istenant':'Рабочее пространство — открываем ваш портал…','ac.gate.isadmin':'Учётная запись оператора — открываем консоль…',
       'ac.f.email':'Электронная почта','ac.f.signinid':'Эл. почта или имя пользователя','ac.f.name':'Отображаемое имя','ac.f.name.hint':'Необязательно — имя, которое видно в шапке.',
       'ac.f.curpw':'Текущий пароль','ac.f.newpw':'Новый пароль','ac.f.pw2':'Повторите новый пароль',
@@ -1227,7 +1222,6 @@ const CQ = (() => {
       'tn.sc.reset.bad':'Пароль не совпадает.','tn.sc.reset.done':'Рубрика сброшена к значению по умолчанию.',
       'tn.sc.isdefault':'Перед вами общая рубрика по умолчанию — у этого рабочего пространства пока нет своей. При сохранении будет создана ваша копия, и дальнейшие изменения умолчания её не затронут.',
       /* ---- public page + admin console (pb.*) ---- */
-      'pb.nav.create':'Создать аккаунт',
       'pb.nav.account':'Мой аккаунт',
       'pb.users':'Пользователи',
       'pb.storage':'Хранение',
@@ -1403,8 +1397,10 @@ const CQ = (() => {
       { id: 'navWorkspace', i18n: 'nav.workspace', href: 'tenant.html', show: !admin && !!tenant },
       { id: 'navAccount', i18n: 'pb.nav.account', href: 'account.html', show: !!user },
       { id: 'logout', i18n: 'nav.logout', href: '#', show: signedIn },
-      { id: 'navSignin', i18n: 'nav.signin', href: 'tenant.html', show: !signedIn },
-      { id: 'navCreate', i18n: 'pb.nav.create', href: 'account.html', show: !signedIn },
+      // account.html is the one sign-in gate now — its own subtabs cover both signing in
+      // (any role: registered user, workspace user, or operator) and registering, so a
+      // second nav item just for "create account" duplicated a door that page already has.
+      { id: 'navSignin', i18n: 'nav.signin', href: 'account.html', show: !signedIn },
     ];
     return items.map(n => ({ id: n.id, i18n: n.i18n, href: n.href,
                              cls: n.show ? '' : 'hidden' }));
