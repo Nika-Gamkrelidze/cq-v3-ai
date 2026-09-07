@@ -34,6 +34,12 @@ UNSCOPED_BY_DESIGN = {
     # per tenant would mean either N queries or a tenant list, and it reads/writes nothing but
     # `copilot_suggestions.state` — see the ADR's reaper note.
     "reap_stale_suggestions",
+    # The platform-wide default chat config is not tenant data: there is no client to scope
+    # by, and it never touches a tenant table — it is one `app_settings` blob read and
+    # written through settings_store, so neither function issues SQL from this module at all.
+    # The client_id guard on statements still applies to everything else here.
+    "get_default_chat_config",
+    "set_default_chat_config",
 }
 
 QUERY_METHODS = {"fetch", "fetchrow", "fetchval", "fetchmany", "execute", "executemany",

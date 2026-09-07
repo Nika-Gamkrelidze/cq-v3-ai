@@ -139,6 +139,18 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `index.html` (public TTS+analyze), `tenant.html` (portal), `admin.html` (console), `kb-admin.html`.
 - **Single sign-in** with admin routing; superadmin creds validated server-side.
 - **Auto-deploy webhook** (push to `main` → server pulls + rebuilds). See §5.
+- **Conversational AI — customer chat bot + operator copilot** (`routers/chat.py`, mounted at
+  `/v1/chat/*`; design in `docs/ADR-001-conversational-ai.md`). The customer's **chat service**
+  calls CQ server-to-server with a separate **integration credential** (`X-CQ-Key: cqi_…` +
+  `X-CQ-Tenant`, granted per tenant — issued from the console's *Bot control → Chat connections*).
+  **Autopilot** (`POST /v1/chat/answer`) answers customers from the tenant's KB documents that were
+  *shared with the bot*, refuses with **zero tokens** when ungrounded, and returns a handoff for a
+  human; after handoff the **copilot** (`/v1/chat/turns` → `/suggestions`) drafts replies for the
+  operator. Per-tenant settings live in the portal's **BOT** tab (`/chat/config`), the inherited
+  baseline in the console's **Default bot** tab (`/admin/chat/default-config`), and the operator
+  brake in *Bot control* (kill switch). Token usage is metered per tenant in `llm_usage`
+  (`feature = autopilot | copilot | handoff`). Contract for the chat-side team:
+  `docs/CHAT_INTEGRATION.md`; paste-ready Claude Code prompt for their repo: `docs/CHAT_SIDE_PROMPT.md`.
 
 **All AI structured outputs use forced tool-use with `strict: true` schemas + array-normalization**
 (`_as_str_list`) so the model can't return a shape that crashes the UI.
@@ -174,6 +186,15 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `python3` is 3.9; use `python3.11`.
 - **Models are configurable** via the admin panel / `.env` (Claude model, STT model, TTS voice).
   Don't hardcode a model id in new code — read from `settings_store`.
+- **The public bot reads only `kb_documents.visibility='public'`** (the 🤖 *share with the bot*
+  toggle in the KB tab; default `internal`). A tenant with nothing shared cannot switch autopilot on
+  (409) — by design, so an internal pricing floor is never quoted to a customer by accident. Two
+  independent off switches: the tenant's `autopilot_enabled` and the superadmin kill switch
+  (`app_settings.autopilot_kill`, 5 s cache).
+- **Chat config resolution** = code defaults ← superadmin default blob
+  (`app_settings.default_chat_config`) ← the tenant's active `chat_configs` row; `is_default` in
+  the response tells the UI which layer it is looking at. Keep the default free of raw SQL in
+  `chat_store.py` — `tests/test_chat_store_sql.py` fails any statement there without `client_id`.
 
 ---
 
@@ -200,6 +221,11 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 
 ## 6. Where we stopped (exact state)
 
+- **2026-09-08 — chat bot launched in the UI.** Tenant BOT tab live (was behind a "coming soon"
+  flag), superadmin-editable default bot config, one chat-service credential with a grant per
+  tenant + a console to manage them, integration contract + chat-side prompt written. **Pending:**
+  the chat service's own integration (their repo, using `docs/CHAT_SIDE_PROMPT.md`), then issuing
+  the credential, sharing KB documents with the bot, and enabling autopilot per pilot tenant.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, all three UIs — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.

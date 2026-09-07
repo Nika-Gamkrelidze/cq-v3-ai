@@ -23,6 +23,7 @@
         <div class="tab" data-tab="anon" data-i18n="adm.anon"></div>
         <div class="tab" data-tab="storage" data-i18n="pb.storage"></div>
         <div class="tab" data-tab="defrubric" data-i18n="pb.defrubric"></div>
+        <div class="tab" data-tab="defbot" data-i18n="pb.defbot"></div>
         <div class="tab" data-tab="integrations" data-i18n="adm.integrations"></div>
         <div class="tab" data-tab="voices" data-i18n="adm.voices"></div>
         <div class="tab" data-tab="bot" data-i18n="adm.bot"></div>
@@ -195,6 +196,106 @@
         </div>
       </section>
 
+      <!-- DEFAULT BOT -->
+      <!-- The tenant portal's Bot form one level up: what every workspace WITHOUT saved bot
+           settings of its own inherits. Deliberately no autopilot switch — the default may
+           shape HOW a bot answers, never WHETHER one is answering; that stays a per-workspace
+           decision, taken after the workspace has shared at least one document with it. -->
+      <section class="panel" id="panel-defbot">
+        <div class="card">
+          <div class="inline" style="justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; row-gap:6px">
+            <h3 style="margin:0" data-i18n="pb.defbot.heading"></h3>
+            <span class="inline" style="gap:8px"><span class="pill" id="dbSource">—</span><span class="hint" id="dbUpdated"></span></span>
+          </div>
+          <p class="hint" data-i18n="pb.defbot.desc"></p>
+          <p class="hint" data-i18n="bot.autopilot.default.note"></p>
+        </div>
+
+        <div class="card">
+          <label data-i18n="bot.persona"></label>
+          <textarea id="db_persona" data-i18n-ph="bot.persona.ph" style="min-height:90px"></textarea>
+          <h4 data-i18n="bot.languages"></h4>
+          <div class="inline" style="gap:18px">
+            <label class="inline" style="gap:6px"><input type="checkbox" class="db-lang" data-lang="en" style="width:auto" /> <span data-i18n="bot.lang.en"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" class="db-lang" data-lang="ka" style="width:auto" /> <span data-i18n="bot.lang.ka"></span></label>
+            <label class="inline" style="gap:6px"><input type="checkbox" class="db-lang" data-lang="ru" style="width:auto" /> <span data-i18n="bot.lang.ru"></span></label>
+          </div>
+        </div>
+
+        <!-- Greeting + refusal in all three languages, as in the portal: a missing translation
+             in the default is a missing translation for every workspace that never wrote its own. -->
+        <div class="card">
+          <h3 data-i18n="bot.greeting"></h3>
+          <div class="row stack-md">
+            <div><label data-i18n="bot.lang.en"></label><textarea id="db_greet_en"></textarea></div>
+            <div><label data-i18n="bot.lang.ka"></label><textarea id="db_greet_ka"></textarea></div>
+            <div><label data-i18n="bot.lang.ru"></label><textarea id="db_greet_ru"></textarea></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3><span data-i18n="bot.refusal"></span><button class="tip" data-tip-i18n="bot.refusal.hint"></button></h3>
+          <div class="row stack-md">
+            <div><label data-i18n="bot.lang.en"></label><textarea id="db_ref_en"></textarea></div>
+            <div><label data-i18n="bot.lang.ka"></label><textarea id="db_ref_ka"></textarea></div>
+            <div><label data-i18n="bot.lang.ru"></label><textarea id="db_ref_ru"></textarea></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3><span data-i18n="bot.escalation"></span><button class="tip" data-tip-i18n="bot.escalation.hint"></button></h3>
+          <input id="db_escalation" data-i18n-ph="bot.escalation.ph" />
+          <h4 data-i18n="bot.retrieval"></h4>
+          <div class="row">
+            <div><label data-i18n="bot.minscore"></label><input id="db_minscore" type="number" step="0.01" min="0" max="1" /></div>
+            <div><label data-i18n="bot.minhits"></label><input id="db_minhits" type="number" min="0" /></div>
+            <div><label data-i18n="bot.topk"></label><input id="db_topk" type="number" min="1" /></div>
+            <div><label data-i18n="bot.suggestions"></label><input id="db_sugg" type="number" min="1" /></div>
+            <div><label data-i18n="bot.maxchars"></label><input id="db_maxchars" type="number" min="1" /></div>
+          </div>
+          <!-- The portal shows only the copilot (draft) caps; the answer caps exist only here
+               because an operator, not a customer, decides how fast an unattended bot may talk. -->
+          <h4 data-i18n="bot.caps"></h4>
+          <div class="row">
+            <div><label data-i18n="bot.cap.tenant"></label><input id="db_cap_tenant" type="number" min="0" /></div>
+            <div><label data-i18n="bot.cap.enduser"></label><input id="db_cap_enduser" type="number" min="0" /></div>
+          </div>
+          <div class="row">
+            <div><label data-i18n="bot.cap.answer_tenant"></label><input id="db_cap_answer_tenant" type="number" min="0" /></div>
+            <div><label data-i18n="bot.cap.answer_enduser"></label><input id="db_cap_answer_enduser" type="number" min="0" /></div>
+          </div>
+          <div class="hint" data-i18n="bot.cap.hint"></div>
+        </div>
+
+        <!-- Disclosure is appended by code after generation, so it is the one line of bot copy
+             a customer's prompt cannot talk the model out of — which is why it is set here. -->
+        <div class="card">
+          <h3><span data-i18n="bot.disclosure"></span><button class="tip" data-tip-i18n="bot.disclosure.hint"></button></h3>
+          <label data-i18n="bot.disclosure.mode"></label>
+          <select id="db_disclosure_mode">
+            <option value="first" data-i18n="bot.disclosure.first"></option>
+            <option value="always" data-i18n="bot.disclosure.always"></option>
+            <option value="off" data-i18n="bot.disclosure.off"></option>
+          </select>
+          <div class="hint" style="margin-top:10px" data-i18n="bot.disclosure.text"></div>
+          <div class="row stack-md">
+            <div><label data-i18n="bot.lang.en"></label><textarea id="db_disc_en"></textarea></div>
+            <div><label data-i18n="bot.lang.ka"></label><textarea id="db_disc_ka"></textarea></div>
+            <div><label data-i18n="bot.lang.ru"></label><textarea id="db_disc_ru"></textarea></div>
+          </div>
+        </div>
+
+        <!-- The refusal-vs-general-knowledge choice, stated as the risk it is. Off by default. -->
+        <div class="card">
+          <label class="inline" style="gap:8px"><input type="checkbox" id="db_general" style="width:auto" /> <span data-i18n="bot.general"></span><button class="tip" data-tip-i18n="bot.general.risk"></button></label>
+          <label class="inline" style="gap:8px; margin-top:14px"><input type="checkbox" id="db_handoff" style="width:auto" /> <span data-i18n="bot.handoff"></span><button class="tip" data-tip-i18n="bot.handoff.hint"></button></label>
+        </div>
+
+        <div class="card">
+          <div class="actions"><button class="primary" id="dbSave" data-i18n="sc.save"></button></div>
+          <div class="msg" id="dbMsg"></div>
+        </div>
+      </section>
+
       <!-- INTEGRATIONS -->
       <section class="panel" id="panel-integrations">
         <div class="card">
@@ -251,15 +352,6 @@
       </section>
       <!-- BOT CONTROL — the 3am brake. State first, one click to act, no settings blob. -->
       <section class="panel" id="panel-bot">
-        <!-- The bot has not launched: tenants see a "Coming soon" tab. The brake below stays
-             visible for the operator (it is a safety control), with this banner for context. -->
-        <div class="card">
-          <div class="soon-card" style="border:none; padding:26px 20px">
-            <span class="soon-emoji">🤖</span>
-            <h3 data-i18n="bot.soon.title"></h3>
-            <p data-i18n="bot.soon.desc.admin"></p>
-          </div>
-        </div>
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:flex-start">
             <div style="flex:1">
@@ -276,6 +368,23 @@
         <div class="card">
           <h3 data-i18n="kill.tenants"></h3>
           <div id="killList" style="margin-top:12px"></div>
+        </div>
+        <!-- CHAT CONNECTIONS — the credentials chat services authenticate with, and the
+             workspaces each may act for. A key is hashed at rest, so its clear text exists in
+             exactly one place, the reveal modal, once; the table never shows more than key_ids. -->
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:flex-start">
+            <div style="flex:1">
+              <h3 style="margin:0" data-i18n="cred.heading"></h3>
+              <p class="hint" data-i18n="cred.lead"></p>
+            </div>
+            <div class="inline" style="flex:0; gap:8px">
+              <button class="ghost" id="reloadConn" data-i18n="btn.refresh"></button>
+              <button class="primary" id="newConnBtn" data-i18n="cred.new"></button>
+            </div>
+          </div>
+          <div id="connList" style="margin-top:12px"></div>
+          <div class="msg" id="connMsg"></div>
         </div>
       </section>
     </div>
@@ -308,11 +417,12 @@
       document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
       tb.classList.add('active'); $('panel-' + tb.dataset.tab).classList.add('active');
       if (tb.dataset.tab === 'bot') loadKill();
+      if (tb.dataset.tab === 'defbot') loadDefBot();
     }));
     document.addEventListener('cq:lang', () => { if ($('app').classList.contains('hidden')) return;
       loadTenants();
       // The kill-switch pills/buttons are built in JS, so data-i18n cannot retranslate them.
-      if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); }
+      if ($('panel-bot').classList.contains('active')) { renderKillGlobal(true); renderKillTenants(); loadConnections(); }
       // Same reason for these two: their rows and their source pill are painted in JS, so
       // data-i18n cannot reach them. Repainted whether or not their panel is on screen —
       // nothing re-renders them on tab activation, so a table left stale while hidden would
@@ -321,7 +431,11 @@
       // Read the editor back first: a language switch mid-edit must not throw away the
       // dimensions someone has typed but not saved.
       if ($('drDims').querySelector('.sc-edit')) drReadDom();
-      drRenderDims(); drPaintSource(); });
+      drRenderDims(); drPaintSource();
+      // The default-bot source pill is painted in JS too, and the custom <select> caches its
+      // option labels — neither notices applyI18n on its own. Only once something has loaded:
+      // before that the pill's "—" must not turn into a claim about where the defaults came from.
+      if (dbCfg) { dbPaintSource(); CQ.syncSelect($('db_disclosure_mode')); } });
 
     async function loadAll() { await Promise.all([loadIntegrations(), loadEmbeddings(), loadAnon(), loadSentimentSettings(),
       loadTenants(), loadVoices(), loadRegistered(), loadUsers(), loadStorage(), loadDefaultRubric()]); }
@@ -976,6 +1090,120 @@
       } finally { b.disabled = false; b.textContent = t('sc.save'); }
     });
 
+    // ---- DEFAULT BOT: the baseline every workspace inherits ------------------------------
+    // The portal's saveBot, field for field, so a knob cannot mean one thing to a customer and
+    // another to the operator. Loaded on tab activation rather than in loadAll(): the route
+    // ships with the bot, and a console that fails to open because one tab's endpoint is not
+    // deployed yet would take the kill switch down with it.
+    const DEFBOT = `${API}/admin/chat/default-config`;
+    const DB_LANGS = ['en', 'ka', 'ru'];
+    const DB_CAPS = [['db_cap_tenant', 'tenant_per_minute'], ['db_cap_enduser', 'enduser_per_hour'],
+                     ['db_cap_answer_tenant', 'answer_tenant_per_minute'], ['db_cap_answer_enduser', 'answer_enduser_per_hour']];
+    // 'builtin' means nothing is saved here yet — the form is showing the code's own defaults.
+    const DB_SRC = { stored: ['pb.defbot.source.stored', 'ready'], builtin: ['pb.defbot.source.builtin', 'notinkb'] };
+    let dbCfg = null, dbMeta = { source: '', updated_at: null, updated_by: '' };
+
+    function dbPaintSource() {
+      const [key, cls] = DB_SRC[dbMeta.source] || DB_SRC.builtin;
+      $('dbSource').className = 'pill ' + cls; $('dbSource').textContent = t(key);
+      $('dbUpdated').textContent = dbMeta.updated_at
+        ? t('pb.defbot.updated').replace('{when}', () => fmtWhen(dbMeta.updated_at)).replace('{who}', () => dbMeta.updated_by || '—')
+        : '';
+    }
+    function fillDefBot(cfg) {
+      dbCfg = (cfg && typeof cfg === 'object') ? cfg : {};
+      const obj = v => (v && typeof v === 'object') ? v : {};
+      const s = obj(dbCfg.settings), g = obj(dbCfg.greeting), rf = obj(dbCfg.refusal_copy);
+      const disc = obj(s.disclosure), limits = obj(s.limits);
+      const langs = Array.isArray(dbCfg.languages) && dbCfg.languages.length ? dbCfg.languages : DB_LANGS;
+      $('db_persona').value = dbCfg.persona || '';
+      DB_LANGS.forEach(l => { $('db_greet_' + l).value = g[l] || ''; $('db_ref_' + l).value = rf[l] || ''; $('db_disc_' + l).value = disc[l] || ''; });
+      document.querySelectorAll('.db-lang').forEach(cb => { cb.checked = langs.includes(cb.dataset.lang); });
+      const kw = s.escalation_keywords;
+      $('db_escalation').value = Array.isArray(kw) ? kw.join(', ') : (typeof kw === 'string' ? kw : '');
+      $('db_minscore').value = dbCfg.min_score ?? 0.35;
+      $('db_minhits').value  = dbCfg.min_hits ?? 1;
+      $('db_topk').value     = dbCfg.top_k ?? 8;
+      $('db_sugg').value     = dbCfg.suggestion_count ?? 2;
+      $('db_maxchars').value = s.max_reply_chars ?? 1200;
+      DB_CAPS.forEach(([id, k]) => { $(id).value = limits[k] ?? ''; });
+      // An unknown mode falls back to disclosing, not to silence: the safe direction.
+      $('db_disclosure_mode').value = ['first', 'always', 'off'].includes(s.disclosure_mode) ? s.disclosure_mode : 'first';
+      CQ.syncSelect($('db_disclosure_mode'));
+      // Never `??`-default this to true: the safe value is false and a missing key means false.
+      $('db_general').checked = s.allow_general_knowledge === true;
+      $('db_handoff').checked = s.handoff_summary !== false;
+      dbMeta = { source: dbCfg.source || '', updated_at: dbCfg.updated_at || null, updated_by: dbCfg.updated_by || '' };
+      dbPaintSource();
+    }
+    async function loadDefBot() {
+      const m = $('dbMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await adminFetch(DEFBOT, { headers: hdr() });
+      // 404/405 is the server without this route, not a broken console — say which.
+      if (!r.ok) { m.className = 'msg err'; m.textContent = (r.status === 404 || r.status === 405) ? t('bot.unavailable') : t('toast.error'); return; }
+      fillDefBot(await r.json().catch(() => ({})));
+    }
+
+    // Turning general knowledge ON is a deliberate risk decision — here it is one taken for
+    // every workspace that never chose otherwise — so it costs a confirmation. Turning it OFF
+    // never does: the safe direction is always one click.
+    $('db_general').addEventListener('change', async () => {
+      if (!$('db_general').checked) return;
+      $('db_general').checked = false;
+      if (await CQ.confirm(t('bot.general.confirm'), { ok: t('bot.general.on') })) $('db_general').checked = true;
+    });
+
+    $('dbSave').addEventListener('click', async () => {
+      const m = $('dbMsg'); m.className = 'msg'; m.textContent = '';
+      const langs = [...document.querySelectorAll('.db-lang')].filter(cb => cb.checked).map(cb => cb.dataset.lang);
+      if (!langs.length) { m.className = 'msg err'; m.textContent = t('bot.languages.pickone'); return; }
+      // Only languages with text are sent: an empty string would shadow the built-in wording
+      // with silence for every workspace inheriting this, which is never what an empty box means.
+      const greeting = {}, refusal = {}, disclosure = {};
+      DB_LANGS.forEach(l => {
+        const g = $('db_greet_' + l).value.trim(), rf = $('db_ref_' + l).value.trim(), dc = $('db_disc_' + l).value.trim();
+        if (g) greeting[l] = g; if (rf) refusal[l] = rf; if (dc) disclosure[l] = dc;
+      });
+      const num = (id, dflt) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : dflt; };
+      const optInt = id => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : undefined; };
+      const prev = (dbCfg && typeof dbCfg.settings === 'object' && dbCfg.settings) ? dbCfg.settings : {};
+      // Rebuilt rather than spread from prev: a cap the operator cleared must go back to the
+      // built-in default, not survive as the number it used to be.
+      const limits = {};
+      DB_CAPS.forEach(([id, k]) => { const v = optInt(id); if (v !== undefined) limits[k] = v; });
+      const body = {
+        persona: $('db_persona').value.trim() || null,
+        greeting, refusal_copy: refusal, languages: langs,
+        canned: Array.isArray(dbCfg && dbCfg.canned) ? dbCfg.canned : [],
+        settings: { ...prev,                                   // unknown knobs survive a save
+          min_score: num('db_minscore', 0.35), min_hits: num('db_minhits', 1),
+          top_k: num('db_topk', 8), suggestion_count: num('db_sugg', 2),
+          max_reply_chars: num('db_maxchars', 1200),
+          escalation_keywords: $('db_escalation').value.split(',').map(s => s.trim()).filter(Boolean),
+          allow_general_knowledge: $('db_general').checked,
+          handoff_summary: $('db_handoff').checked,
+          disclosure_mode: $('db_disclosure_mode').value,
+          disclosure,
+          limits },
+      };
+      const b = $('dbSave'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
+      try {
+        const r = await adminFetch(DEFBOT, { method: 'PUT', headers: jhdr(), body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          // A 422 carries pydantic's list, which stringifies to "[object Object]"; only a
+          // real sentence is worth showing verbatim.
+          const why = typeof d.detail === 'string' ? d.detail : t('toast.error');
+          m.className = 'msg err'; m.textContent = why; CQ.toast(why, 'err'); return;
+        }
+        fillDefBot(d);
+        m.className = 'msg ok'; m.textContent = t('pb.defbot.saved'); CQ.toast(t('pb.defbot.saved'), 'ok');
+      } catch (e) {
+        if (e.message === 'unauthorized') throw e;   // adminFetch is already redirecting
+        m.className = 'msg err'; m.textContent = t('toast.error'); CQ.toast(t('toast.error'), 'err');
+      } finally { b.disabled = false; b.textContent = t('sc.save'); }
+    });
+
     // ---- BOT CONTROL: autopilot kill switch + per-tenant state -------------------------
     // The switch itself is one `app_settings` blob: {global_disabled, disabled_clients:[id]}.
     // The per-tenant column is read from each tenant's own chat config, so this page shows the
@@ -1077,6 +1305,230 @@
       stop ? set.add(id) : set.delete(id);
       await putKill({ disabled_clients: [...set] });
     }
+
+    // ---- Chat connections ---------------------------------------------------------------
+    // A connection is the credential a chat service authenticates with (X-CQ-Key). It is not
+    // a tenant's api_key: one service fronts several workspaces, so the workspace is named per
+    // request (X-CQ-Tenant) and checked against the grants managed here — a service can only
+    // ever act for a workspace an operator granted it. Keys are stored hashed, so the clear
+    // text exists exactly once, in the reveal modal; the table only ever shows key_ids.
+    const CRED_URL = `${API}/admin/integrations`;
+    const CRED_SCOPES = [['chat:turn', 'cred.scope.turn'], ['chat:suggest', 'cred.scope.suggest'],
+                         ['chat:answer', 'cred.scope.answer'], ['chat:sync', 'cred.scope.sync']];
+    const CRED_OVERLAP_DAYS = 7;          // how long a rotated-out key keeps working
+    let CREDS = [];
+
+    // One error path for every call. The server's own `detail` comes first because it names
+    // WHICH grant or name was refused; a bare 404 is explained as "not deployed" rather than
+    // as a generic failure, since this console can be newer than the api it talks to. The
+    // message goes both into a .msg and a toast: the modal that triggered it may be closing.
+    async function credCall(url, init, msgEl, fallbackKey = 'toast.error') {
+      const m = msgEl || $('connMsg'); m.className = 'msg'; m.textContent = '';
+      const r = await adminFetch(url, init);
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) return d ?? {};
+      const detail = typeof d.detail === 'string' ? d.detail
+        : Array.isArray(d.detail) ? d.detail.map(e => (e && e.msg) || String(e)).join('; ') : '';
+      const msg = detail || (r.status === 404 ? t('cred.unavailable') : t(fallbackKey));
+      m.className = 'msg err'; m.textContent = msg; CQ.toast(msg, 'err');
+      return null;
+    }
+
+    async function loadConnections() {
+      const d = await credCall(CRED_URL, { headers: hdr() }, null, 'cred.loadfail');
+      if (d === null) { CREDS = []; $('connList').innerHTML = ''; return; }
+      CREDS = Array.isArray(d.integrations) ? d.integrations : [];
+      renderConnections();
+    }
+
+    async function credActiveTenants() {
+      const r = await adminFetch(`${API}/admin/tenants`, { headers: hdr() });
+      const l = r.ok ? await r.json().catch(() => []) : [];
+      return (Array.isArray(l) ? l : []).filter(x => x.is_active);
+    }
+    const credName = x => x.name || x.id;
+    const credActiveGrants = x => (x.grants || []).filter(g => g.is_active);
+    const credWsLabel = g => g.name || g.slug || g.client_id;
+
+    // A secret has three terminal looks: revoked (deactivated or rotated out and past its
+    // overlap), expired, and "still valid until" — the rotated-out key during its overlap,
+    // which is the one an operator is actually watching while the chat service switches over.
+    function credKeyBlock(s) {
+      const exp = s.expires_at ? new Date(s.expires_at) : null;
+      const hasExp = exp && !isNaN(exp);
+      let pill = '';
+      if (s.revoked_at) pill = `<span class="pill off">${esc(t('cred.key.revoked'))}</span>`;
+      else if (hasExp && exp.getTime() <= Date.now()) pill = `<span class="pill off">${esc(t('cred.key.expired'))}</span>`;
+      else if (hasExp) pill = `<span class="pill pending">${esc(t('cred.key.expires').replace('{when}', () => fmtWhen(s.expires_at)))}</span>`;
+      return `<div style="white-space:nowrap"><code>${esc(s.key_id)}</code> ${pill}
+        <div class="hint">${esc(t('cred.key.created'))} ${esc(fmtWhen(s.created_at))} · ${esc(t('cred.key.lastused'))} ${s.last_used_at ? esc(fmtWhen(s.last_used_at)) : esc(t('pb.never'))}</div></div>`;
+    }
+
+    function renderConnections() {
+      const box = $('connList');
+      if (!CREDS.length) { box.innerHTML = `<div class="empty">${esc(t('cred.empty'))}</div>`; return; }
+      // The × lives INSIDE the chip so it reads as "this workspace, removable" rather than as
+      // a row action; the reset makes it a glyph, not a second pill-shaped button.
+      const X_STYLE = 'background:none; border:0; padding:0 0 0 6px; margin:0; color:inherit; cursor:pointer; font:inherit; line-height:1';
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t('th.name')}</th><th>${t('th.status')}</th><th>${esc(t('cred.scopes'))}</th><th>${esc(t('cred.workspaces'))}</th><th>${esc(t('cred.keys'))}</th><th></th></tr></thead><tbody>` +
+        CREDS.map(x => {
+          const off = !x.is_active, id = esc(x.id);
+          const chips = credActiveGrants(x).map(g => `<span class="chip" title="${esc((g.scopes || []).join(', '))}">${esc(credWsLabel(g))}${off ? '' :
+            `<button data-ungrant="${id}" data-client="${esc(g.client_id)}" title="${esc(t('cred.grant.remove'))}" aria-label="${esc(t('cred.grant.remove'))}" style="${X_STYLE}">×</button>`}</span>`).join('');
+          const secrets = (x.secrets || []).map(credKeyBlock).join('');
+          return `<tr${off ? ' style="opacity:.5"' : ''}>
+            <td><b>${esc(credName(x))}</b><div class="hint"><code>${id}</code></div></td>
+            <td><span class="pill ${off ? 'off' : 'on'}">${esc(t(off ? 'cred.state.off' : 'cred.state.on'))}</span></td>
+            <td>${(x.scopes || []).map(s => `<span class="chip">${esc(s)}</span>`).join('') || '—'}</td>
+            <td>${chips || `<span class="hint">${esc(t('cred.grant.none'))}</span>`}${off ? '' :
+              ` <button class="ghost" data-grant="${id}" title="${esc(t('cred.grant.add'))}" aria-label="${esc(t('cred.grant.add'))}" style="padding:3px 10px; margin-top:3px">+</button>`}</td>
+            <td>${secrets || `<span class="hint">${esc(t('cred.keys.none'))}</span>`}</td>
+            <td class="inline">${off ? '' : `<button class="ghost" data-rotate="${id}">${esc(t('btn.rotate'))}</button><button class="danger" data-deact="${id}">${esc(t('cred.deactivate'))}</button>`}</td>
+          </tr>`;
+        }).join('') + `</tbody></table></div>`;
+      const byId = id => CREDS.find(x => String(x.id) === id);
+      box.querySelectorAll('button[data-grant]').forEach(b => b.addEventListener('click', () => credGrantModal(byId(b.dataset.grant))));
+      box.querySelectorAll('button[data-ungrant]').forEach(b => b.addEventListener('click', () => credRemoveGrant(byId(b.dataset.ungrant), b.dataset.client)));
+      box.querySelectorAll('button[data-rotate]').forEach(b => b.addEventListener('click', () => credRotate(byId(b.dataset.rotate))));
+      box.querySelectorAll('button[data-deact]').forEach(b => b.addEventListener('click', () => credDeactivate(byId(b.dataset.deact))));
+    }
+
+    // Scopes default to all four: a connection that cannot do something fails at 3am in the
+    // chat service's logs, not here, so the safe default is "can", and narrowing is a choice.
+    async function credCreateModal() {
+      const tenants = await credActiveTenants();
+      const scopeRows = CRED_SCOPES.map(([s, k]) =>
+        `<label class="inline" style="gap:8px; margin:8px 0 0"><input type="checkbox" data-scope="${s}" checked /> <span><code>${s}</code> — ${esc(t(k))}</span></label>`).join('');
+      const wsRows = tenants.length ? tenants.map(x =>
+        `<label class="inline" style="gap:8px; margin:8px 0 0"><input type="checkbox" data-ws="${esc(x.id)}" /> <span>${esc(x.name)} <code>${esc(x.slug)}</code></span></label>`).join('')
+        : `<p class="hint">${esc(t('cred.workspaces.none'))}</p>`;
+      const bg = showModal(`<h3 style="margin-top:0">${esc(t('cred.new'))}</h3>
+        <label>${esc(t('f.name'))}</label><input id="ccName" maxlength="120" placeholder="${esc(t('cred.name.ph'))}" />
+        <label>${esc(t('cred.scopes'))}</label>${scopeRows}
+        <label>${esc(t('cred.workspaces'))}</label><div style="max-height:220px; overflow:auto">${wsRows}</div>
+        <p class="hint">${esc(t('cred.workspaces.hint'))}</p>
+        <div class="msg" id="ccMsg"></div>
+        <div class="actions"><button class="ghost" id="ccCancel">${esc(t('btn.cancel'))}</button>
+          <button class="primary" id="ccCreate">${esc(t('cred.create'))}</button></div>`, '560px');
+      const name = bg.querySelector('#ccName'), m = bg.querySelector('#ccMsg'), b = bg.querySelector('#ccCreate');
+      bg.querySelector('#ccCancel').addEventListener('click', () => bg.remove());
+      const submit = async () => {
+        const nm = name.value.trim();
+        const scopes = [...bg.querySelectorAll('input[data-scope]:checked')].map(i => i.dataset.scope);
+        const grants = [...bg.querySelectorAll('input[data-ws]:checked')].map(i => i.dataset.ws);
+        if (!nm) { m.className = 'msg err'; m.textContent = t('cred.name.required'); name.focus(); return; }
+        if (!scopes.length) { m.className = 'msg err'; m.textContent = t('cred.scopes.required'); return; }
+        b.disabled = true;
+        try {
+          const d = await credCall(CRED_URL, { method: 'POST', headers: jhdr(), body: JSON.stringify({ name: nm, scopes, grants }) }, m);
+          if (!d) return;
+          bg.remove(); CQ.toast(t('cred.created'), 'ok');
+          credRevealModal(d, nm, 0);
+          loadConnections();
+        } finally { b.disabled = false; }
+      };
+      b.addEventListener('click', submit);
+      name.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+      name.focus();
+    }
+
+    // The only place a key is ever in the clear. `d.warning` is the server's own sentence
+    // about that and is preferred; the built-in wording covers an api that sends none. The
+    // header snippet is here, next to the key, because the operator pastes both into the
+    // chat service's config in the same minute — a separate docs page would be one more tab.
+    function credRevealModal(d, name, overlapDays) {
+      const key = d.api_key || '';
+      const mono = 'font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+      const snippet = [`X-CQ-Key: ${esc(key)}`,
+        `X-CQ-Tenant: &lt;${esc(t('cred.snippet.tenant'))}&gt;`,
+        `X-CQ-Expect-Tenant: &lt;${esc(t('cred.snippet.same'))}&gt;`].join('\n');
+      const bg = showModal(`<h3 style="margin-top:0">${esc(t('cred.reveal.title'))}</h3>
+        <p class="hint" style="margin-top:-6px">${esc(name)}</p>
+        <div class="inline" style="gap:8px">
+          <input id="crKey" readonly value="${esc(key)}" style="${mono}; flex:1" />
+          <button class="ghost" id="crCopy" style="flex:0 0 auto">${esc(t('pb.copy'))}</button>
+        </div>
+        <p class="msg err" style="margin-top:10px">${esc(d.warning || t('cred.reveal.once'))}</p>
+        ${overlapDays ? `<p class="hint">${esc(t('cred.reveal.overlap').replace('{days}', () => String(overlapDays)))}</p>` : ''}
+        <p class="hint">${esc(t('cred.reveal.headers'))}</p>
+        <pre class="tx" style="margin:0; ${mono}">${snippet}</pre>
+        <p class="hint">${esc(t('cred.reveal.serverside'))}</p>
+        <div class="actions"><button class="primary" id="crClose">${esc(t('pb.close'))}</button></div>`, '640px');
+      const inp = bg.querySelector('#crKey');
+      inp.addEventListener('focus', () => inp.select());
+      bg.querySelector('#crCopy').addEventListener('click', async () => {
+        inp.select();                                   // a failed copy still leaves the key selected
+        const ok = await copyText(key);
+        CQ.toast(ok ? t('pb.copied') : t('cred.copyfail'), ok ? 'ok' : 'err');
+      });
+      bg.querySelector('#crClose').addEventListener('click', () => bg.remove());
+    }
+
+    // Rotation is not dangerous — the old key keeps working through the overlap — so the
+    // confirm is the plain kind; the reveal that follows is the whole point of the click.
+    async function credRotate(x) {
+      if (!x) return;
+      const msg = t('cred.rotate.confirm').replace('{name}', () => credName(x)).replace('{days}', () => String(CRED_OVERLAP_DAYS));
+      if (!(await CQ.confirm(msg, { ok: t('btn.rotate'), danger: false }))) return;
+      const d = await credCall(`${CRED_URL}/${encodeURIComponent(x.id)}/rotate?overlap_days=${CRED_OVERLAP_DAYS}`, { method: 'POST', headers: hdr() });
+      if (!d) return;
+      CQ.toast(t('cred.rotated'), 'ok');
+      credRevealModal(d, credName(x), d.overlap_days ?? CRED_OVERLAP_DAYS);
+      loadConnections();
+    }
+
+    async function credDeactivate(x) {
+      if (!x) return;
+      if (!(await CQ.confirm(t('cred.deactivate.confirm').replace('{name}', () => credName(x)), { ok: t('cred.deactivate'), danger: true }))) return;
+      const d = await credCall(`${CRED_URL}/${encodeURIComponent(x.id)}`, { method: 'DELETE', headers: hdr() });
+      if (!d) return;
+      CQ.toast(t('cred.deactivated'), 'ok'); loadConnections();
+    }
+
+    // Only workspaces that are active AND not already granted are offered: re-granting is a
+    // server error the operator would otherwise have to read, and an inactive workspace
+    // cannot be served no matter what the grant says.
+    async function credGrantModal(x) {
+      if (!x) return;
+      const granted = new Set(credActiveGrants(x).map(g => String(g.client_id)));
+      const free = (await credActiveTenants()).filter(w => !granted.has(String(w.id)));
+      const body = free.length
+        ? `<label>${esc(t('cred.grant.pick'))}</label><select id="agWs">${free.map(w => `<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.slug)})</option>`).join('')}</select>`
+        : `<p class="hint">${esc(t('cred.grant.allgranted'))}</p>`;
+      const bg = showModal(`<h3 style="margin-top:0">${esc(t('cred.grant.title').replace('{name}', () => credName(x)))}</h3>
+        ${body}
+        <div class="msg" id="agMsg"></div>
+        <div class="actions"><button class="ghost" id="agCancel">${esc(t('btn.cancel'))}</button>
+          ${free.length ? `<button class="primary" id="agOk">${esc(t('cred.grant.submit'))}</button>` : ''}</div>`);
+      CQ.enhanceSelects(bg);
+      bg.querySelector('#agCancel').addEventListener('click', () => bg.remove());
+      const ok = bg.querySelector('#agOk');
+      if (ok) ok.addEventListener('click', async () => {
+        ok.disabled = true;
+        try {
+          const d = await credCall(`${CRED_URL}/${encodeURIComponent(x.id)}/grants`, { method: 'POST', headers: jhdr(),
+            body: JSON.stringify({ tenant: bg.querySelector('#agWs').value }) }, bg.querySelector('#agMsg'));
+          if (!d) return;
+          bg.remove(); CQ.toast(t('cred.grant.added'), 'ok'); loadConnections();
+        } finally { ok.disabled = false; }
+      });
+    }
+
+    async function credRemoveGrant(x, clientId) {
+      if (!x) return;
+      const g = credActiveGrants(x).find(g => String(g.client_id) === String(clientId));
+      const msg = t('cred.grant.remove.confirm').replace('{ws}', () => g ? credWsLabel(g) : clientId).replace('{name}', () => credName(x));
+      if (!(await CQ.confirm(msg, { ok: t('btn.remove'), danger: true }))) return;
+      const d = await credCall(`${CRED_URL}/${encodeURIComponent(x.id)}/grants/${encodeURIComponent(clientId)}`, { method: 'DELETE', headers: hdr() });
+      if (!d) return;
+      CQ.toast(t('cred.grant.removed'), 'ok'); loadConnections();
+    }
+
+    $('newConnBtn').addEventListener('click', credCreateModal);
+    $('reloadConn').addEventListener('click', loadConnections);
+    // Loaded when the tab opens, like the kill switch beside it, rather than in loadAll():
+    // this is the least-visited card in the console and nothing else depends on its data.
+    document.querySelector('.tab[data-tab="bot"]').addEventListener('click', loadConnections);
 
     boot();
   </script>

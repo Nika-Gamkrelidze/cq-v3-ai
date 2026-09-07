@@ -117,3 +117,14 @@ The analysis itself never partially fails silently — a failed job has `status:
 - Audio is **not stored** after processing; results are retained. If the service restarts mid-job,
   that job is marked `error` — resubmit it (idempotency makes this safe).
 - Everything is strictly tenant-isolated: you can only ever see your own KB, jobs, and rubric.
+
+## Chat / bot API
+
+The conversational surface — the public **autopilot** (`POST /v1/chat/answer`), the operator
+**copilot** (`POST /v1/chat/turns` → `GET /v1/chat/suggestions/{suggest_ref}`, `POST /v1/chat/feedback`)
+and the conversation **mirror** (`conversations:sync`, `DELETE /v1/chat/conversations/{external_ref}`) —
+lives under `/v1/chat/` and is **not** reachable with the `X-API-Key` above. It uses a separate,
+scoped **integration credential** (`X-CQ-Key: cqi_<key_id>.<secret>` + `X-CQ-Tenant`) that the CQ
+superadmin issues to the chat service and grants per tenant; that credential, in turn, cannot
+reach anything on this page. Contract, headers, envelope, status codes and the rollout checklist:
+**[`docs/CHAT_INTEGRATION.md`](CHAT_INTEGRATION.md)**.

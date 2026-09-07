@@ -314,15 +314,9 @@
             </div>
           </div>
           <div class="msg err hidden" id="botLoadMsg"></div>
-        </div>
-
-        <!-- Shown instead of the config form while the bot has not launched (BOT_COMING_SOON). -->
-        <div class="card hidden" id="botSoon">
-          <div class="soon-card" style="border:none; padding:44px 20px">
-            <span class="soon-emoji">🤖</span>
-            <h3 data-i18n="bot.soon.title"></h3>
-            <p data-i18n="bot.soon.desc"></p>
-          </div>
+          <!-- Shown while `/chat/config` answers with is_default: the values on screen are the
+               shared default, not this workspace's bot, and saving is what forks it. -->
+          <div class="msg hidden" id="botDefaultNote" data-i18n="bot.isdefault"></div>
         </div>
 
         <div id="botForm" class="hidden">
@@ -379,13 +373,35 @@
             <div class="row">
               <div><label data-i18n="bot.cap.tenant"></label><input id="b_cap_tenant" type="number" min="0" /></div>
               <div><label data-i18n="bot.cap.enduser"></label><input id="b_cap_enduser" type="number" min="0" /></div>
+              <div><label data-i18n="bot.cap.answer_tenant"></label><input id="b_cap_answer_tenant" type="number" min="0" /></div>
+              <div><label data-i18n="bot.cap.answer_enduser"></label><input id="b_cap_answer_enduser" type="number" min="0" /></div>
             </div>
+            <div class="hint" data-i18n="bot.cap.hint"></div>
           </div>
 
           <!-- The refusal-vs-general-knowledge choice, stated as the risk it is. Off by default. -->
           <div class="card">
             <label class="inline" style="gap:8px"><input type="checkbox" id="b_general" style="width:auto" /> <span data-i18n="bot.general"></span><button class="tip" data-tip-i18n="bot.general.risk"></button></label>
             <label class="inline" style="gap:8px; margin-top:14px"><input type="checkbox" id="b_handoff" style="width:auto" /> <span data-i18n="bot.handoff"></span><button class="tip" data-tip-i18n="bot.handoff.hint"></button></label>
+          </div>
+
+          <!-- The disclosure line is appended by code after generation, so it is the one piece
+               of bot copy a customer cannot talk the model out of. Empty text means the
+               built-in wording; "off" is for channels whose own interface already says "bot". -->
+          <div class="card">
+            <h3><span data-i18n="bot.disclosure"></span><button class="tip" data-tip-i18n="bot.disclosure.hint"></button></h3>
+            <label data-i18n="bot.disclosure.mode"></label>
+            <select id="b_disclosure_mode">
+              <option value="first" data-i18n="bot.disclosure.first"></option>
+              <option value="always" data-i18n="bot.disclosure.always"></option>
+              <option value="off" data-i18n="bot.disclosure.off"></option>
+            </select>
+            <div class="row stack-md" style="margin-top:14px">
+              <div><label data-i18n="bot.lang.en"></label><textarea id="b_disc_en"></textarea></div>
+              <div><label data-i18n="bot.lang.ka"></label><textarea id="b_disc_ka"></textarea></div>
+              <div><label data-i18n="bot.lang.ru"></label><textarea id="b_disc_ru"></textarea></div>
+            </div>
+            <div class="hint" data-i18n="bot.disclosure.text"></div>
           </div>
 
           <div class="card">
@@ -575,7 +591,7 @@
     document.addEventListener('cq:lang', () => { if (!$('app').classList.contains('hidden')) {
       // The custom <select> paints its own trigger from option text, so applyI18n alone
       // leaves it showing the previous language until it is re-rendered.
-      ['kfStatus','kfVis','kChunkDoc'].forEach(id => CQ.syncSelect($(id)));
+      ['kfStatus','kfVis','kChunkDoc','b_disclosure_mode'].forEach(id => CQ.syncSelect($(id)));
       kbLoad(); if ($('panel-history').classList.contains('active')) loadHistory();
       if ($('panel-health').classList.contains('active')) loadCuration();
       if (scLoaded) { scReadDom(); scRenderDims(); scShowVersion(); } // relabel, keep unsaved edits
@@ -1693,16 +1709,28 @@
     });
 
     // ---- BOT: the tenant's own autopilot configuration ---------------------------------
-    // Reads/writes `chat_configs` through the tenant-scoped mirror of the superadmin route
-    // (`/admin/chat/{tenant_id}/config`), exactly as `/scoring/config` mirrors its admin twin.
-    // If that route is not deployed yet the tab says so rather than throwing: a tenant seeing
-    // a dead tab must be told it is the server, not their browser.
+    // Reads/writes `chat_configs` through `/chat/config`, the tenant-scoped mirror of the
+    // superadmin route (`/admin/chat/{tenant_id}/config`), exactly as `/scoring/config` mirrors
+    // its admin twin. GET answers the merged config plus `is_default` (this workspace has never
+    // saved its own bot) and `killed` (the operator's kill switch). A 404/405 is still named as
+    // the server's absence rather than thrown: a tenant seeing a dead tab must be told it is
+    // the server, not their browser.
     const BOTCFG = `${API}/chat/config`;
-    // The bot has not launched yet: the tab shows a "Coming soon" card instead of the config
-    // form. Flip to false when the bot ships — everything below is wired and ready.
-    const BOT_COMING_SOON = true;
     const BOT_LANGS = ['en','ka','ru'];
+    const BOT_DISCLOSURE_MODES = ['first','always','off'];
     let botCfg = null;
+    CQ.enhanceSelects($('panel-bot'));
+
+    // Members see what the bot is doing without a Save button that would only 403 — the
+    // server's `may_configure_workspace` is the policy, this stops the UI promising more.
+    function botApplyRole() {
+      const ro = !canConfigure();
+      $('saveBot').classList.toggle('hidden', ro);
+      $('botForm').querySelectorAll('input, select, textarea').forEach(el => { el.disabled = ro; });
+      // The custom <select> paints a button over the native control, so the control's own
+      // `disabled` never reaches what the user actually clicks.
+      $('botForm').querySelectorAll('.cq-select-trigger').forEach(b => { b.disabled = ro; });
+    }
 
     function botStatePill() {
       const el = $('botState');
@@ -1733,23 +1761,26 @@
       $('b_maxchars').value = s.max_reply_chars ?? 1200;
       $('b_cap_tenant').value  = limits.tenant_per_minute ?? '';
       $('b_cap_enduser').value = limits.enduser_per_hour ?? '';
+      $('b_cap_answer_tenant').value  = limits.answer_tenant_per_minute ?? '';
+      $('b_cap_answer_enduser').value = limits.answer_enduser_per_hour ?? '';
       // Never `??`-default this to true: the safe value is false and a missing key means false.
       $('b_general').checked = s.allow_general_knowledge === true;
       $('b_handoff').checked = s.handoff_summary !== false;
+      // An unknown mode falls back to the engine's own default rather than a blank trigger.
+      $('b_disclosure_mode').value = BOT_DISCLOSURE_MODES.includes(s.disclosure_mode) ? s.disclosure_mode : 'first';
+      CQ.syncSelect($('b_disclosure_mode'));
+      const disc = (s.disclosure && typeof s.disclosure === 'object') ? s.disclosure : {};
+      BOT_LANGS.forEach(l => { $('b_disc_'+l).value = typeof disc[l] === 'string' ? disc[l] : ''; });
       $('botVersion').textContent = botCfg.version ? `${t('bot.version')} ${botCfg.version}` : '';
+      $('botDefaultNote').classList.toggle('hidden', botCfg.is_default !== true);
       $('botNeedPublic').classList.add('hidden');
       botStatePill();
     }
 
     $('reloadBot').addEventListener('click', loadBot);
     async function loadBot() {
-      if (BOT_COMING_SOON) {
-        $('botSoon').classList.remove('hidden');
-        $('botForm').classList.add('hidden'); $('botLoadMsg').classList.add('hidden');
-        $('botState').classList.add('hidden'); $('reloadBot').classList.add('hidden');
-        return;
-      }
       const m = $('botLoadMsg'); m.classList.add('hidden'); m.textContent = '';
+      $('botDefaultNote').classList.add('hidden');
       let d = null;
       try {
         const r = await apiFetch(BOTCFG, { headers: authH() });
@@ -1762,6 +1793,7 @@
       }
       if (!d || typeof d !== 'object') { m.classList.remove('hidden'); m.textContent = t('bot.loadfail'); return; }
       $('botForm').classList.remove('hidden');
+      botApplyRole();
       fillBot(d);
     }
 
@@ -1802,6 +1834,13 @@
       const limits = {};
       if (optInt('b_cap_tenant') !== undefined) limits.tenant_per_minute = optInt('b_cap_tenant');
       if (optInt('b_cap_enduser') !== undefined) limits.enduser_per_hour = optInt('b_cap_enduser');
+      if (optInt('b_cap_answer_tenant') !== undefined) limits.answer_tenant_per_minute = optInt('b_cap_answer_tenant');
+      if (optInt('b_cap_answer_enduser') !== undefined) limits.answer_enduser_per_hour = optInt('b_cap_answer_enduser');
+      // Only non-empty strings are sent: to the engine a key that is present but "" means
+      // "suppress the disclosure in this language", which is not what clearing a box means
+      // here — that asks for the built-in wording back, so the key must be absent.
+      const disclosure = {};
+      BOT_LANGS.forEach(l => { const v = $('b_disc_'+l).value.trim(); if (v) disclosure[l] = v; });
       const body = {
         persona: $('b_persona').value.trim() || null,
         greeting, refusal_copy: refusal, languages: langs,
@@ -1814,7 +1853,8 @@
           escalation_keywords: $('b_escalation').value.split(',').map(s => s.trim()).filter(Boolean),
           allow_general_knowledge: $('b_general').checked,
           handoff_summary: $('b_handoff').checked,
-          limits },
+          disclosure_mode: BOT_DISCLOSURE_MODES.includes($('b_disclosure_mode').value) ? $('b_disclosure_mode').value : 'first',
+          disclosure, limits },
       };
       const b = $('saveBot'); b.disabled = true; b.innerHTML = '<span class="spinner"></span>';
       try {

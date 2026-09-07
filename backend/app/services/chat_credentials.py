@@ -202,9 +202,10 @@ def validate_scopes(scopes: list[str]) -> list[str]:
 async def issue(name: str, scopes: list[str], grants: list[str]) -> tuple[str, str]:
     """Create an integration + its first secret + its grant rows. -> (key_id, plaintext ONCE).
 
-    `grants` are tenant selectors (uuid or slug). P1 callers pass exactly one — the single-grant
-    rule is enforced in the router, not here, so the data model stays capable of multi-tenant
-    credentials without a code change later.
+    `grants` are tenant selectors (uuid or slug), one or more. The P1 pilot capped this at one
+    in the router; since 2026-09-08 one credential legitimately carries many (see
+    routers/admin.py::create_integration), and `add_grant` / `remove_grant` below change the
+    set after issuance without minting a new key.
     """
     scopes = validate_scopes(scopes)
     sel = [g.strip() for g in (grants or []) if (g or "").strip()]
@@ -287,6 +288,77 @@ async def deactivate(integration_id: str) -> bool:
                 "WHERE integration_id = $1 AND revoked_at IS NULL",
                 integration_id,
             )
+    return updated.endswith(" 1")
+
+
+class UnknownIntegration(ValueError):
+    """The integration in the request PATH does not exist — a 404, where every other ValueError
+    raised here describes the request BODY and is a 400. Kept a ValueError so callers that only
+    care about "the operator asked for something impossible" still catch it in one clause."""
+
+
+async def add_grant(integration_id: str, tenant_sel: str, scopes: list[str] | None = None) -> dict:
+    """Let an existing integration act for one more tenant. -> the grant as list_integrations shows it.
+
+    Onboarding a tenant onto the chat service is this one row — no new key, no redeploy of the
+    chat site. The grant's scopes may only NARROW the integration's: a request for a scope the
+    integration itself does not hold is dropped rather than honoured, because _RESOLVE_SQL
+    intersects the two anyway and a stored grant that promises more than the key can deliver
+    would mislead whoever reads the operator view.
+
+    Re-granting a tenant that already has a row (active or revoked) re-activates it in place via
+    ON CONFLICT, so remove_grant → add_grant is a clean round trip and the pair is idempotent.
+    Raises UnknownIntegration for the integration, ValueError for the tenant or the scopes.
+    """
+    sel = (tenant_sel or "").strip()
+    if not sel:
+        raise ValueError("A tenant selector (uuid or slug) is required.")
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            held = await conn.fetchval(
+                "SELECT scopes FROM integrations WHERE id = $1", integration_id)
+            if held is None:
+                raise UnknownIntegration("Unknown integration")
+            held = list(held or [])
+            if scopes is None:
+                effective = held
+            else:
+                wanted = validate_scopes(scopes)
+                effective = [s for s in wanted if s in held]
+                if not effective:
+                    raise ValueError("None of the requested scopes are held by this integration.")
+            tenant = await conn.fetchrow(
+                "SELECT id, slug, name FROM clients WHERE (id::text = $1 OR slug = $1) AND is_active",
+                sel)
+            if not tenant:
+                raise ValueError(f"Unknown or inactive tenant: {sel[:40]}")
+            row = await conn.fetchrow(
+                """INSERT INTO integration_grants (integration_id, client_id, scopes, created_by)
+                   VALUES ($1, $2, $3, 'superadmin')
+                   ON CONFLICT (integration_id, client_id)
+                   DO UPDATE SET scopes = EXCLUDED.scopes, is_active = true
+                   RETURNING client_id, scopes, is_active""",
+                integration_id, tenant["id"], effective,
+            )
+    log.info("granted integration %s -> tenant %s (%s)", integration_id, tenant["slug"], effective)
+    return {"client_id": str(row["client_id"]), "slug": tenant["slug"], "name": tenant["name"],
+            "scopes": list(row["scopes"] or []), "is_active": bool(row["is_active"])}
+
+
+async def remove_grant(integration_id: str, client_id: str) -> bool:
+    """Stop an integration acting for one tenant. False when no such grant row exists.
+
+    Deactivate, never delete — the row is the audit trail of who was ever reachable with this
+    key, the same reasoning as deactivate(). _RESOLVE_SQL joins on g.is_active, so this takes
+    effect on the very next request; there is no cache to clear. The other grants, and the key
+    itself, keep working — that is the whole point of revoking per tenant instead of rotating.
+    """
+    async with pool().acquire() as conn:
+        updated = await conn.execute(
+            """UPDATE integration_grants SET is_active = false
+                WHERE integration_id = $1 AND client_id = $2""",
+            integration_id, client_id,
+        )
     return updated.endswith(" 1")
 
 

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routers import (admin, analyze, auth, calls, chat, convert, curation, kb,
+from .routers import (admin, analyze, auth, calls, chat, chat_config, convert, curation, kb,
                      kb_admin, partner, recordings, scoring, sentiment, tenants, tts)
 from .services import analysis
 from .services.migrate import run_startup_migrations
@@ -69,6 +69,10 @@ app.include_router(kb_admin.router)
 app.include_router(scoring.router)
 app.include_router(sentiment.router)
 app.include_router(tenants.router)
+# The portal's own bot settings (GET/PUT /chat/config), the tenant twin of
+# /admin/chat/{tenant_id}/config. Root only: the integration surface has its own read-only
+# /v1/chat/config in chat.router and must not gain a write path through a prefix.
+app.include_router(chat_config.router)
 # Call Workbench: /recordings + /summaries. Root only, never under /v1 — it admits registered
 # users and anonymous visitors, neither of which belongs on the partner surface.
 app.include_router(recordings.router)

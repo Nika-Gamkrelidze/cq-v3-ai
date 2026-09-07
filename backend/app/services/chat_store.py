@@ -18,19 +18,24 @@ followed by a read, and reports `is_new=False` on replay so callers can skip the
 asyncpg hands back jsonb as `str` unless a codec is registered (the house workaround, see
 settings_store._load_key), so this module decodes on read and json.dumps on write, always.
 """
+import copy
 import json
 import logging
+import time
 import uuid
+from datetime import datetime, timezone
 
 import asyncpg
 
 from ..db import pool
+from . import settings_store
 
 log = logging.getLogger("cq")
 
-# Returned when a tenant has never saved a chat config. Centralised here on purpose:
-# gate() and the routers both read min_score/min_hits, and two independently invented
-# default sets would mean the refusal threshold silently differs between the copilot
+# The code floor under every chat config: the operator's stored default (see
+# get_default_chat_config) lays over this, and a tenant's own row lays over that. Centralised
+# here on purpose: gate() and the routers both read min_score/min_hits, and two independently
+# invented default sets would mean the refusal threshold silently differs between the copilot
 # and the public autopilot. autopilot_enabled stays False — a model speaking to an end
 # customer with no human in the loop is opt-in, per tenant, forever.
 CHAT_CONFIG_DEFAULTS: dict = {
@@ -493,17 +498,269 @@ async def reap_stale_suggestions(older_than_s: int = STALE_SUGGESTION_S) -> int:
 
 
 # ---------------------------------------------------------------------------
+# The platform-wide DEFAULT chat config — what every tenant inherits
+#
+# CHAT_CONFIG_DEFAULTS above is code, and code ships with a deploy. The baseline a new
+# workspace starts from (refusal copy, disclosure line, thresholds, rate caps) is a product
+# decision the operator revises far more often than we redeploy, so — exactly like the default
+# scoring rubric — it lives in one `app_settings` blob the console edits. It is NOT tenant
+# data: it goes through settings_store rather than raw SQL here, because every statement in
+# this module is required to name client_id (tests/test_chat_store_sql.py) and there is no
+# tenant to name.
+#
+# The 5 s cache mirrors the kill switch, and for the same reason: get_chat_config() sits in
+# front of every chat turn, and a value that changes a few times a year must not cost a DB
+# round-trip per message — while a superadmin who just saved must see it land within seconds.
+# ---------------------------------------------------------------------------
+DEFAULT_CHAT_CONFIG_KEY = "default_chat_config"
+DEFAULT_CHAT_CONFIG_TTL_S = 5.0
+
+SUPPORTED_LANGUAGES = ("en", "ka", "ru")
+# Kept literal rather than imported from chat_prompts: that module pulls in retrieval, and a
+# persistence layer importing the prompt layer for one three-word tuple is the wrong direction.
+_DISCLOSURE_MODES = ("first", "always", "off")
+# The knobs lifted out of `settings` to the top level. Only these — an arbitrary settings key
+# must never be able to shadow a structural field like `autopilot_enabled` or `languages`.
+_LIFTED_KNOBS = ("min_score", "min_hits", "top_k", "suggestion_count")
+
+# (fetched_at, value). Per-process, which is correct for a single uvicorn worker.
+_default_cache: tuple[float, dict] | None = None
+
+
+def _lang_map(value, field: str) -> dict:
+    """Validate the `{lang: text}` shape greeting, refusal_copy and settings.disclosure share.
+
+    Empty strings are kept on purpose: for disclosure "present but empty" is how a tenant
+    says "this channel discloses in its own chrome", and the operator may want the same
+    suppression as the default.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object keyed by language (en, ka, ru)")
+    out: dict = {}
+    for k, v in value.items():
+        lang = str(k).strip().lower()
+        if lang not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"{field}.{k}: unsupported language (expected one of en, ka, ru)")
+        if v is None:
+            v = ""
+        if not isinstance(v, str):
+            raise ValueError(f"{field}.{lang} must be a string")
+        out[lang] = v
+    return out
+
+
+def _as_int(value, field: str, lo: int, hi: int | None = None) -> int:
+    """An integer in [lo, hi]. Bools are refused even though python calls them ints — a
+    `true` landing in top_k is a form-wiring bug, not a request for one passage."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+        raise ValueError(f"{field} must be a whole number")
+    n = int(value)
+    if n < lo or (hi is not None and n > hi):
+        rng = f"at least {lo}" if hi is None else f"between {lo} and {hi}"
+        raise ValueError(f"{field} must be {rng}")
+    return n
+
+
+def _validated_default_settings(settings) -> dict:
+    """The `settings` blob of the default, checked key by key.
+
+    Unknown keys pass through untouched — the engine reads settings through `_cfg` and a
+    validator that only knows today's keys must not become the reason tomorrow's knob needs a
+    deploy. Known keys are range-checked because a default is inherited by EVERY tenant: a
+    typo'd min_score of 35 would silently refuse every question on every bot at once.
+    """
+    if settings is None:
+        return {}
+    if not isinstance(settings, dict):
+        raise ValueError("settings must be an object")
+    out = dict(settings)
+    # A default can never switch a bot on. Stripped rather than rejected so a form that
+    # round-trips the whole config shape does not have to special-case one field.
+    out.pop("autopilot_enabled", None)
+
+    if out.get("min_score") is not None:
+        v = out["min_score"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= float(v) <= 1:
+            raise ValueError("settings.min_score must be a number between 0 and 1")
+        out["min_score"] = float(v)
+    if out.get("min_hits") is not None:
+        out["min_hits"] = _as_int(out["min_hits"], "settings.min_hits", 0)
+    if out.get("top_k") is not None:
+        out["top_k"] = _as_int(out["top_k"], "settings.top_k", 1, 50)
+    if out.get("suggestion_count") is not None:
+        out["suggestion_count"] = _as_int(out["suggestion_count"], "settings.suggestion_count", 1, 5)
+    if out.get("max_reply_chars") is not None:
+        out["max_reply_chars"] = _as_int(out["max_reply_chars"], "settings.max_reply_chars",
+                                         100, 5000)
+    if out.get("limits") is not None:
+        limits = out["limits"]
+        if not isinstance(limits, dict):
+            raise ValueError("settings.limits must be an object")
+        out["limits"] = {str(k): _as_int(v, f"settings.limits.{k}", 0)
+                         for k, v in limits.items() if v is not None}
+    if out.get("disclosure_mode") is not None:
+        mode = str(out["disclosure_mode"]).strip().lower()
+        if mode not in _DISCLOSURE_MODES:
+            raise ValueError("settings.disclosure_mode must be one of first, always, off")
+        out["disclosure_mode"] = mode
+    if out.get("disclosure") is not None:
+        out["disclosure"] = _lang_map(out["disclosure"], "settings.disclosure")
+    for flag in ("allow_general_knowledge", "handoff_summary"):
+        if out.get(flag) is not None and not isinstance(out[flag], bool):
+            raise ValueError(f"settings.{flag} must be true or false")
+    if out.get("escalation_keywords") is not None:
+        kws = out["escalation_keywords"]
+        if not isinstance(kws, list) or not all(isinstance(k, str) for k in kws):
+            raise ValueError("settings.escalation_keywords must be a list of strings")
+        out["escalation_keywords"] = [k.strip() for k in kws if k.strip()]
+    return out
+
+
+def _validated_languages(languages) -> list[str]:
+    if not isinstance(languages, (list, tuple)):
+        raise ValueError("languages must be a list")
+    langs: list[str] = []
+    for x in languages:
+        lang = str(x).strip().lower()
+        if lang and lang not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"languages: unsupported language {lang!r} (expected en, ka, ru)")
+        if lang and lang not in langs:
+            langs.append(lang)
+    if not langs:
+        raise ValueError("languages must include at least one of en, ka, ru")
+    return langs
+
+
+def _default_config_from(stored: dict) -> dict:
+    """CHAT_CONFIG_DEFAULTS with the stored default blob laid over it — one flat dict in the
+    same shape get_chat_config() returns, so the console can drive both from one form."""
+    stored = stored or {}
+    settings_blob = dict(stored.get("settings") or {})
+    cfg = dict(CHAT_CONFIG_DEFAULTS)
+    cfg.update({
+        "persona": stored.get("persona") or None,
+        "greeting": dict(stored.get("greeting") or {}),
+        "refusal_copy": dict(stored.get("refusal_copy") or {}),
+        "languages": list(stored.get("languages") or []) or list(CHAT_CONFIG_DEFAULTS["languages"]),
+        "canned": list(stored.get("canned") or []),
+        "settings": settings_blob,
+        "updated_at": stored.get("updated_at"),
+        "updated_by": stored.get("updated_by"),
+        "source": "stored" if stored else "builtin",
+        "is_default": True,
+    })
+    for knob in _LIFTED_KNOBS:
+        if settings_blob.get(knob) is not None:
+            cfg[knob] = settings_blob[knob]
+    # Pinned last, unconditionally: a default is not a tenant row. It has no version, it is
+    # not an "active" config, and it can never be the thing that lets a bot talk to the public.
+    cfg["version"] = 0
+    cfg["autopilot_enabled"] = False
+    cfg["is_active"] = False
+    return cfg
+
+
+async def get_default_chat_config(*, force: bool = False) -> dict:
+    """The baseline every tenant inherits, cached for 5 seconds.
+
+    `source` is "stored" once a superadmin has saved one and "builtin" before that, so the
+    console can say what it is showing. Returns a copy — get_chat_config() merges tenant
+    values into what it gets back, and a caller mutating the cached object would leak one
+    tenant's persona into the next tenant's request.
+    """
+    global _default_cache
+    now = time.monotonic()
+    if not force and _default_cache and (now - _default_cache[0]) < DEFAULT_CHAT_CONFIG_TTL_S:
+        return copy.deepcopy(_default_cache[1])
+    cfg = _default_config_from(await settings_store.get_blob(DEFAULT_CHAT_CONFIG_KEY))
+    _default_cache = (now, cfg)
+    return copy.deepcopy(cfg)
+
+
+async def set_default_chat_config(
+    *,
+    persona: str | None = None,
+    greeting: dict | None = None,
+    refusal_copy: dict | None = None,
+    languages: list[str] | None = None,
+    canned: list | None = None,
+    settings: dict | None = None,
+    updated_by: str = "superadmin",
+) -> dict:
+    """Replace the stored default and drop the cache. Raises ValueError with a message an
+    operator can act on; the router turns that into a 400.
+
+    There is deliberately no `autopilot_enabled` parameter: switching a public bot on is a
+    per-tenant act with its own guard (routers/admin.put_chat_config), and nothing that
+    applies to every workspace at once may do it.
+    """
+    global _default_cache
+    if persona is not None and not isinstance(persona, str):
+        raise ValueError("persona must be text")
+    if canned is not None and not isinstance(canned, list):
+        raise ValueError("canned must be a list")
+    blob = {
+        "persona": (persona or "").strip() or None,
+        "greeting": _lang_map(greeting, "greeting"),
+        "refusal_copy": _lang_map(refusal_copy, "refusal_copy"),
+        "languages": _validated_languages(languages if languages is not None
+                                          else CHAT_CONFIG_DEFAULTS["languages"]),
+        "canned": list(canned or []),
+        "settings": _validated_default_settings(settings),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": (updated_by or "superadmin").strip() or "superadmin",
+    }
+    await settings_store.set_blob(DEFAULT_CHAT_CONFIG_KEY, blob)
+    _default_cache = None
+    log.info("default chat config saved by %s", blob["updated_by"])
+    return await get_default_chat_config(force=True)
+
+
+def _merge_copy(default: dict, tenant: dict) -> dict:
+    """Per-language merge for greeting / refusal_copy: the tenant wins only where it actually
+    wrote something. A console form that saves three fields with one filled in must not
+    blank the other two languages back to nothing."""
+    out = dict(default or {})
+    for lang, text in (tenant or {}).items():
+        if isinstance(text, str) and text.strip():
+            out[lang] = text
+    return out
+
+
+def _merge_settings(default: dict, tenant: dict) -> dict:
+    """Tenant settings over the default's, with `limits` and `disclosure` merged one level
+    deeper — a tenant given a bespoke per-minute cap must keep inheriting the default's
+    per-hour one, and a tenant with Georgian disclosure copy must keep the default English.
+    A tenant's explicit None is "unset", as everywhere in settings_store, not a shadow."""
+    tenant = {k: v for k, v in (tenant or {}).items() if v is not None}
+    out = {**(default or {}), **tenant}
+    for key in ("limits", "disclosure"):
+        base, over = (default or {}).get(key), tenant.get(key)
+        if isinstance(base, dict) and isinstance(over, dict):
+            out[key] = {**base, **over}
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Per-tenant chat config
 # ---------------------------------------------------------------------------
 async def get_chat_config(client_id: str) -> dict:
-    """The active chat_configs row merged over CHAT_CONFIG_DEFAULTS. Never returns None.
+    """CHAT_CONFIG_DEFAULTS <- the stored default <- the tenant's active row. Never None.
 
     The tuning knobs the gate reads (min_score, min_hits, top_k, suggestion_count) live in
-    the row's `settings` jsonb and are lifted to the top level here, so callers see one flat
-    dict and no caller has to re-invent a threshold. A tenant with no config at all gets the
-    defaults — a fresh tenant must behave, not crash.
+    the `settings` jsonb and are lifted to the top level here, so callers see one flat dict
+    and no caller has to re-invent a threshold. They are lifted from the MERGED settings, so
+    a tenant that never touched min_score runs on the operator's default, not the code's.
+
+    The tenant row overrides field by field, never wholesale: an empty persona, an empty
+    greeting in one language or an absent settings key all mean "inherit". `autopilot_enabled`
+    is the one exception — it comes from the tenant row alone, because the default is pinned
+    off and nothing inherited may switch a public bot on. `is_default` tells the console
+    whether it is looking at inheritance or at the tenant's own saved version.
     """
-    cfg = dict(CHAT_CONFIG_DEFAULTS)
+    cfg = await get_default_chat_config()
     if not client_id:
         return cfg
     async with pool().acquire() as conn:
@@ -518,25 +775,28 @@ async def get_chat_config(client_id: str) -> dict:
             client_id)
     if not row:
         return cfg
-    settings_blob = _json(row["settings"]) or {}
+    merged_settings = _merge_settings(cfg["settings"], _json(row["settings"]) or {})
+    persona = (row["persona"] or "").strip()
+    # `source` describes the default layer (stored | builtin); next to a tenant's own row it
+    # would read as a claim about that row, so it stays only on inherited configs.
+    cfg.pop("source", None)
     cfg.update({
         "version": row["version"],
-        "persona": row["persona"],
-        "greeting": _json(row["greeting"]) or {},
-        "refusal_copy": _json(row["refusal_copy"]) or {},
-        "languages": list(row["languages"] or []) or CHAT_CONFIG_DEFAULTS["languages"],
-        "canned": _json(row["canned"]) or [],
+        "persona": persona or cfg["persona"],
+        "greeting": _merge_copy(cfg["greeting"], _json(row["greeting"]) or {}),
+        "refusal_copy": _merge_copy(cfg["refusal_copy"], _json(row["refusal_copy"]) or {}),
+        "languages": list(row["languages"] or []) or cfg["languages"],
+        "canned": (_json(row["canned"]) or []) or cfg["canned"],
         "autopilot_enabled": bool(row["autopilot_enabled"]),
-        "settings": settings_blob,
+        "settings": merged_settings,
         "is_active": bool(row["is_active"]),
+        "is_default": False,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
         "updated_by": row["updated_by"],
     })
-    # Lift only the known knobs: an arbitrary settings key must not be able to shadow a
-    # structural field like `autopilot_enabled` or `languages`.
-    for knob in ("min_score", "min_hits", "top_k", "suggestion_count"):
-        if settings_blob.get(knob) is not None:
-            cfg[knob] = settings_blob[knob]
+    for knob in _LIFTED_KNOBS:
+        if merged_settings.get(knob) is not None:
+            cfg[knob] = merged_settings[knob]
     return cfg
 
 

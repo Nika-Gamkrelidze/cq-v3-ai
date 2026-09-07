@@ -580,13 +580,15 @@ class IntegrationCreate(BaseModel):
 
 @router.post("/integrations", dependencies=[Depends(require_admin)], status_code=201)
 async def create_integration(body: IntegrationCreate):
-    # P1 issues SINGLE-GRANT credentials. The verify path is already multi-tenant and needs no
-    # change to support more, so the pilot's blast radius is one tenant — bounded by DATA (how
-    # many grant rows exist) rather than by code. Widening it later is deleting this check plus
-    # an INSERT, and it should be a deliberate decision with its own review, not the default.
-    if len(body.grants or []) != 1:
-        raise HTTPException(status_code=400,
-                            detail="Exactly one tenant grant per credential (P1 policy).")
+    # One credential, many tenants — decided 2026-09-08. The P1 pilot capped issuance at exactly
+    # one grant so its blast radius was one tenant, and its comment said widening would be "a
+    # deliberate decision with its own review". This is that decision: the owner's chat backend
+    # is ONE service acting for MANY CQ tenants, and N single-grant keys it has to route between
+    # is the failure mode the grant table was designed to avoid. What bounds the blast radius is
+    # unchanged — grant ROWS (data an operator adds and revokes below, one tenant at a time),
+    # not this check. The verify path never needed to change; only this ceiling did.
+    if not [g for g in (body.grants or []) if (g or "").strip()]:
+        raise HTTPException(status_code=400, detail="At least one tenant grant is required.")
     try:
         key_id, plaintext = await chat_credentials.issue(body.name, body.scopes, body.grants)
     except ValueError as exc:
@@ -618,6 +620,37 @@ async def deactivate_integration(integration_id: str):
     if not await chat_credentials.deactivate(integration_id):
         raise HTTPException(status_code=404, detail="Integration not found")
     return {"integration_id": integration_id, "is_active": False}
+
+
+class GrantCreate(BaseModel):
+    tenant: str                        # selector: uuid or clients.slug
+    scopes: list[str] | None = None    # None => the integration's own scopes; may only narrow
+
+
+@router.post("/integrations/{integration_id}/grants", dependencies=[Depends(require_admin)],
+             status_code=201)
+async def add_integration_grant(integration_id: str, body: GrantCreate):
+    """Onboard one more tenant onto an existing credential — a grant row, not a new key."""
+    try:
+        grant = await chat_credentials.add_grant(integration_id, body.tenant, body.scopes)
+    except chat_credentials.UnknownIntegration as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"integration_id": integration_id, "grant": grant}
+
+
+@router.delete("/integrations/{integration_id}/grants/{client_id}",
+               dependencies=[Depends(require_admin)])
+async def remove_integration_grant(integration_id: str, client_id: str):
+    """Revoke one tenant without touching the key or the other tenants on it.
+
+    Deactivates the row rather than deleting it (audit trail), and is effective on the next
+    request — the resolver joins on the grant's is_active with no cache in between.
+    """
+    if not await chat_credentials.remove_grant(integration_id, client_id):
+        raise HTTPException(status_code=404, detail="Grant not found")
+    return {"integration_id": integration_id, "client_id": client_id, "is_active": False}
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +705,46 @@ async def put_chat_config(tenant_id: str, body: ChatConfigBody):
             tenant_id, persona=body.persona, greeting=body.greeting,
             refusal_copy=body.refusal_copy, languages=body.languages, canned=body.canned,
             autopilot_enabled=body.autopilot_enabled, settings=body.settings,
+            updated_by="superadmin")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# The default chat config — the baseline every tenant inherits
+#
+# The chat-side twin of GET/PUT /admin/default-rubric: what a workspace runs on until it
+# saves a config of its own, editable from the console rather than by redeploying
+# CHAT_CONFIG_DEFAULTS. Superadmin-only for the same reasons as the per-tenant writer above,
+# doubly so because one save here changes every tenant that has not overridden the field.
+#
+# `/chat/default-config` has one path segment fewer than `/chat/{tenant_id}/config`, so the
+# two cannot be confused by the router whatever order they are registered in.
+# ---------------------------------------------------------------------------
+class DefaultChatConfigBody(BaseModel):
+    # Same shape as ChatConfigBody minus `autopilot_enabled`: a default can never switch a
+    # public bot on, so the field does not exist here rather than being ignored.
+    persona: str | None = None
+    greeting: dict = {}              # {en,ka,ru}
+    refusal_copy: dict = {}          # {en,ka,ru}
+    languages: list[str] = ["en", "ka", "ru"]
+    canned: list = []
+    settings: dict = {}
+
+
+@router.get("/chat/default-config", dependencies=[Depends(require_admin)])
+async def get_default_chat_config():
+    """`source` says whether the console is looking at a stored default or the built-in one.
+    Bypasses the 5 s cache: an operator who just saved must see their own save."""
+    return await chat_store.get_default_chat_config(force=True)
+
+
+@router.put("/chat/default-config", dependencies=[Depends(require_admin)])
+async def put_default_chat_config(body: DefaultChatConfigBody):
+    try:
+        return await chat_store.set_default_chat_config(
+            persona=body.persona, greeting=body.greeting, refusal_copy=body.refusal_copy,
+            languages=body.languages, canned=body.canned, settings=body.settings,
             updated_by="superadmin")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

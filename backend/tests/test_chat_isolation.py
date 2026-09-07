@@ -356,15 +356,13 @@ def test_admin_issuance_rejects_forbidden_scopes(api, seed):
     assert r.status_code == 400, r.text
     assert "kb:write" in r.text
 
-    # And the P1 single-grant policy: a credential must not be issued for two tenants at once.
-    r = api.post("/admin/integrations", headers=hdr,
-                 json={"name": "wide", "scopes": ["chat:turn"],
-                       "grants": [seed["a"]["slug"], seed["b"]["slug"]]})
-    assert r.status_code == 400, r.text
+    # (The P1 "exactly one grant" ceiling that used to be asserted here was lifted on 2026-09-08 —
+    # one credential now legitimately carries a grant row per tenant. test_chat_grants.py owns
+    # that behaviour, including what a revoked grant must and must not let through.)
 
-    # Nothing was created by either attempt.
+    # Nothing was created.
     assert sql(lambda c: c.fetchval(
-        "SELECT count(*) FROM integrations WHERE name = ANY($1::text[])", ["creep", "wide"])) == 0
+        "SELECT count(*) FROM integrations WHERE name = $1", "creep")) == 0
 
 
 def test_integration_principal_is_not_a_tenant_principal(api, seed):
