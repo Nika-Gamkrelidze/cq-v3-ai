@@ -16,7 +16,7 @@ export const en: Dict = {
   'nav.public': 'Public app',
   'nav.editor': 'Audio editor',
   'nav.console': 'Console',
-  'nav.kb': 'Knowledge Base',
+  'nav.kb': 'AI Services',
   'nav.workspace': 'My workspace',
   'nav.account': 'My account',
   'nav.usage': 'AI usage',
@@ -184,7 +184,7 @@ export const ka: Dict = {
   'nav.public': 'საჯარო აპლიკაცია',
   'nav.editor': 'აუდიო რედაქტორი',
   'nav.console': 'კონსოლი',
-  'nav.kb': 'ცოდნის ბაზა',
+  'nav.kb': 'AI სერვისები',
   'nav.workspace': 'ჩემი სამუშაო სივრცე',
   'nav.account': 'ჩემი ანგარიში',
   'nav.usage': 'AI-ს ხარჯვა',
@@ -352,7 +352,7 @@ export const ru: Dict = {
   'nav.public': 'Публичное приложение',
   'nav.editor': 'Аудиоредактор',
   'nav.console': 'Консоль',
-  'nav.kb': 'База знаний',
+  'nav.kb': 'AI Сервисы',
   // The one place this file deliberately differs from brand.js, which says 'Моё пространство'.
   // That reads as "my personal space"; the destination is the customer ORGANISATION's console,
   // shared with colleagues. check_i18n.py prints it as DRIFT — it is meant to stay on that list
