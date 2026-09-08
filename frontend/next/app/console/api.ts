@@ -191,19 +191,81 @@ export interface Integration {
   secrets: Secret[];
 }
 
-/** The voice-id → preview_url map the Integrations tab previews from, so a ▶ costs nothing.
-
-    It lives on the console shell rather than in either tab because BOTH invalidate it: a new
-    ElevenLabs key may be a different account, and saving the allowlist changes what is in the
-    list. See `page.tsx`. */
-export interface PreviewCache {
-  fetched: boolean;
-  map: Record<string, string>;
-}
-
 /** What a create or a rotate hands back — the one and only time the key exists in the clear. */
 export interface RevealedKey {
   api_key?: string;
   warning?: string;
   overlap_days?: number;
+}
+
+/* ---------------- the AI provider registry ---------------- */
+
+/** The three things a workspace's AI is resolved for, independently of one another. The list
+    itself (`CAPABILITIES`) lives in `logic.ts`, which the tests import and which therefore
+    cannot import a value from this file — see the note there. */
+export type Capability = 'llm' | 'stt' | 'tts';
+
+/** One provider's entry in `GET /admin/ai/providers`. `known_models` is "known, not
+    exhaustive": the form offers them first and accepts any id typed over them. */
+export interface AiProviderEntry {
+  label: string;
+  known_models: string[];
+  allows_base_url: boolean;
+  /** Extra per-connection settings keys the provider takes (`voice_id` for a TTS provider). */
+  fields: string[];
+}
+
+export type AiCatalog = Partial<Record<Capability, Record<string, AiProviderEntry>>>;
+
+export interface AiLastTest {
+  ok: boolean;
+  at?: string | null;
+  detail?: string | null;
+}
+
+/** A row of `GET /admin/ai/connections`. The key itself is NEVER in here — only whether one is
+    stored and the masked hint — which is why a form cannot pre-fill it and "save with an empty
+    box" cannot mean "clear it". */
+export interface AiConnection {
+  id: string;
+  name: string;
+  capability: Capability;
+  provider: string;
+  model: string | null;
+  base_url: string | null;
+  has_key: boolean;
+  key_hint: string | null;
+  settings: Record<string, unknown> | null;
+  is_active: boolean;
+  is_default: boolean;
+  last_test: AiLastTest | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+/** What a workspace is REALLY running on for one capability, as the resolver would answer. */
+export interface AiEffective {
+  /** byo | assigned | default | legacy — which layer of the chain answered. */
+  source: string;
+  provider: string;
+  model: string | null;
+  connection: { id: string; name: string } | null;
+}
+
+export interface AiAssignment {
+  connection_id: string | null;
+  effective: AiEffective;
+}
+
+/** `GET /admin/ai/assignments/{tenant_id}` — one entry per capability. */
+export type AiAssignments = Partial<Record<Capability, AiAssignment>>;
+
+/** The additive part of `GET /health` this console reads: whether provider keys are encrypted
+    at rest, and which connection is the default for each capability. */
+export interface HealthAi {
+  secrets?: 'encrypted' | 'plaintext' | string;
+  ai?: {
+    connections?: number;
+    defaults?: Partial<Record<Capability, string | null>>;
+  };
 }

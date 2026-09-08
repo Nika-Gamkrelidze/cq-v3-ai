@@ -16,8 +16,8 @@ import logging
 import time
 
 from ..db import pool
-from . import (attribution, claude, elevenlabs, factcheck, media, retrieval, scoring,
-               scoring_store, segments, sentiment, settings_store, transcription)
+from . import (attribution, claude, factcheck, media, retrieval, scoring, scoring_store,
+               segments, sentiment, settings_store, transcription, voice)
 
 log = logging.getLogger("cq")
 
@@ -155,9 +155,8 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
     # 1. Transcribe
     await _update(job_id, status="transcribing")
     try:
-        stt = await elevenlabs.transcribe(
-            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription.as_kwargs(stt_settings))
+        stt = await voice.transcribe(client_id, audio, filename, content_type,
+                                     transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001
         return await fail(f"Transcription failed: {exc}")
     transcript = (stt.get("text") or "")

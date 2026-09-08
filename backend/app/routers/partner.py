@@ -24,7 +24,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, Header,
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import analysis, elevenlabs, scoring, scoring_store, settings_store
+from ..services import analysis, scoring_store, voice
 from ..services import transcription as transcription_svc
 from ..services.auth import Principal, resolve_principal
 
@@ -99,8 +99,8 @@ async def account(p: Principal = Depends(require_tenant)):
 async def transcribe(file: UploadFile = File(...),
                      transcription: str | None = Form(default=None),
                      p: Principal = Depends(require_tenant)):
-    """Transcribe audio (ElevenLabs Scribe) without running analysis/scoring.
-    Returns the transcript, detected language, and per-word timings.
+    """Transcribe audio (on this workspace's speech-to-text provider) without running
+    analysis/scoring. Returns the transcript, detected language, and per-word timings.
 
     `transcription` is an optional JSON object (form field) overriding this workspace's
     transcription settings for this file only — see GET /transcription/config."""
@@ -111,11 +111,9 @@ async def transcribe(file: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="Empty upload")
     if len(audio) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="Audio file exceeds 100 MB limit")
-    cfg = await settings_store.get_effective()
     try:
-        stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription_svc.as_kwargs(stt_settings))
+        stt = await voice.transcribe(p.client_id, audio, file.filename, file.content_type,
+                                     transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
     return {"filename": file.filename, "language": stt.get("language_code"),

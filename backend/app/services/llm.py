@@ -1,4 +1,4 @@
-"""One front door for every Anthropic call: bounded, memoized, and metered.
+"""One front door for every text-model call: resolved, bounded, memoized, and metered.
 
 Why this file exists — three problems that every call site had independently:
 
@@ -13,9 +13,18 @@ Why this file exists — three problems that every call site had independently:
    request volume of audio, so starting to record it only once chat ships would leave a
    permanently blind period on cost. Every call through here writes an `llm_usage` row.
 
-Plus admission control: `_LLM_SEM` caps in-flight Anthropic calls, and a caller that cannot get
-a slot within a second gets an error (routers turn `LLMBusyError` into a 429) rather than
+Plus admission control: `_LLM_SEM` caps in-flight model calls, and a caller that cannot get a
+slot within a second gets an error (routers turn `LLMBusyError` into a 429) rather than
 queueing behind an unbounded backlog and timing out anyway.
+
+And now a fourth: **which provider.** A tenant may run on Anthropic, OpenAI or Gemini — a
+superadmin-assigned connection, or a key of their own — and the fifteen call sites must not
+know or care. `call_tool` and `stream_text` keep the signatures they always had; they ask
+`ai_resolve.resolve()` whose provider/model/key this call runs on, then hand the call to that
+provider's adapter (`providers/llm_*.py`). The adapters speak the wire formats; this file owns
+everything a call site can observe — the exceptions, the truncation check, the usage row.
+Anything that reads a key from settings and talks to a model WITHOUT going through here would
+silently bypass a tenant's configuration, so new AI code goes through `llm.py`.
 """
 import asyncio
 import contextlib
@@ -27,7 +36,22 @@ import anthropic
 
 from ..config import settings
 from ..db import pool
-from . import ai_config, attribution
+from . import ai_resolve, attribution
+from .ai_resolve import Resolved
+from .providers import llm_anthropic, llm_gemini, llm_openai
+from .providers.llm_base import (  # noqa: F401 — re-exported: call sites use llm.LLMError etc.
+    MAX_TOKENS,
+    NARROW_TOKENS_PER_CHAR,
+    WIDE_TOKENS_PER_CHAR,
+    LLMAdapter,
+    LLMBusyError,
+    LLMError,
+    LLMTruncatedError,
+    StreamUsage,
+    ToolResult,
+    estimate_tokens,
+    usage_of,
+)
 
 log = logging.getLogger("cq")
 
@@ -38,7 +62,8 @@ log = logging.getLogger("cq")
 # anthropic.Timeout, NOT httpx.Timeout: since the SDK vendored its HTTP stack (httpx2), a
 # Timeout built from the app-level httpx is a foreign object inside it, and every request
 # dies in the connect phase as APIConnectionError('Connection error.') — which silently took
-# every Claude feature down at once on the first image rebuild after the SDK upgrade.
+# every Claude feature down at once on the first image rebuild after the SDK upgrade. The
+# HTTP adapters (OpenAI, Gemini) read the same four fields off it into their own httpx.
 ANALYSIS = dict(timeout=anthropic.Timeout(60.0, connect=2.0), max_retries=1)
 COPILOT = dict(timeout=anthropic.Timeout(6.0, connect=1.0), max_retries=0)
 ANSWER = dict(timeout=anthropic.Timeout(25.0, connect=1.0), max_retries=1)
@@ -46,55 +71,23 @@ CURATE = dict(timeout=anthropic.Timeout(60.0, connect=2.0), max_retries=1)
 # Background import work: nobody is staring at a spinner, and one segment can be 12k chars
 # of scorecard rows that all have to come back out as entries — give it a long read budget.
 RESTRUCTURE = dict(timeout=anthropic.Timeout(180.0, connect=2.0), max_retries=1)
+# The registry's "Test connection" button: a human is waiting, and a retry would only hide
+# the very failure they are trying to see.
+PROBE = dict(timeout=anthropic.Timeout(20.0, connect=3.0), max_retries=0)
 
 # How long a caller waits for an admission slot before being told to come back later.
 ADMIT_TIMEOUT_S = 1.0
 
-# Output sizing, in ONE place. Byte-level BPE splits scripts outside its merge vocabulary far
-# harder than Latin text: measured on cl100k, Georgian runs ~0.53 chars/token against ~6.2 for
-# English, a ~12x difference that no single chars-per-token constant can express.
-#
-# Two callers share it and they MUST share it: `scoring_import.estimate_output_tokens` sizes
-# the budget a document needs to come back verbatim, and `_stream_progress` below measures
-# what has actually come back. Those two numbers become the denominator and the numerator of
-# a progress bar — measure them with different yardsticks and the percentage is fiction, even
-# though both halves would look individually reasonable.
-WIDE_TOKENS_PER_CHAR = 2.0     # Georgian, Armenian, CJK...  (measured ~1.9, rounded up)
-NARROW_TOKENS_PER_CHAR = 0.25  # Latin, digits, punctuation  (measured ~0.16, rounded up)
 
-
-def estimate_tokens(text: str) -> float:
-    """Rough token count for `text`, counting the two script populations apart.
-
-    Float rather than int on purpose: a stream is measured chunk by chunk, and rounding every
-    one- or two-character fragment to a whole token would throw most of the count away.
-    """
-    wide = sum(1 for ch in text if ord(ch) > 0x02FF)
-    return wide * WIDE_TOKENS_PER_CHAR + (len(text) - wide) * NARROW_TOKENS_PER_CHAR
-
-
-class LLMError(RuntimeError):
-    """Any failure talking to Anthropic, or a malformed/absent structured result."""
-
-
-class LLMBusyError(LLMError):
-    """Admission control rejected the call — the service is at its concurrency ceiling."""
-
-
-class LLMTruncatedError(LLMError):
-    """The model hit max_tokens mid-answer. A forced tool call cut off at the budget comes
-    back HTTP 200 with a PARTIAL tool input — treating it as success silently loses data,
-    so callers must either shrink the work and retry, or fail loudly."""
-
-
-# Memoized clients, keyed by (api_key, timeout, max_retries). Never closed: they are
-# process-lifetime connection pools, and closing one mid-flight would break another caller.
-# This is safe ONLY because the API runs a single uvicorn worker (no --workers in
-# backend/Dockerfile) — with more than one worker each would hold its own copy, which is
+# Memoized Anthropic SDK clients, keyed by (api_key, timeout, max_retries, base_url). Never
+# closed: they are process-lifetime connection pools, and closing one mid-flight would break
+# another caller. This is safe ONLY because the API runs a single uvicorn worker (no --workers
+# in backend/Dockerfile) — with more than one worker each would hold its own copy, which is
 # still correct but multiplies the real concurrency ceiling below.
 _clients: dict[tuple, anthropic.AsyncAnthropic] = {}
 
-# Admission control. One worker means this semaphore IS the service's Anthropic concurrency.
+# Admission control. One worker means this semaphore IS the service's model concurrency,
+# whichever provider answers.
 _LLM_SEM = asyncio.Semaphore(settings.llm_max_concurrency)
 
 # Strong refs to in-flight accounting tasks — asyncio only weakly references tasks, so
@@ -114,6 +107,48 @@ def client(api_key: str, *, timeout, max_retries: int,
     return inst
 
 
+# Catalog id -> adapter. Adding a provider is one module under providers/ plus one line here.
+# The Anthropic adapter borrows `client()` above rather than owning a pool of its own, and it
+# is handed a lambda rather than the function so a test that fakes the SDK (by patching
+# `llm.client`) is honoured — the name is looked up at call time, not at import.
+_ADAPTERS: dict[str, LLMAdapter] = {
+    "anthropic": llm_anthropic.AnthropicAdapter(lambda api_key, **kw: client(api_key, **kw)),
+    "openai": llm_openai.OpenAIAdapter(),
+    "gemini": llm_gemini.GeminiAdapter(),
+}
+
+
+def _adapter(res: Resolved) -> LLMAdapter:
+    adapter = _ADAPTERS.get(res.provider)
+    if adapter is None:
+        raise LLMError(f"No text-AI adapter for provider {res.provider!r}.")
+    return adapter
+
+
+async def _resolve(client_id: str | None, api_key: str, model: str) -> Resolved:
+    """Whose provider, model and key this call runs on.
+
+    `api_key` and `model` are what the call site read from the legacy deployment settings;
+    they are the bottom of the resolution chain (see ai_resolve) and are only used when no
+    registry layer sets a value. Doing it at this one chokepoint is why the call sites do
+    not each have to remember to.
+
+    A CONFIG LOOKUP MUST NEVER BREAK AN AI CALL — the rule the old per-tenant overlay kept,
+    enforced here rather than trusted: if the resolver cannot be read at all (no pool, a
+    registry table missing mid-migration), the call runs on the legacy layer the caller
+    already holds — Anthropic, with the deployment key and model — and the failure is logged.
+    """
+    try:
+        res = await ai_resolve.resolve(client_id, "llm", api_key=api_key, model=model)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("AI resolution failed for %s; running on the legacy settings", client_id)
+        legacy = getattr(ai_resolve, "LEGACY_PROVIDER", {}).get("llm", "anthropic")
+        res = Resolved("llm", legacy, model or None, api_key or "", None)
+    if not res.model:
+        raise LLMError(f"No model is configured for the {res.provider} text AI.")
+    return res
+
+
 @contextlib.asynccontextmanager
 async def _admit(feature: str, timeout_s: float = ADMIT_TIMEOUT_S):
     """The 1s default exists so interactive routes can 429 fast. Background callers
@@ -131,22 +166,10 @@ async def _admit(feature: str, timeout_s: float = ADMIT_TIMEOUT_S):
         _LLM_SEM.release()
 
 
-def _system_param(system: str, cache_system: bool):
-    """System prompt as-is, or as a single cacheable block.
-
-    Prompt caching needs the block form; keep the plain string by default so every existing
-    call site sends byte-identical requests to what it sent before.
-    """
-    if not system:
-        return anthropic.NOT_GIVEN
-    if not cache_system:
-        return system
-    return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-
-
 def _record(*, feature: str, client_id: str | None, integration_id: str | None, model: str,
-            message, latency_ms: int, ok: bool, byo: bool = False,
-            actor: str | None = None, job_id: str | None = None) -> None:
+            message=None, usage: dict | None = None, latency_ms: int, ok: bool,
+            byo: bool = False, actor: str | None = None, job_id: str | None = None,
+            provider: str | None = None, connection_id: str | None = None) -> None:
     """Fire-and-forget one `llm_usage` row. Accounting must never fail a turn.
 
     Deliberately not awaited and deliberately not holding a pool connection across the LLM
@@ -156,30 +179,39 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
     called from an `except` path, so a signature mismatch here does not surface as a broken
     metric — it replaces the real API error with a TypeError and takes the whole feature down.
 
+    `usage` is the adapter's normalised block (`ToolResult["usage"]`); `message` is the older
+    spelling, an Anthropic-SDK-shaped response, still read when `usage` is not given.
+
     `actor` and `job_id` normally come from the request context rather than the call site
-    (see `attribution`): the fifteen places that reach Anthropic sit several frames below the
+    (see `attribution`): the fifteen places that reach a model sit several frames below the
     request and would each have to thread two arguments they otherwise have no use for. An
     explicit argument still wins, for a caller that genuinely knows better.
+
+    `provider` and `connection_id` say WHOSE money and WHICH registry connection — with
+    `byo` they are what lets spend be grouped by provider and charged to the right party.
     """
     ctx_actor, ctx_job = attribution.current()
     actor = actor or ctx_actor
     job_id = job_id or ctx_job
-    usage = getattr(message, "usage", None)
+    if usage is None and message is not None:
+        usage = usage_of(message)
+    usage = usage or {}
     row = (
         client_id,
         integration_id,
         feature,
         model,
-        getattr(usage, "input_tokens", None),
-        getattr(usage, "output_tokens", None),
-        # Only present when prompt caching is in play; older/other responses omit them.
-        getattr(usage, "cache_read_input_tokens", None),
-        getattr(usage, "cache_creation_input_tokens", None),
+        usage.get("input_tokens"),
+        usage.get("output_tokens"),
+        usage.get("cache_read_tokens"),
+        usage.get("cache_creation_tokens"),
         latency_ms,
         ok,
         actor,
         job_id,
         byo,
+        provider,
+        connection_id,
     )
     try:
         task = asyncio.create_task(_write_usage(row))
@@ -197,61 +229,12 @@ async def _write_usage(row: tuple) -> None:
                 INSERT INTO llm_usage (client_id, integration_id, feature, model,
                                        input_tokens, output_tokens,
                                        cache_read_tokens, cache_creation_tokens, latency_ms, ok,
-                                       actor, job_id, byo)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13)
+                                       actor, job_id, byo, provider, connection_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13, $14,
+                        $15::uuid)
                 """, *row)
     except Exception as exc:  # noqa: BLE001 — cost accounting can never break a turn
         log.warning("llm_usage write failed: %s", exc)
-
-
-async def _stream_progress(st, on_progress: Callable[[int], None]) -> None:
-    """Drain a message stream, reporting cumulative output tokens as they are produced.
-
-    WHICH EVENT, and why: a forced tool call writes its answer as `content_block_delta`
-    events carrying `input_json_delta.partial_json` — fragments of the tool input's JSON, a
-    few characters at a time. That is the only per-token signal this kind of call emits. The
-    API's exact figure lives in `message_delta.usage.output_tokens` (cumulative, per the
-    streaming docs), but the same docs promise only "one or more" `message_delta` events and
-    a plain tool call sends one, after the last content block — exact, and far too late to
-    move a progress bar with. So the fragments are measured with `estimate_tokens`, and the
-    exact figure is folded in if it does arrive early, taking whichever source has seen more
-    so the number can never run backwards.
-
-    Matching the RAW event types also avoids double counting: the Python SDK's stream yields
-    its own synthesized `text` / `input_json` events interleaved with the raw ones, and both
-    describe the same bytes.
-
-    `on_progress` is somebody's UI, not part of the call: it is only ever handed a growing
-    integer, and if it raises, it is dropped and the import carries on without a bar.
-    """
-    tokens = 0.0
-    sent = 0
-    async for event in st:
-        etype = getattr(event, "type", None)
-        if etype == "content_block_delta":
-            delta = getattr(event, "delta", None)
-            chunk = getattr(delta, "partial_json", None) or getattr(delta, "text", None)
-            if chunk:
-                tokens += estimate_tokens(chunk)
-        elif etype == "message_delta":
-            exact = getattr(getattr(event, "usage", None), "output_tokens", None)
-            if isinstance(exact, int) and exact > tokens:
-                tokens = float(exact)
-        else:
-            continue
-        count = int(tokens)
-        if count > sent:
-            sent = count
-            try:
-                on_progress(count)
-            except Exception as exc:  # noqa: BLE001 — a broken bar must not fail the call
-                log.warning("call_tool on_progress failed; progress dropped: %s", exc)
-                return  # get_final_message() drains whatever is left
-
-
-def _wrap(exc: anthropic.APIError) -> LLMError:
-    # Same message shape the call sites already produced, so their error text is unchanged.
-    return LLMError(getattr(exc, "message", None) or str(exc))
 
 
 async def call_tool(*, feature: str, client_id: str | None, api_key: str, model: str,
@@ -265,65 +248,55 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
     """The house forced-tool-use pattern: one tool, tool_choice pinned to it, strict schema.
 
     Returns the tool_use block's input as a plain dict. Raises LLMError if the model answered
-    without calling the tool (which `tool_choice` makes very unlikely, but never impossible),
-    and LLMTruncatedError if the answer hit max_tokens — a truncated tool input parses as a
+    without calling the tool (which forcing makes very unlikely, but never impossible), and
+    LLMTruncatedError if the answer hit max_tokens — a truncated tool input parses as a
     smaller-but-valid dict, so without this check the caller silently loses the cut-off tail.
 
-    `stream=True` transports the SAME call over SSE and collects the final message — the
-    result is identical. It exists because Anthropic drops long NON-streaming requests
-    ("Request timed out or interrupted... long-requests"): a big model writing thousands of
-    tokens of dense Georgian guidance takes minutes, which only a stream survives. Callers
-    whose outputs can be big (restructure, rubric import) must pass it.
+    `tool` is written in the house (Anthropic) shape; each adapter translates it and its
+    schema into what its provider's strict mode accepts (`llm_base.translate_schema`).
+
+    `stream=True` transports the SAME call over SSE and collects the final result — identical
+    output. It exists because Anthropic drops long NON-streaming requests ("Request timed out
+    or interrupted... long-requests"): a big model writing thousands of tokens of dense
+    Georgian guidance takes minutes, which only a stream survives. Callers whose outputs can
+    be big (restructure, rubric import) must pass it; the other adapters honour it too.
 
     `on_progress(cumulative_output_tokens)` turns that same stream into a progress signal
     (`stream=True` only — a blocking call has nothing to say until it is over). Without it
-    the deltas are consumed by the SDK and discarded, which is what every other caller here
-    still does: when it is None this function runs the code path it has always run.
+    the deltas are consumed and discarded, which is what every other caller here still does:
+    when it is None the adapter runs the code path it has always run.
 
-    `api_key` and `model` are the DEPLOYMENT default; if the tenant has configured their own,
-    it is substituted here (see `ai_config.overlay`). Doing it at this one chokepoint is why
-    the call sites do not each have to remember to.
+    `api_key` and `model` are the DEPLOYMENT default; the registry (a default or assigned
+    connection) or the tenant's own key is substituted here — see `_resolve`.
     """
-    use = await ai_config.overlay(client_id, api_key, model)
-    api_key, model = use.api_key, use.model
-    cl = client(api_key, base_url=use.base_url, **opts)
+    res = await _resolve(client_id, api_key, model)
+    adapter = _adapter(res)
     started = time.monotonic()
-    kwargs = dict(
-        model=model,
-        max_tokens=max_tokens,
-        system=_system_param(system, cache_system),
-        tools=[tool],
-        tool_choice={"type": "tool", "name": tool["name"]},
-        messages=[{"role": "user", "content": user}],
-    )
     async with _admit(feature, timeout_s=admit_timeout_s):
         try:
-            if stream:
-                async with cl.messages.stream(**kwargs) as st:
-                    if on_progress is not None:
-                        await _stream_progress(st, on_progress)
-                    message = await st.get_final_message()
-            else:
-                message = await cl.messages.create(**kwargs)
-        except anthropic.APIError as exc:
+            result = await adapter.call_tool(
+                res, system=system, user=user, tool=tool, max_tokens=max_tokens,
+                cache_system=cache_system, stream=stream, on_progress=on_progress, opts=opts)
+        except LLMError:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
-                    model=model, message=None,
+                    model=res.model, usage=None,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
-                    actor=actor, job_id=job_id, byo=use.byo)
-            raise _wrap(exc) from exc
+                    actor=actor, job_id=job_id, byo=res.byo,
+                    provider=res.provider, connection_id=res.connection_id)
+            raise
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
-            model=model, message=message,
+            model=res.model, usage=result["usage"],
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
-            actor=actor, job_id=job_id, byo=use.byo)
+            actor=actor, job_id=job_id, byo=res.byo,
+            provider=res.provider, connection_id=res.connection_id)
 
-    if getattr(message, "stop_reason", None) == "max_tokens":
+    if result["stop_reason"] == MAX_TOKENS:
         raise LLMTruncatedError(
             f"The model ran out of output budget ({max_tokens} tokens) before finishing.")
-    for block in message.content:
-        if block.type == "tool_use" and block.name == tool["name"]:
-            return dict(block.input)
-    raise LLMError(f"Claude did not return a {tool['name']} result.")
+    if result["input"] is None:
+        raise LLMError(f"{adapter.label} did not return a {tool['name']} result.")
+    return result["input"]
 
 
 async def stream_text(*, feature: str, client_id: str | None, api_key: str, model: str,
@@ -333,30 +306,54 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
     """Yield plain text deltas. The admission slot is held for the whole stream, because an
     open stream is exactly as much upstream concurrency as a blocking call.
 
-    Applies the tenant's AI overrides for the same reason `call_tool` does."""
-    use = await ai_config.overlay(client_id, api_key, model)
-    api_key, model = use.api_key, use.model
-    cl = client(api_key, base_url=use.base_url, **opts)
+    Resolves the tenant's provider for the same reason `call_tool` does."""
+    res = await _resolve(client_id, api_key, model)
+    adapter = _adapter(res)
+    holder = StreamUsage()
     started = time.monotonic()
     async with _admit(feature):
         try:
-            async with cl.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                system=_system_param(system, False),
-                messages=[{"role": "user", "content": user}],
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
-                message = await stream.get_final_message()
-        except anthropic.APIError as exc:
+            async for text in adapter.stream_text(res, system=system, user=user,
+                                                  max_tokens=max_tokens, opts=opts,
+                                                  usage=holder):
+                yield text
+        except LLMError:
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
-                    model=model, message=None,
+                    model=res.model, usage=None,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
-                    byo=use.byo)
-            raise _wrap(exc) from exc
+                    byo=res.byo, provider=res.provider, connection_id=res.connection_id)
+            raise
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
-            model=model, message=message,
+            model=holder.model or res.model, usage=holder.usage,
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
-            byo=use.byo)
+            byo=res.byo, provider=res.provider, connection_id=res.connection_id)
+
+
+async def probe(res: Resolved, *, client_id: str | None = None) -> dict:
+    """Does exactly this provider/model/key answer? For the registry's "Test connection".
+
+    One tiny forced tool call ("reply with {ok: true}") on the adapter `res.provider` names,
+    returning {"ok": bool, "detail": str} with plain English either way — never raising, so
+    a router can hand the outcome straight back to the button. The call is admitted and
+    metered like any other (feature "probe"), because it spends real tokens on somebody's key;
+    `client_id` is only attribution for a tenant testing their own override.
+    """
+    try:
+        adapter = _adapter(res)
+    except LLMError as exc:
+        return {"ok": False, "detail": str(exc)}
+    if not res.model:
+        return {"ok": False, "detail": "No model is set for this connection — pick one first."}
+    started = time.monotonic()
+    try:
+        async with _admit("probe"):
+            outcome = await adapter.probe(res, opts=PROBE)
+    except LLMBusyError as exc:
+        return {"ok": False, "detail": str(exc)}
+    result = outcome.get("result")
+    _record(feature="probe", client_id=client_id, integration_id=None, model=res.model,
+            usage=result["usage"] if result else None,
+            latency_ms=int((time.monotonic() - started) * 1000), ok=bool(outcome["ok"]),
+            byo=res.byo, provider=res.provider, connection_id=res.connection_id)
+    return {"ok": bool(outcome["ok"]), "detail": outcome["detail"]}

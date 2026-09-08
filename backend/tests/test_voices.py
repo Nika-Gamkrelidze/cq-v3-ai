@@ -7,10 +7,10 @@ is the one voice a customer cannot see — which is exactly the bug this file pi
 """
 import pytest
 
-from app.routers import tts
 from app.services import elevenlabs, settings_store
+from app.services.providers import tts_elevenlabs as el
 
-LAURA = tts.GEORGIAN_VOICE                      # "Laura - Natural & Grounded"
+LAURA = el.GEORGIAN_VOICE                       # "Laura - Natural & Grounded"
 CHARLIE = "IKne3meq5aSn9XLyUdCD"
 RACHEL = "21m00Tcm4TlvDq8ikWAM"
 

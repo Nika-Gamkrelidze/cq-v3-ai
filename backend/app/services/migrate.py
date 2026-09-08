@@ -69,6 +69,39 @@ async def _seed_demo_tenant(conn) -> None:
     )
 
 
+async def _migrate_tenant_ai_configs(conn) -> str:
+    """Copy the LLM-only `tenant_ai_configs` rows into `tenant_ai_overrides` (capability
+    'llm'), sealing each key on the way. Idempotent: a tenant that already has an llm
+    override row is skipped, so a row an owner has since edited is never overwritten by
+    the stale legacy copy. The old table is left in place (commented as superseded)."""
+    from . import ai_registry  # late: ai_registry imports the pool + settings this module feeds
+
+    rows = await conn.fetch(
+        """
+        SELECT c.client_id, c.provider, c.model, c.api_key, c.base_url, c.enabled, c.notes,
+               c.updated_at, c.updated_by
+        FROM tenant_ai_configs c
+        WHERE NOT EXISTS (SELECT 1 FROM tenant_ai_overrides o
+                          WHERE o.client_id = c.client_id AND o.capability = 'llm')
+        """)
+    copied = 0
+    for r in rows:
+        key = (r["api_key"] or "").strip() or None
+        tag = await conn.execute(
+            """
+            INSERT INTO tenant_ai_overrides
+                (client_id, capability, provider, model, api_key_enc, settings, enabled,
+                 notes, base_url, updated_at, updated_by)
+            VALUES ($1, 'llm', $2, $3, $4, '{}'::jsonb, $5, $6, $7, $8, $9)
+            ON CONFLICT (client_id, capability) DO NOTHING
+            """,
+            r["client_id"], (r["provider"] or "anthropic").strip() or "anthropic",
+            r["model"], ai_registry.seal_secret(key) if key else None, bool(r["enabled"]),
+            r["notes"], r["base_url"], r["updated_at"], r["updated_by"])
+        copied += int(tag.endswith(" 1"))
+    return f"tenant_ai_configs -> tenant_ai_overrides: {copied} row(s) copied"
+
+
 async def run_startup_migrations() -> list[str]:
     log: list[str] = []
     async with pool().acquire() as conn:
@@ -114,6 +147,11 @@ async def run_startup_migrations() -> list[str]:
         # tts_settings.sql: the shaped voice_settings behind each synthesis. After media.sql,
         # which created tts_requests.
         await _apply(conn, "tts_settings.sql")
+        # ai_connections.sql: the AI provider registry (connections, assignments, per-
+        # capability overrides) + provider/connection columns on llm_usage. After
+        # ai_usage.sql, whose tenant_ai_configs it supersedes and copies from below.
+        await _apply(conn, "ai_connections.sql")
+        log.append(await _migrate_tenant_ai_configs(conn))
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)

@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import BaseModel, Field
 
 from ..db import pool
-from ..services import analysis, elevenlabs, limits, sentiment, sentiment_config, settings_store
+from ..services import analysis, limits, sentiment, sentiment_config, settings_store, voice
 from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 # The one "who owns this row" rule (see its docstring): a registered user calling this public
@@ -165,9 +165,8 @@ async def standalone_sentiment(request: Request, file: UploadFile = File(...),
         user_id=_user_id(principal))
 
     try:
-        stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription_svc.as_kwargs(stt_settings))
+        stt = await voice.transcribe(principal.client_id, audio, file.filename,
+                                     file.content_type, transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
@@ -207,9 +206,9 @@ async def admin_standalone_sentiment(file: UploadFile = File(...),
         tid, transcription_svc.parse_override(transcription))
 
     try:
-        stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription_svc.as_kwargs(stt_settings))
+        # The tenant's provider too, for the same reason as its settings.
+        stt = await voice.transcribe(tid, audio, file.filename, file.content_type,
+                                     transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
 

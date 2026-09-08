@@ -8,7 +8,7 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from ..db import pool
-from ..services import analysis, elevenlabs, limits, media, sentiment, settings_store
+from ..services import analysis, limits, sentiment, voice
 from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 
@@ -92,7 +92,6 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
         raise HTTPException(status_code=413, detail="Audio file exceeds 100 MB limit")
 
     await limits.reserve(principal, "analyses", len(audio))
-    cfg = await settings_store.get_effective()
 
     job_id = await analysis.create_job(
         filename=file.filename, content_type=file.content_type, size_bytes=len(audio),
@@ -101,9 +100,8 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
         user_id=_user_id(principal))
 
     try:
-        stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription_svc.as_kwargs(stt_settings))
+        stt = await voice.transcribe(principal.client_id, audio, file.filename,
+                                     file.content_type, transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")

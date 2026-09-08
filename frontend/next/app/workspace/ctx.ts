@@ -20,7 +20,7 @@ import {
 
 export type T = (key: string, vars?: Record<string, string | number>) => string;
 
-export type TabName = 'kb' | 'analyze' | 'rubric' | 'transcription' | 'health' | 'bot' | 'history';
+export type TabName = 'kb' | 'analyze' | 'rubric' | 'transcription' | 'ai' | 'health' | 'bot' | 'history';
 
 /** Every tenant-scoped call this page makes runs at this scope. Named once so a call site
  *  cannot quietly pick a different credential — see `lib/session.ts` §Scope. */

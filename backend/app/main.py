@@ -9,11 +9,12 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routers import (admin, analyze, auth, calls, chat, chat_config, convert, curation, kb,
-                     kb_admin, partner, recordings, scoring, sentiment, tenants,
-                     transcription as transcription_router, tts)
-from .services import analysis
+from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, chat_config,
+                     convert, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
+                     tenants, transcription as transcription_router, tts)
+from .services import ai_registry, ai_resolve, analysis
 from .services import auth as auth_service
+from .services.ai_registry import RegistryError
 from .services.transcription import TranscriptionSettingsError
 from .services.migrate import run_startup_migrations
 
@@ -25,6 +26,18 @@ async def lifespan(app: FastAPI):
     await db.connect()
     for line in await run_startup_migrations():
         log.info("startup migration: %s", line)
+    # Provider keys at rest: re-seal any legacy plaintext secret now that the DDL exists, then
+    # turn the admin panel's keys into the first registry connections (no-op once any active
+    # connection exists). Both AFTER migrations, both non-fatal: a deployment must still boot
+    # on a vault problem — it just runs with the legacy settings and says so in the log.
+    try:
+        resealed = await ai_resolve.vault().migrate_plaintext()
+        log.info("startup secrets: %s plaintext secret(s) re-sealed (mode=%s)",
+                 resealed, ai_registry.secrets_status()["mode"])
+    except Exception:  # noqa: BLE001
+        log.exception("startup secrets: migrate_plaintext failed")
+    for line in await ai_registry.seed_from_legacy():
+        log.info("startup: %s", line)
     # Fail any analysis job left mid-flight by a previous crash/restart. The audio IS stored
     # now (every principal, under the Storage retention), but nothing re-drives a half-run
     # pipeline from a stored file — the caller resubmits. Workbench rows parked in `ready`
@@ -103,6 +116,15 @@ async def _transcription_settings_handler(request: Request, exc: TranscriptionSe
         "field": getattr(exc, "field", "") or None})
 
 
+@app.exception_handler(RegistryError)
+async def _registry_error_handler(request: Request, exc: RegistryError):
+    """A refused AI-registry write: FastAPI's own `detail` plus the machine `code` and the
+    offending `field`, so the console and the portal can point at the input to fix — the
+    same shape the transcription settings use."""
+    return JSONResponse(status_code=exc.status, content={
+        "detail": str(exc), "code": exc.code, "field": exc.field})
+
+
 app.include_router(calls.router)
 app.include_router(analyze.router)
 app.include_router(tts.router)
@@ -127,6 +149,10 @@ app.include_router(transcription_router.router)
 # Call Workbench: /recordings + /summaries. Root only, never under /v1 — it admits registered
 # users and anonymous visitors, neither of which belongs on the partner surface.
 app.include_router(recordings.router)
+# AI provider registry: /admin/ai/* (connections, assignments, catalog — superadmin) and
+# /ai/config (the workspace's own keys — owner). Root only, like the other settings routers.
+app.include_router(ai_admin.router)
+app.include_router(ai_tenant.router)
 
 # ---- B2B partner API (versioned) -------------------------------------------
 # New partner-facing endpoints (account, transcriptions, async + bulk analysis, jobs,
@@ -181,13 +207,25 @@ async def health(request: Request):
     # after the host-side fix — with no SSH and no VPN.
     addressing = "ok" if auth_service.can_identify_visitor(auth_service.client_ip(request)) \
         else "nat-masked"
+    # `secrets` and `ai` answer, from one unauthenticated curl, whether provider keys are
+    # encrypted at rest and what the deployment defaults to per capability — names only,
+    # never a key or a hint.
+    secrets_mode = ai_registry.secrets_status()["mode"]
     try:
         async with db.pool().acquire() as conn:
             await conn.fetchval("SELECT 1")
-        return {"status": "ok", "database": "connected", "client_addressing": addressing}
+        try:
+            ai = await ai_registry.summary()
+        except Exception as exc:  # noqa: BLE001 — the registry must not take /health down
+            ai = {"connections": 0, "defaults": {c: None for c in ai_registry.CAPABILITIES},
+                  "error": str(exc)}
+        return {"status": "ok", "database": "connected", "client_addressing": addressing,
+                "secrets": secrets_mode, "ai": ai}
     except Exception as exc:  # noqa: BLE001
         return {"status": "degraded", "database": "unavailable", "detail": str(exc),
-                "client_addressing": addressing}
+                "client_addressing": addressing, "secrets": secrets_mode,
+                "ai": {"connections": 0,
+                       "defaults": {c: None for c in ai_registry.CAPABILITIES}}}
 
 
 # Serve the static frontend from the API too, so the whole app is reachable on a

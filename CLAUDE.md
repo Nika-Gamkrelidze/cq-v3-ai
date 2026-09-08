@@ -139,6 +139,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `index.html` (public TTS+analyze), `tenant.html` (portal), `admin.html` (console), `kb-admin.html`.
 - **Single sign-in** with admin routing; superadmin creds validated server-side.
 - **Auto-deploy webhook** (push to `main` → server pulls + rebuilds). See §5.
+- **Multi-provider AI** (`services/ai_registry.py`, `ai_resolve.py`, `providers/*`). A registry of
+  named **connections** — `ai_connections(name, capability llm|stt|tts, provider, model,
+  base_url, sealed key, settings)`, one **default per capability** — plus per-workspace
+  **assignment** (`tenant_ai_assignments`, a dropdown on `/ai-config`) and a workspace's **own
+  key** (`tenant_ai_overrides`, the portal's *Your own AI subscription* tab; owners only, never
+  a base URL). Text providers: Anthropic, OpenAI, Gemini; voice: ElevenLabs, OpenAI — STT and
+  TTS are resolved independently. Console: *AI providers* tab (Test connection / Make default /
+  Deactivate). Provider keys are **encrypted at rest** (`services/secrets.py`, `SECRETS_KEY`).
 - **Conversational AI — customer chat bot + operator copilot** (`routers/chat.py`, mounted at
   `/v1/chat/*`; design in `docs/ADR-001-conversational-ai.md`). The customer's **chat service**
   calls CQ server-to-server with a separate **integration credential** (`X-CQ-Key: cqi_…` +
@@ -186,6 +194,36 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `python3` is 3.9; use `python3.11`.
 - **Models are configurable** via the admin panel / `.env` (Claude model, STT model, TTS voice).
   Don't hardcode a model id in new code — read from `settings_store`.
+- **Every AI call goes through one of two seams, or it bypasses a tenant's configuration.**
+  Text: `services/llm.py::call_tool / stream_text` (signatures unchanged since the single-provider
+  days) → `services/providers/llm_<provider>.py`. Voice: `services/voice.py::transcribe /
+  synthesize / list_voices / list_models` → `providers/{stt,tts}_<provider>.py`. Nothing else
+  may import `anthropic`, `elevenlabs` or a provider module — that is how a workspace can be
+  moved to Gemini or another voice provider with a dropdown instead of a deploy. New AI code
+  keeps the house pattern (forced tool-use + strict schema); `providers/llm_base.py::
+  translate_schema` renders the schema in each provider's dialect (OpenAI strict wants
+  `additionalProperties:false` everywhere; Gemini takes an OpenAPI subset).
+- **The resolution chain** (`ai_resolve.resolve(client_id, capability)`) is legacy admin
+  settings ← default connection ← assigned connection ← the tenant's own key, each layer
+  overriding only what it sets. A layer that CHANGES the provider drops the inherited model,
+  key and base URL (an OpenAI assignment over an Anthropic default is never handed the
+  Anthropic key). `source` is honest (`byo` with `byo=False` when the tenant set only a model).
+  It never raises for a lookup failure — a chain that ends keyless resolves with `api_key=''`
+  and the adapter says so in words.
+- **Secrets.** Stored values are `enc:v1:<fernet>`; `secrets.seal()` on every write,
+  `open()` only inside the resolver; no API response ever carries a key (tests grep the bodies).
+  Without `SECRETS_KEY` the API still boots in a **plaintext** mode (`/health.secrets`, console
+  banner) and seals everything on the first boot after the key is set. **Losing the key makes
+  every stored provider key unreadable — back it up.**
+- **OpenAI and Gemini adapters are unverified against the live APIs** (this repo holds no key
+  for either). Request/response shapes are pinned with `httpx.MockTransport`; the console's
+  *Test connection* is the live verification. Known first-use watch-item: OpenAI reasoning
+  models spend `max_completion_tokens` on hidden reasoning, so a 4096-token budget can come
+  back truncated — pick a larger budget or a non-reasoning model for that connection.
+- **The legacy Integrations key/model fields are gone from the console.** On the first boot
+  with an empty registry, `ai_registry.seed_from_legacy()` turns the admin-panel keys into
+  default connections once; a keyless deployment stays on the legacy path with an empty
+  registry (that is the local dev state — the local `.env` has no provider keys at all).
 - **The public bot reads only `kb_documents.visibility='public'`** (the 🤖 *share with the bot*
   toggle in the KB tab; default `internal`). A tenant with nothing shared cannot switch autopilot on
   (409) — by design, so an internal pricing floor is never quoted to a customer by accident. Two
@@ -227,6 +265,11 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 
 ## 6. Where we stopped (exact state)
 
+- **2026-09-08 — multi-provider AI.** Connection registry + per-workspace assignment + tenant
+  BYO keys, encrypted at rest; Anthropic/OpenAI/Gemini text adapters and ElevenLabs/OpenAI
+  voice adapters behind two seams; all 15 voice call sites migrated. **Pending on the server:**
+  set `SECRETS_KEY` in the server `.env` (see `.env.example`) so keys get sealed; add OpenAI /
+  Gemini keys and press *Test connection* before assigning either to a workspace.
 - **2026-09-08 — chat bot launched in the UI.** Tenant BOT tab live (was behind a "coming soon"
   flag), superadmin-editable default bot config, one chat-service credential with a grant per
   tenant + a console to manage them, integration contract + chat-side prompt written. **Pending:**

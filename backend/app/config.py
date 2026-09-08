@@ -72,5 +72,12 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-jwt-secret"
     token_ttl_hours: int = 24
 
+    # --- Encryption at rest for provider keys (services/secrets.py) ---
+    # A Fernet key: urlsafe-base64 of 32 bytes, exactly what Fernet.generate_key() emits.
+    # Empty = plaintext mode: the API boots and works, stores keys unencrypted, and says so
+    # once in the log and in /health. Set it on the SERVER's .env and back it up — every
+    # stored provider key is unreadable without the key it was sealed with.
+    secrets_key: str = ""
+
 
 settings = Settings()

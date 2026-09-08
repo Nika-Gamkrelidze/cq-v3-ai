@@ -8,6 +8,10 @@
 
    `lib/__tests__/console.test.mts` covers them. */
 
+import type {
+  AiAssignment, AiConnection, AiEffective, AiLastTest, AiProviderEntry, Capability,
+} from './api';
+
 /* ---------------------------------------------------------------- kill switch */
 
 export interface KillState {
@@ -454,4 +458,247 @@ export function languageCodes(rows: readonly { code?: unknown }[], current: stri
 export function formatIds(current: string): string[] {
   const known: string[] = [...AUDIO_FORMATS];
   return current && !known.includes(current) ? [current, ...known] : known;
+}
+
+/* ----------------------------------------------------- the AI provider registry
+
+   The registry tab and the per-workspace AI setup page both read the same three tables, and the
+   rules below are the ones that must agree between them: which connection is "the default",
+   how a model that is not in the catalogue is offered back, and — the one that matters — that a
+   stored key is only ever REPLACED by a typed one or REMOVED by an explicit action, never
+   cleared by an empty box. The key never comes back from the server, so the box is empty on
+   every open; treating that as "clear it" would wipe a working credential on an unrelated edit,
+   which is the same rule `IntegrationsTab` and the old AI setup page each kept by hand. */
+
+/** The three capabilities, in the order every surface lists them. A VALUE here rather than in
+    `api.ts` because this file is imported by the node test runner, which resolves no path alias
+    and no extension-less specifier — so it must not import a value from anything that does. */
+export const CAPABILITIES: readonly Capability[] = ['llm', 'stt', 'tts'] as const;
+
+/** The sentinel the model picker uses for "type one in". Not a model id any provider has. */
+export const MODEL_OTHER = '__other__';
+
+/** Narrow an arbitrary string from the API to a capability, or null. */
+export function asCapability(v: unknown): Capability | null {
+  return typeof v === 'string' && (CAPABILITIES as readonly string[]).includes(v)
+    ? (v as Capability)
+    : null;
+}
+
+/** The connections, grouped by capability and ordered for a table: the default first, then the
+    active ones by name, and the inactive ones last (also by name). A row whose capability this
+    build does not know about is dropped rather than crashing the tab. */
+export function groupConnections(list: readonly AiConnection[]): Record<Capability, AiConnection[]> {
+  const out = { llm: [], stt: [], tts: [] } as Record<Capability, AiConnection[]>;
+  for (const c of list) {
+    const cap = asCapability(c.capability);
+    if (cap) out[cap].push(c);
+  }
+  const rank = (c: AiConnection) => (c.is_default && c.is_active ? 0 : c.is_active ? 1 : 2);
+  for (const cap of CAPABILITIES) {
+    out[cap].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }
+  return out;
+}
+
+/** The default connection of a group, or null. An INACTIVE default is not a default: the
+    resolver skips it, so the tab must say "no default" rather than show a dead row as one. */
+export function defaultOf(group: readonly AiConnection[]): AiConnection | null {
+  return group.find(c => c.is_default && c.is_active) || null;
+}
+
+/** The pill for a connection's last test: class plus the key that names it. */
+export function testBadge(last: AiLastTest | null | undefined): { cls: string; key: string } {
+  if (!last || typeof last.ok !== 'boolean') return { cls: 'notinkb', key: 'ai.test.never' };
+  return last.ok ? { cls: 'ready', key: 'ai.test.ok' } : { cls: 'error', key: 'ai.test.fail' };
+}
+
+/* ---- the model picker ---- */
+
+/** Split a stored model into what the picker shows: a known id selects itself; anything else
+    that is non-empty selects "Other…" with the id in the text box; empty selects the empty
+    option (the provider's default). */
+export function modelPickFor(known: readonly string[], current: string | null | undefined): {
+  pick: string;
+  text: string;
+} {
+  const m = (current || '').trim();
+  if (!m) return { pick: '', text: '' };
+  if (known.includes(m)) return { pick: m, text: '' };
+  return { pick: MODEL_OTHER, text: m };
+}
+
+/** Read the picker back. `null` is how "no model — use the provider default" is spelled on the
+    wire; an "Other…" with nothing typed is the same thing, not an empty-string model id. */
+export function modelFromPick(pick: string, text: string): string | null {
+  const v = (pick === MODEL_OTHER ? text : pick).trim();
+  return v || null;
+}
+
+/** The picker's options: the empty option, the known ids, and "Other…". Labels for the two
+    non-model rows are passed in already translated, so this stays free of the dictionary. */
+export function modelOptions(
+  known: readonly string[],
+  labels: { none: string; other: string },
+): { value: string; label: string }[] {
+  return [
+    { value: '', label: labels.none },
+    ...known.map(m => ({ value: m, label: m })),
+    { value: MODEL_OTHER, label: labels.other },
+  ];
+}
+
+/* ---- the connection form ---- */
+
+/** The form as the operator holds it. `settings` is the extra per-provider fields (a TTS
+    voice id), each as the string in its box. */
+export interface ConnForm {
+  name: string;
+  provider: string;
+  model: string | null;
+  baseUrl: string;
+  apiKey: string;
+  clearKey: boolean;
+  settings: Record<string, string>;
+}
+
+/** The extra settings fields a provider entry takes, with the TTS voice always present: the
+    catalogue lists it, but a TTS connection with nowhere to put a voice id is unusable even
+    when a server predates the field. */
+export function settingsFields(cap: Capability, entry: AiProviderEntry | undefined): string[] {
+  const fields = [...(entry?.fields || [])];
+  if (cap === 'tts' && !fields.includes('voice_id')) fields.unshift('voice_id');
+  return fields;
+}
+
+/** The POST/PUT body for a connection.
+
+    Three rules, each the safe direction:
+
+      * `api_key` is sent ONLY when one was typed. The box is empty on every open because the
+        server never returns the key; an unconditional send would clear a working credential.
+      * `clear_key` is sent only when the operator asked for it AND typed nothing — a typed key
+        is a replacement, and sending both would be an ambiguous request the server may resolve
+        either way.
+      * `base_url` is sent only when the catalogue says the provider allows one. A provider
+        without a gateway option has no use for the field, and a stale value carried from a
+        previous provider choice must not be written under it.
+
+    `settings` keeps only non-empty values, trimmed. */
+export function connectionPayload(
+  cap: Capability,
+  form: ConnForm,
+  entry: AiProviderEntry | undefined,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    name: form.name.trim(),
+    capability: cap,
+    provider: form.provider,
+    model: form.model,
+  };
+  if (entry?.allows_base_url) body.base_url = form.baseUrl.trim() || null;
+  const key = form.apiKey.trim();
+  if (key) body.api_key = key;
+  else if (form.clearKey) body.clear_key = true;
+  const settings: Record<string, string> = {};
+  for (const [k, v] of Object.entries(form.settings)) {
+    const s = (v || '').trim();
+    if (s) settings[k] = s;
+  }
+  body.settings = settings;
+  return body;
+}
+
+/** The form for an existing connection (or a blank one for `null`), for one provider entry. */
+export function formFromConnection(
+  cap: Capability,
+  c: AiConnection | null,
+  entry: AiProviderEntry | undefined,
+  fallbackProvider: string,
+): ConnForm {
+  const settings: Record<string, string> = {};
+  const stored = (c?.settings && typeof c.settings === 'object' ? c.settings : {}) as Record<string, unknown>;
+  for (const f of settingsFields(cap, entry)) {
+    const v = stored[f];
+    settings[f] = v === null || v === undefined ? '' : String(v);
+  }
+  return {
+    name: c?.name || '',
+    provider: c?.provider || fallbackProvider,
+    model: c?.model || null,
+    baseUrl: c?.base_url || '',
+    apiKey: '',
+    clearKey: false,
+    settings,
+  };
+}
+
+/* ---- assignments ---- */
+
+/** The options for one capability's assignment picker on the AI setup page.
+
+    The empty option is "follow the default", labelled with the default's name when there is
+    one. Only ACTIVE connections are offered — a deactivated one cannot be resolved to, and
+    offering it would save an assignment that silently falls through to the default. The one
+    exception is the connection ALREADY assigned: if it has since been deactivated it is kept
+    in the list, disabled, so the picker shows the truth ("assigned to X, which is off") rather
+    than an empty trigger that a Save would write back as "default". */
+export function assignmentOptions(
+  group: readonly AiConnection[],
+  assigned: string | null,
+  labels: { default: (name: string | null) => string; connection: (c: AiConnection) => string },
+): { value: string; label: string; disabled?: boolean }[] {
+  const def = defaultOf(group);
+  const out: { value: string; label: string; disabled?: boolean }[] = [
+    { value: '', label: labels.default(def ? def.name : null) },
+  ];
+  for (const c of group) {
+    if (c.is_active) out.push({ value: c.id, label: labels.connection(c) });
+  }
+  if (assigned && !out.some(o => o.value === assigned)) {
+    const stale = group.find(c => c.id === assigned);
+    out.push({
+      value: assigned,
+      label: stale ? labels.connection(stale) : assigned,
+      disabled: true,
+    });
+  }
+  return out;
+}
+
+/** The PUT body for a workspace's assignments: every capability, `null` for "default". Sending
+    all three is deliberate — the route merges what it is given, and a capability left out of
+    the body would keep whatever it had, which is not what a form that shows all three means. */
+export function assignmentsPayload(
+  picks: Readonly<Partial<Record<Capability, string>>>,
+): Record<Capability, string | null> {
+  const out = {} as Record<Capability, string | null>;
+  for (const cap of CAPABILITIES) out[cap] = (picks[cap] || '').trim() || null;
+  return out;
+}
+
+/** The picks a workspace's assignments load into: the assigned id, or '' for "default". */
+export function picksFromAssignments(
+  a: Readonly<Partial<Record<Capability, AiAssignment | null | undefined>>>,
+): Record<Capability, string> {
+  const out = {} as Record<Capability, string>;
+  for (const cap of CAPABILITIES) out[cap] = a[cap]?.connection_id || '';
+  return out;
+}
+
+const SOURCES: readonly string[] = ['byo', 'assigned', 'default', 'legacy'];
+
+/** The i18n key for an effective source, for the "In effect" line. An unknown value from a
+    newer server falls back to `legacy` rather than rendering a raw token as a sentence. */
+export function sourceKey(source: string | null | undefined): string {
+  return `ai.source.${SOURCES.includes(source || '') ? source : 'legacy'}`;
+}
+
+/** What a workspace runs on for one capability, as one short line: the connection's name when
+    there is one, else the provider; then the model. `null` when nothing is known. */
+export function effectiveLabel(eff: AiEffective | null | undefined): { head: string; model: string } | null {
+  if (!eff) return null;
+  const head = eff.connection?.name || eff.provider || '';
+  if (!head && !eff.model) return null;
+  return { head, model: eff.model || '' };
 }

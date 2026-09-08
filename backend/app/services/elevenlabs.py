@@ -6,12 +6,19 @@ in per call (it comes from runtime settings, not a module-level constant).
 Every call goes through `_request`, so a failure always surfaces as an ElevenLabsError
 carrying a machine `code` — and, for a restricted key, the `scope` ElevenLabs names as
 missing — instead of a raw JSON blob pasted into the user's toast.
+
+Nothing outside `services/providers/` calls this module any more: the routers and services go
+through `services/voice.py`, which resolves the provider a tenant runs on and dispatches to
+`providers/stt_elevenlabs.py` / `providers/tts_elevenlabs.py`, thin wrappers over the four
+functions below. The functions keep their signatures — the requests they build are pinned
+byte for byte by tests/test_transcription_settings.py and tests/test_tts_settings.py.
 """
-import io
 import re
-import wave
 
 import httpx
+
+from .providers import voice_base
+from .providers.voice_base import VoiceError, silence_wav  # noqa: F401 — re-exported
 
 BASE_URL = "https://api.elevenlabs.io/v1"
 
@@ -28,18 +35,14 @@ SCOPE_TTS = "text_to_speech"
 _MISSING_SCOPE_RE = re.compile(r"permission[:\s]+['\"]?([a-z][a-z0-9_]{2,40})", re.I)
 
 
-class ElevenLabsError(RuntimeError):
-    """A classified ElevenLabs failure.
+class ElevenLabsError(VoiceError):
+    """A classified ElevenLabs failure (a `VoiceError`, so one except clause covers every
+    voice provider).
 
     `code`  — missing_permission | invalid_key | quota | blocked | transport | http
     `scope` — the permission ElevenLabs named as missing, when it named one
     `raw`   — first 500 chars of the response body (kept for the admin panel / job row)
     """
-
-    def __init__(self, message: str, *, status: int | None = None, code: str = "http",
-                 scope: str | None = None, raw: str = ""):
-        super().__init__(message)
-        self.status, self.code, self.scope, self.raw = status, code, scope, raw
 
 
 def _headers(api_key: str) -> dict:
@@ -104,7 +107,8 @@ async def _request(method: str, path: str, action: str, scope: str | None = None
                    timeout: float, **kw) -> httpx.Response:
     """The single place every ElevenLabs call is made, so transport and HTTP failures both
     come back classified rather than as a bare httpx exception string."""
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    # `voice_base._transport` is the test hook (httpx.MockTransport); None is the network.
+    async with httpx.AsyncClient(timeout=timeout, transport=voice_base._transport) as client:
         try:
             resp = await client.request(method, f"{BASE_URL}{path}", **kw)
         except httpx.RequestError as exc:
@@ -114,22 +118,6 @@ async def _request(method: str, path: str, action: str, scope: str | None = None
     if resp.status_code >= 400:
         raise _api_error(resp, action, scope)
     return resp
-
-
-def silence_wav(seconds: float = 0.4, rate: int = 16000) -> bytes:
-    """~13 KB of mono 16-bit digital silence, built in-process.
-
-    Probe payload only. It is the cheapest thing that still exercises the REAL
-    speech-to-text endpoint — the only way to prove the speech_to_text permission, since
-    ElevenLabs has no endpoint that reports a key's own scopes.
-    """
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(b"\x00\x00" * int(rate * seconds))
-    return buf.getvalue()
 
 
 async def transcribe(audio: bytes, filename: str, content_type: str, api_key: str,
@@ -193,8 +181,9 @@ async def text_to_speech(text: str, api_key: str, voice_id: str,
     `voice_settings` rides along only when non-empty: an absent key means "the voice's own
     defaults", which is what every clip before the advanced controls existed was made with, and
     sending an empty `{}` is not guaranteed to mean the same thing to ElevenLabs. The caller
-    (routers/tts.py::shape_voice_settings) is responsible for having removed anything the
-    model would reject — this function sends exactly what it is handed.
+    (services/voice.py::shape_voice_settings, against the ElevenLabs adapter's caps) is
+    responsible for having removed anything the model would reject — this function sends
+    exactly what it is handed.
     """
     if not voice_id:
         raise ElevenLabsError("No TTS voice is configured (set one in the admin panel).")
@@ -232,8 +221,8 @@ async def list_models(api_key: str) -> list[dict]:
     """The models this account may synthesize with, reduced to the fields the TTS form needs.
 
     Raw facts only — no ordering, no hiding, no "does this model take a style slider": that
-    judgement lives in one place, routers/tts.py::model_caps, so the customer form and the
-    request shaper can never disagree about a model. `languages` is flattened to ISO codes
+    judgement lives in one place, providers/tts_elevenlabs.py::model_caps, so the customer form
+    and the request shaper can never disagree about a model. `languages` is flattened to ISO codes
     because that is what /languages and the language selector already speak.
     """
     resp = await _request("GET", "/models", "Listing models", SCOPE_MODELS,

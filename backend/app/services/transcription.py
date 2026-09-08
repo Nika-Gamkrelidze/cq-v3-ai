@@ -428,7 +428,9 @@ def parse_override(raw: str | dict | None) -> dict:
 
 
 def as_kwargs(cfg: dict | None) -> dict:
-    """Resolved settings → `elevenlabs.transcribe()` keyword arguments.
+    """Resolved settings → the STT adapter's keyword arguments (`services/voice.py::transcribe`
+    hands them to `providers/stt_<provider>.py`; for ElevenLabs they are exactly
+    `elevenlabs.transcribe()`'s).
 
     An empty/None cfg yields `{}` — literally the call the product made before these settings
     existed — so a path that has not been taught about them cannot accidentally change what

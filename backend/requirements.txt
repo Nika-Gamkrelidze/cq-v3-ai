@@ -12,3 +12,4 @@ python-docx
 pytest
 pytest-asyncio
 openpyxl
+cryptography>=43

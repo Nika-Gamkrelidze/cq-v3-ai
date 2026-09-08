@@ -43,9 +43,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..db import pool
-from ..services import (analysis, attribution, elevenlabs, factcheck, limits, llm, media,
+from ..services import (ai_resolve, analysis, attribution, factcheck, limits, llm, media,
                         scoring, scoring_store, segments, semantic, sentiment_config,
-                        settings_store, summarise)
+                        settings_store, summarise, voice)
 from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 # One definition of "who owns this row", shared with the legacy upload routes rather than
@@ -197,15 +197,30 @@ def _media_type(content_type: str | None, path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-_KEYS = {"stt": ("elevenlabs_api_key", "ElevenLabs"), "llm": ("anthropic_api_key", "Anthropic")}
+_KEYS = {"llm": ("anthropic_api_key", "Anthropic")}
 
 
 async def _settings(*needs: str) -> dict:
     """The integration settings, with the keys a route is about to spend checked FIRST: a
     missing key is a clean 502 before a quota unit is taken or a row created — not a None
-    result, an SDK exception dressed as a 500, or an error row plus the same 502 later."""
+    result, an SDK exception dressed as a 500, or an error row plus the same 502 later.
+
+    "stt" is checked on the DEPLOYMENT'S speech-to-text resolution (the default connection,
+    else the legacy key) — the layer every caller has. A tenant assigned its own connection or
+    bringing its own key can only ADD a key above that, so a pass here is never wrong for it;
+    the one gap is a deployment with no STT key at any level whose tenant brings one, which is
+    refused here before `voice.transcribe` would have found the tenant's key.
+    """
     cfg = await settings_store.get_effective()
     for need in needs:
+        if need == "stt":
+            res = await ai_resolve.resolve(None, "stt")
+            if not res.api_key:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Speech-to-text API key is not configured (set it in the admin "
+                           "panel or add a default connection).")
+            continue
         key, vendor = _KEYS[need]
         if not cfg.get(key):
             raise HTTPException(status_code=502,
@@ -308,19 +323,21 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 
 async def _ingest(job_id: str, audio: bytes, filename: str | None, content_type: str | None,
-                  cfg: dict, *, emit=None, stt_settings: dict | None = None) -> dict:
+                  cfg: dict, *, emit=None, stt_settings: dict | None = None,
+                  client_id: str | None = None) -> dict:
     """Transcribe an already-created row and park it `ready` with its timeline.
 
     Shared by the single-upload route (both transports) and the summaries batch. A failure is
     recorded on the row first — a row left in `transcribing` is what the startup sweep fails
-    as abandoned, and this one was not abandoned, it was refused upstream.
+    as abandoned, and this one was not abandoned, it was refused upstream. `client_id` picks
+    the speech-to-text provider (`voice.transcribe`); `cfg` is the LLM settings the callers
+    still read for the later stages.
     """
     if emit is not None:
         emit("stage", {"stage": "transcribing"})
     try:
-        stt = await elevenlabs.transcribe(
-            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
-            **transcription_svc.as_kwargs(stt_settings))
+        stt = await voice.transcribe(client_id, audio, filename, content_type,
+                                     transcription=stt_settings)
     except Exception as exc:  # noqa: BLE001 — every STT failure is the same answer to the caller
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise _Failed(502, f"Transcription failed: {exc}") from exc
@@ -416,14 +433,15 @@ async def upload_recording(request: Request, file: UploadFile = File(...),
         async def run(emit):
             try:
                 return await _ingest(job_id, audio, file.filename, file.content_type, cfg,
-                                     emit=emit, stt_settings=stt_settings)
+                                     emit=emit, stt_settings=stt_settings,
+                                     client_id=principal.client_id)
             except asyncio.CancelledError:
                 await _abandon([job_id])
                 raise
         return _sse_response(_stream(request, run))
     try:
         return await _ingest(job_id, audio, file.filename, file.content_type, cfg,
-                             stt_settings=stt_settings)
+                             stt_settings=stt_settings, client_id=principal.client_id)
     except _Failed as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
@@ -862,7 +880,8 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
             user_id=_user_id(principal), source="audio", created_by=actor)
         try:
             recs.append(await _ingest(job_id, audio, filename, content_type, cfg,
-                                      stt_settings=stt_settings))
+                                      stt_settings=stt_settings,
+                                      client_id=principal.client_id))
         except _Failed as exc:
             raise _Failed(exc.status, f"'{filename}': {exc.detail}") from exc
         except asyncio.CancelledError:

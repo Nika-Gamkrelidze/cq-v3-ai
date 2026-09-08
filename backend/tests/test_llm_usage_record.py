@@ -148,17 +148,21 @@ def test_overlay_is_a_no_op_without_a_tenant(monkeypatch):
 
 
 def test_both_entry_points_apply_the_overlay():
-    """`call_tool` and `stream_text` are the only ways into Anthropic, so both must overlay.
+    """`call_tool` and `stream_text` are the only ways into a text provider, so both must
+    resolve the tenant's configuration before they build a request.
 
     A new entry point added without this line would silently ignore every tenant's
-    configuration while appearing to work perfectly.
+    configuration — their assigned connection, their own key — while appearing to work
+    perfectly. The chokepoint used to be `ai_config.overlay`; since the provider registry it
+    is `_resolve` (which calls `ai_resolve.resolve`). The name is pinned, not the mechanism:
+    what matters is that both functions go through the one place the chain is applied.
     """
     tree = ast.parse(LLM_SRC)
     for name in ("call_tool", "stream_text"):
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == name)
         body = ast.dump(fn)
-        assert "'overlay'" in body, f"{name} does not apply the tenant AI overlay"
+        assert "'_resolve'" in body, f"{name} does not resolve the tenant's AI configuration"
 
 
 # --------------------------------------------------------------------------- #

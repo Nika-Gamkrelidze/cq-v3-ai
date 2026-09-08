@@ -17,12 +17,10 @@ import { CheckRow, Msg, type Note } from './parts';
    disabled — the Georgian TTS path depends on that voice existing, and an operator who could
    untick it would break Georgian speech for everyone with no error to explain it. */
 
-export default function VoicesTab({
-  epoch, onSaved,
-}: {
-  /** Bumped by the Integrations tab after a key change — a new key may be a new account. */
+export default function VoicesTab({ epoch }: {
+  /** Bumped by the AI providers tab after a speech connection changes — a new key may be a
+      new account, with a different voice list. */
   epoch: number;
-  onSaved: () => void;
 }) {
   const { t } = useI18n();
   const [voices, setVoices] = useState<Voice[]>([]);
@@ -102,7 +100,6 @@ export default function VoicesTab({
     try {
       const d = await adminSend<VoicesPayload>('PUT', '/admin/voices', { mode, voice_ids: ids });
       apply(d);
-      onSaved();                       // the Integrations preview map may now be stale
       setNote({ kind: 'ok', text: t('toast.saved') });
       toast(t('toast.saved'), 'ok');
     } catch (e) {

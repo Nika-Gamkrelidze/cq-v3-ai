@@ -31,6 +31,7 @@
 
      chrome.ts              nav. login. session. err. btn. th. tab. rec. drop. lang. role.
                             feat. cap. res. toast. msg. f. tip.
+     features/ai.ts         ai.
      features/analysis.ts   an. fc. sn. stt. hist.
      features/bot.ts        bot.
      features/convert.ts    cv.
@@ -61,6 +62,7 @@
    duplicate check, and then nobody can answer "where does this string live?" without a grep. */
 
 import * as chrome from './chrome';
+import * as ai from './features/ai';
 import * as analysis from './features/analysis';
 import * as bot from './features/bot';
 import * as convert from './features/convert';
@@ -88,7 +90,7 @@ export type Dict = Record<string, string>;
 
 const MODULES: Record<Lang, Dict>[] = [
   chrome,
-  analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, transcription,
+  ai, analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, transcription,
   tts, workbench,
   account, aicfg, consolePage, copilot, home, usage, workspace,
 ];

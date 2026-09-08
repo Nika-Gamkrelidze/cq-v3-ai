@@ -1,8 +1,9 @@
 """Advanced TTS controls: the model catalogue and per-model shaping of voice_settings.
 
-Two promises are pinned here. First, the rules live in ONE place (`routers/tts.py::model_caps`)
-and both the customer form (GET /tts/models) and the request shaper derive from it — so a v3
-model that shows no style slider also never has a style value sent for it. Second, a request
+Two promises are pinned here. First, the rules live in ONE place — the ElevenLabs adapter's
+`model_caps` (`services/providers/tts_elevenlabs.py`) — and both the customer form
+(GET /tts/models) and the request shaper (`services/voice.py::shape_voice_settings`) derive
+from it — so a v3 model that shows no style slider also never has a style value sent for it. Second, a request
 written against the old contract (text + language, nothing else) still produces the exact
 ElevenLabs body it always did: no `voice_settings` key, `language_code` on multilingual_v2,
 nothing but text + model for Georgian.
@@ -10,15 +11,17 @@ nothing but text + model for Georgian.
 The route tests stub `elevenlabs._request` — one level below `text_to_speech` — because the
 claim under test is what leaves the process, and `text_to_speech` is the function that decides
 whether a `voice_settings` key exists at all. No network, no keys; the quota gate is a no-op
-and stored clips land in a temp dir.
+and stored clips land in a temp dir. The routes reach ElevenLabs through `services/voice.py`
+now; with no registry rows the resolver answers with the legacy settings, so the stubbed
+`settings_store.get_effective` is still the whole configuration.
 """
 import json
 import uuid
 
 import pytest
 
-from app.routers import tts
-from app.services import elevenlabs, limits, media, settings_store
+from app.services import elevenlabs, limits, media, settings_store, voice
+from app.services.providers import tts_elevenlabs as el
 from conftest import sql  # loop-independent SQL; see its module docstring
 
 RACHEL = "21m00Tcm4TlvDq8ikWAM"
@@ -56,42 +59,42 @@ FLASH = {"model_id": "eleven_flash_v2_5", "can_use_style": True, "can_use_speake
 # Pure: the capability rules
 # ---------------------------------------------------------------------------
 def test_caps_v3_is_presets_only():
-    caps = tts.model_caps(V3)
+    caps = el.model_caps(V3)
     assert caps == {"presets": True, "style": False, "speaker_boost": True, "speed": False,
                     "language_code": "rejected", "max_chars": 5000}
 
 
 def test_caps_multilingual_v2_takes_everything_and_ignores_the_language():
-    caps = tts.model_caps(MV2)
+    caps = el.model_caps(MV2)
     assert caps == {"presets": False, "style": True, "speaker_boost": True, "speed": True,
                     "language_code": "ignored", "max_chars": 5000}   # min(5000, 10000)
 
 
 def test_caps_flash_enforces_the_language():
-    assert tts.model_caps(FLASH)["language_code"] == "enforced"
-    assert tts.model_caps(FLASH)["max_chars"] == 5000
+    assert el.model_caps(FLASH)["language_code"] == "enforced"
+    assert el.model_caps(FLASH)["max_chars"] == 5000
 
 
 def test_caps_style_off_is_honoured_outside_v3():
     """A non-v3 model that says it cannot use style loses the slider too — the rule is the
     model's own flag, with the v3 prefix only adding to it."""
-    assert tts.model_caps(dict(MV2, can_use_style=False))["style"] is False
+    assert el.model_caps(dict(MV2, can_use_style=False))["style"] is False
 
 
 def test_caps_unknown_model_reads_as_supported():
     """The configured default may be a model the list does not describe. Absent flags mean
     "send it" — ElevenLabs ignores a field a model has no use for; hiding one it does take
     is a lost feature."""
-    caps = tts.model_caps({"model_id": "eleven_something_new"})
+    caps = el.model_caps({"model_id": "eleven_something_new"})
     assert caps["style"] and caps["speaker_boost"] and caps["speed"]
     assert caps["language_code"] == "ignored" and caps["max_chars"] == 5000
 
 
 def test_visible_hides_legacy_and_orders_the_products_first():
-    ids = [m["model_id"] for m in tts._visible([dict(m) for m in RAW_LIVE])]
+    ids = [m["model_id"] for m in el._visible([dict(m) for m in RAW_LIVE])]
     assert ids == ["eleven_multilingual_v2", "eleven_v3", "eleven_flash_v2_5",
                    "eleven_v3_conversational"]
-    for hidden in tts.MODEL_HIDE:
+    for hidden in el.MODEL_HIDE:
         assert hidden not in ids
 
 
@@ -100,21 +103,21 @@ def test_visible_hides_legacy_and_orders_the_products_first():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("asked, sent", [(0.3, 0.5), (0.8, 1.0), (0.0, 0.0), (0.2, 0.0), (1.0, 1.0)])
 def test_v3_snaps_stability_to_a_preset(asked, sent):
-    shaped = tts.shape_voice_settings(tts.model_caps(V3), {"stability": asked})
+    shaped = voice.shape_voice_settings(el.model_caps(V3), {"stability": asked})
     assert shaped == {"stability": sent}
 
 
 def test_v3_drops_style_and_speed_but_keeps_similarity_and_boost():
-    shaped = tts.shape_voice_settings(
-        tts.model_caps(V3),
+    shaped = voice.shape_voice_settings(
+        el.model_caps(V3),
         {"stability": 0.3, "style": 0.4, "speed": 1.1, "similarity_boost": 0.9,
          "use_speaker_boost": False})
     assert shaped == {"stability": 0.5, "similarity_boost": 0.9, "use_speaker_boost": False}
 
 
 def test_multilingual_v2_keeps_everything_clamped():
-    shaped = tts.shape_voice_settings(
-        tts.model_caps(MV2),
+    shaped = voice.shape_voice_settings(
+        el.model_caps(MV2),
         {"stability": 1.7, "similarity_boost": -0.2, "style": 0.4, "use_speaker_boost": 1,
          "speed": 0.5})
     assert shaped == {"stability": 1.0, "similarity_boost": 0.0, "style": 0.4,
@@ -122,11 +125,11 @@ def test_multilingual_v2_keeps_everything_clamped():
 
 
 def test_nothing_surviving_is_none_not_an_empty_object():
-    assert tts.shape_voice_settings(tts.model_caps(MV2), None) is None
-    assert tts.shape_voice_settings(tts.model_caps(MV2), {}) is None
-    assert tts.shape_voice_settings(tts.model_caps(MV2), {"style": None}) is None
+    assert voice.shape_voice_settings(el.model_caps(MV2), None) is None
+    assert voice.shape_voice_settings(el.model_caps(MV2), {}) is None
+    assert voice.shape_voice_settings(el.model_caps(MV2), {"style": None}) is None
     # v3 with only the controls it does not have: the model gets the voice's defaults.
-    assert tts.shape_voice_settings(tts.model_caps(V3), {"style": 0.4, "speed": 1.1}) is None
+    assert voice.shape_voice_settings(el.model_caps(V3), {"style": 0.4, "speed": 1.1}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +173,7 @@ def stubs(monkeypatch, tmp_path):
     # An anonymous clip is kept on disk: point the media root at a temp dir, never the volume.
     monkeypatch.setattr(media, "MEDIA_ROOT", tmp_path / "media")
     # Every test starts with a cold catalogue, so `models_down` is seen by the next request.
-    monkeypatch.setattr(tts, "_models_cache", None)
+    monkeypatch.setattr(el, "_models_cache", {})
     try:
         yield state
     finally:
@@ -223,7 +226,7 @@ def test_georgian_snaps_to_a_preset_and_never_sends_a_language_code(api, stubs):
                                "voice_settings": {"stability": 0.3, "style": 0.4, "speed": 1.1}})
     assert r.status_code == 200 and r.content == b"ID3fake-mp3"
     [sent] = stubs["sent"]
-    assert sent["voice_id"] == tts.GEORGIAN_VOICE
+    assert sent["voice_id"] == el.GEORGIAN_VOICE
     assert sent["json"] == {"text": text, "model_id": "eleven_v3",
                             "voice_settings": {"stability": 0.5}}
     assert "language_code" not in sent["json"]

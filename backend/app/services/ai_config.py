@@ -1,55 +1,49 @@
-"""Which AI a given tenant runs on.
+"""The LLM-only view of a tenant's AI configuration — a compatibility shim.
 
-`overlay()` answers "whose model and whose key does this call use", and `usage.py` answers
-"what did that come to" — the second is only meaningful if the first is honest about who paid,
-which is why the overlay reports `byo` and the usage rows carry it.
+This module used to OWN the per-tenant override (table `tenant_ai_configs`). The registry
+(`ai_registry.py`, `ai_resolve.py`) replaced it with three capabilities, named connections and
+sealed keys, and the old rows were copied into `tenant_ai_overrides` as `capability='llm'` on
+boot (services/migrate.py). Everything here now reads and writes THAT row, so the two callers
+that still speak the old vocabulary keep working unchanged:
 
-THE DEFAULT IS THE DEPLOYMENT'S OWN. Almost every tenant has no row here at all: they run on
-the model and key in the admin settings, and their spend is ours. A row appears when a tenant
-asks for something else — a different model, or their OWN provider key so the bill lands on
-their account. Both are superadmin-managed on purpose: a tenant able to set its own base_url
-could point the product at an endpoint that keeps every transcript it is handed.
+  * `/admin/ai-config/{tenant_id}` (routers/admin.py) — `public_config` / `save_config`;
+  * `llm.overlay`-era call sites — `overlay()` is the full resolver chain, LLM capability,
+    folded back into the old four-field tuple.
+
+New code imports `ai_resolve.resolve` directly. Nothing here returns a key: `public_config`
+carries `has_key` and a masked `key_hint`, and `overlay` is internal to the call path.
 """
 import logging
 from typing import NamedTuple
 
-from ..db import pool
+from . import ai_registry, ai_resolve
 
 log = logging.getLogger("cq")
 
-# Small and short-lived: this is read on the hot path of every AI call, and a tenant's model
-# changing is an operator action that can take a few seconds to land.
-_CACHE: dict[str, tuple[float, dict]] = {}
-_TTL_S = 30.0
-
-
-def _now() -> float:
-    import time
-    return time.monotonic()
-
 
 async def get_config(client_id: str) -> dict | None:
-    """The raw row for a tenant, or None. `api_key` is included — callers that build an API
-    response must use `public_config` instead."""
+    """The tenant's LLM override in the legacy row shape, or None. `api_key` is the OPENED
+    key — callers that build an API response must use `public_config` instead."""
     if not client_id:
         return None
-    async with pool().acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT client_id, provider, model, api_key, base_url, enabled, notes,
-                   updated_at, updated_by
-            FROM tenant_ai_configs WHERE client_id = $1
-            """, client_id)
-    return dict(row) if row else None
+    row = await ai_registry.get_override(client_id, "llm")
+    if not row:
+        return None
+    return {"client_id": str(row["client_id"]), "provider": row["provider"],
+            "model": row["model"], "api_key": ai_resolve.open_secret(row["api_key_enc"]),
+            "base_url": row["base_url"], "enabled": bool(row["enabled"]),
+            "notes": row["notes"], "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"]}
 
 
 async def public_config(client_id: str) -> dict:
     """What an operator may SEE. The key itself never leaves the server — only whether one is
-    set — because a console that can display a credential is a console that can leak it."""
+    set and a masked hint — because a console that can display a credential is a console
+    that can leak it."""
     row = await get_config(client_id)
     if not row:
         return {"enabled": False, "provider": "anthropic", "model": None,
-                "base_url": None, "has_key": False, "notes": None,
+                "base_url": None, "has_key": False, "key_hint": "", "notes": None,
                 "updated_at": None, "updated_by": None}
     return {
         "enabled": bool(row["enabled"]),
@@ -57,6 +51,7 @@ async def public_config(client_id: str) -> dict:
         "model": row["model"],
         "base_url": row["base_url"],
         "has_key": bool(row["api_key"]),
+        "key_hint": ai_registry._mask(row["api_key"] or ""),
         "notes": row["notes"],
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
         "updated_by": row["updated_by"],
@@ -67,65 +62,52 @@ async def save_config(client_id: str, *, enabled: bool, provider: str | None,
                       model: str | None, base_url: str | None,
                       api_key: str | None, clear_key: bool, notes: str | None,
                       updated_by: str) -> dict:
-    """Upsert a tenant's overrides.
+    """Upsert a tenant's LLM override (the superadmin shape: every field explicit, base_url
+    allowed — this is the operator's route, never a tenant's).
 
     `api_key` is only written when a NEW one is supplied: the console cannot read the stored
     key, so it cannot send it back, and treating "absent" as "clear it" would wipe a
     tenant's credential every time an operator edited the model. Clearing is therefore an
-    explicit `clear_key`.
+    explicit `clear_key`. Raises `ai_registry.RegistryError` (400 with a `code`) for an
+    unknown provider or a base_url the provider does not take.
     """
-    async with pool().acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO tenant_ai_configs
-                (client_id, provider, model, base_url, enabled, notes, api_key,
-                 updated_at, updated_by)
-            VALUES ($1, COALESCE($2,'anthropic'), $3, $4, $5, $6, $7, now(), $8)
-            ON CONFLICT (client_id) DO UPDATE SET
-                provider = COALESCE(EXCLUDED.provider, 'anthropic'),
-                model = EXCLUDED.model,
-                base_url = EXCLUDED.base_url,
-                enabled = EXCLUDED.enabled,
-                notes = EXCLUDED.notes,
-                api_key = CASE
-                    WHEN $9 THEN NULL                       -- explicitly cleared
-                    WHEN $7 IS NOT NULL THEN $7             -- replaced
-                    ELSE tenant_ai_configs.api_key          -- left alone
-                END,
-                updated_at = now(),
-                updated_by = EXCLUDED.updated_by
-            """,
-            client_id, (provider or "anthropic").strip() or "anthropic",
-            (model or "").strip() or None, (base_url or "").strip() or None,
-            bool(enabled), (notes or "").strip() or None,
-            (api_key or "").strip() or None, updated_by, bool(clear_key))
-    _CACHE.pop(client_id, None)
+    await ai_registry.save_override(
+        client_id, "llm", provider=(provider or "anthropic"), model=model, api_key=api_key,
+        clear_key=clear_key, enabled=bool(enabled), notes=notes, base_url=base_url,
+        updated_by=updated_by)
+    forget(client_id)
     return await public_config(client_id)
 
 
 class Overlay(NamedTuple):
-    """What a call should actually run on, after the tenant's row is applied."""
+    """What a call should actually run on, after the tenant's own row is applied."""
     api_key: str
     model: str
     base_url: str | None
     byo: bool          # the spend is on the TENANT'S key, not ours
 
 
+# The overlay's own short cache of `get_config` rows, exactly as before the registry: it is
+# the pre-registry algorithm kept whole for the callers (and tests) that still pin it.
+_CACHE: dict[str, tuple[float, dict]] = {}
+_TTL_S = 30.0
+
+
+def _now() -> float:
+    import time
+    return time.monotonic()
+
+
 async def overlay(client_id: str | None, api_key: str, model: str) -> Overlay:
-    """Apply a tenant's overrides on top of the deployment default.
+    """DEPRECATED — the pre-registry overlay: the tenant's OWN LLM row (bring-your-own key
+    and/or model) applied over the deployment default the caller passes in.
 
-    `api_key` and `model` are the default the caller already resolved from settings, so this
-    does not re-read them; it only fetches the tenant's row (cached) and substitutes the
-    fields that row actually sets. A tenant may override the model alone and still run on our
-    key — the common request — or bring only a key, which is equally fine.
-
-    THIS IS THE ONE PLACE THE OVERRIDE IS APPLIED. `llm.py` calls it for every Claude request,
-    which is why the ~15 call sites do not each have to remember to. Anything that reads a key
-    from settings and talks to Anthropic WITHOUT going through `llm.py` would silently bypass
-    a tenant's configuration, so new AI code goes through `llm.py`.
-
-    Never raises: a tenant whose config cannot be read runs on the default rather than losing
-    the request, and the failure is logged.
+    It sees ONE layer of the chain — the tenant's own row — and none of the registry's
+    default or assigned connections. Production call sites go through
+    `ai_resolve.resolve(client_id, "llm", ...)`, which is the full chain; this stays so a
+    caller written against the old shape keeps its old, exact behaviour rather than a
+    silently different one. Never raises: a tenant whose row cannot be read runs on the
+    default rather than losing the request, and the failure is logged.
     """
     default = Overlay(api_key=api_key, model=model, base_url=None, byo=False)
     if not client_id:
@@ -153,8 +135,9 @@ async def overlay(client_id: str | None, api_key: str, model: str) -> Overlay:
 
 
 def forget(client_id: str | None = None) -> None:
-    """Drop the cache — for tests, and after a save."""
+    """Drop both caches — the overlay's and the resolver's — for tests, and after a save."""
     if client_id:
         _CACHE.pop(client_id, None)
     else:
         _CACHE.clear()
+    ai_resolve.forget(client_id)

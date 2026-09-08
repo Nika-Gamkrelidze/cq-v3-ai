@@ -1,0 +1,356 @@
+"""The voice seam (`services/voice.py`) and the four adapters behind it.
+
+Three claims are pinned here, and the first is the one that matters most:
+
+1. With the resolver answering the LEGACY layer (what an empty registry resolves to), the
+   request that leaves the process for ElevenLabs is byte for byte what it was before the seam
+   existed — `model_id` / `diarize` / `tag_audio_events`, plus `language_code` / `keyterms`
+   only when the settings set them; text + model (+ language_code where the model takes it)
+   for TTS, the Georgian path still eleven_v3 + Laura with no language code.
+2. A tenant resolved to provider `openai` reaches the OpenAI adapter, which sends the
+   documented request shapes: multipart `/audio/transcriptions` with `language`, JSON
+   `/audio/speech` returning the bytes. There are NO provider keys in this tree, so these are
+   the only checks the OpenAI adapters get until an operator presses "Test connection".
+3. The seam degrades rather than crashes: an unknown provider, a foreign model id, a rejected
+   key and a dead network are each one classified `VoiceError` (or a `{ok: False}` probe).
+
+Every request is captured with `httpx.MockTransport`, installed through `voice_base._transport`
+— the hook both `elevenlabs._request` and `voice_base.http_request` read. The resolver is
+stubbed by module attribute (the registry's chain is its own test's business; this file needs
+only its OUTPUT), and `audio_format="original"` keeps ffmpeg out of the multipart assertions.
+No database: nothing here touches the app's pool.
+"""
+import asyncio
+import json
+import re
+
+import httpx
+import pytest
+
+from app.services import ai_resolve, segments, settings_store, voice
+from app.services import transcription as tr
+from app.services.ai_resolve import Resolved
+from app.services.providers import tts_elevenlabs, voice_base
+
+RACHEL = "21m00Tcm4TlvDq8ikWAM"
+LAURA = tts_elevenlabs.GEORGIAN_VOICE
+ORIGINAL = {"audio_format": "original"}     # no ffmpeg; every other setting on its default
+
+
+def run(coro):
+    """Drive one coroutine on its own loop — the house pattern (see conftest.sql)."""
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# Resolved values — what the registry's chain would hand the seam
+# ---------------------------------------------------------------------------
+def legacy_stt(model="scribe_v1"):
+    return Resolved("stt", "elevenlabs", model, "el-key", None)
+
+
+def legacy_tts(settings=None):
+    return Resolved("tts", "elevenlabs", "eleven_multilingual_v2", "el-key", None,
+                    settings={"voice_id": RACHEL} if settings is None else settings)
+
+
+def openai_stt(model="whisper-1", base_url=None):
+    return Resolved("stt", "openai", model, "sk-test", base_url, byo=True,
+                    connection_id="c-1", source="byo")
+
+
+def openai_tts(settings=None):
+    return Resolved("tts", "openai", "tts-1", "sk-test", None,
+                    settings={"voice_id": "nova"} if settings is None else settings,
+                    connection_id="c-2", source="assigned")
+
+
+# The ElevenLabs model catalogue as GET /v1/models returns it (languages as objects).
+def _raw(model_id, *, style=True, limit=10000, langs=("en",)):
+    return {"model_id": model_id, "name": model_id, "description": "",
+            "can_do_text_to_speech": True, "can_use_style": style,
+            "can_use_speaker_boost": True, "maximum_text_length_per_request": limit,
+            "languages": [{"language_id": c, "name": c} for c in langs]}
+
+
+EL_MODELS = [_raw("eleven_multilingual_v2", langs=("en", "ru")),
+             _raw("eleven_v3", style=False, limit=5000, langs=("en", "ka", "ru")),
+             _raw("eleven_flash_v2_5", limit=40000)]
+
+
+def form_fields(req: dict) -> dict:
+    """The multipart body as {field: [values]} — `<file>` for a file part. A list, because
+    `keyterms` is a REPEATED field."""
+    boundary = re.search(r"boundary=([^;]+)", req["content_type"]).group(1).encode()
+    out: dict = {}
+    for part in req["body"].split(b"--" + boundary):
+        if b"Content-Disposition" not in part:
+            continue
+        head, _, value = part.partition(b"\r\n\r\n")
+        name = re.search(rb'name="([^"]+)"', head).group(1).decode()
+        out.setdefault(name, []).append(
+            "<file>" if b'filename="' in head else value.rstrip(b"\r\n").decode())
+    return out
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    """Every request the adapters make, with canned responses by path substring."""
+    state = {"sent": [], "responses": {}, "fail": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state["fail"] is not None:
+            raise state["fail"]
+        state["sent"].append({
+            "method": request.method, "url": str(request.url), "path": request.url.path,
+            "headers": dict(request.headers), "body": request.read(),
+            "content_type": request.headers.get("content-type", "")})
+        for key, (status, payload) in state["responses"].items():
+            if key in request.url.path:
+                if isinstance(payload, bytes):
+                    return httpx.Response(status, content=payload,
+                                          headers={"content-type": "audio/mpeg"})
+                return httpx.Response(status, json=payload)
+        return httpx.Response(404, json={"error": {"message": f"no canned {request.url.path}"}})
+
+    monkeypatch.setattr(voice_base, "_transport", httpx.MockTransport(handler))
+    monkeypatch.setattr(tts_elevenlabs, "_models_cache", {})   # cold catalogue every test
+    state["responses"].update({
+        "/speech-to-text": (200, {"text": "ok", "language_code": "ka",
+                                  "words": [{"text": "ok", "start": 0.0, "end": 0.3,
+                                             "speaker_id": "speaker_0", "type": "word"}]}),
+        "/models": (200, EL_MODELS),
+        "/voices": (200, {"voices": [{"voice_id": RACHEL, "name": "Rachel",
+                                      "category": "premade", "preview_url": "u"}]}),
+        "/text-to-speech/": (200, b"ID3fake-el"),
+        "/audio/transcriptions": (200, {"text": "hello", "language": "english",
+                                        "words": [{"word": "hello", "start": 0.0, "end": 0.4}]}),
+        "/audio/speech": (200, b"ID3fake-openai"),
+    })
+    return state
+
+
+@pytest.fixture
+def resolver(monkeypatch):
+    """The resolver's OUTPUT per capability, and who asked for what."""
+    state = {"stt": legacy_stt(), "tts": legacy_tts(), "calls": []}
+
+    async def _resolve(client_id, capability, *, api_key=None, model=None):
+        state["calls"].append((client_id, capability))
+        return state[capability]
+
+    async def _effective():
+        return {"elevenlabs_api_key": "el-key", "tts_voice_id": RACHEL,
+                "tts_model": "eleven_multilingual_v2", "stt_model": "scribe_v1"}
+
+    monkeypatch.setattr(ai_resolve, "resolve", _resolve)
+    monkeypatch.setattr(settings_store, "get_effective", _effective)
+    return state
+
+
+# ---------------------------------------------------------------------------
+# 1. ElevenLabs through the seam: the same requests as before
+# ---------------------------------------------------------------------------
+def test_legacy_stt_with_no_settings_sends_exactly_what_it_always_did(wire, resolver):
+    out = run(voice.transcribe(None, b"raw", "call.wav", "audio/wav", transcription=ORIGINAL))
+    [req] = wire["sent"]
+    assert req["url"] == "https://api.elevenlabs.io/v1/speech-to-text"
+    assert req["headers"]["xi-api-key"] == "el-key"
+    assert form_fields(req) == {"model_id": ["scribe_v1"], "diarize": ["true"],
+                                "tag_audio_events": ["true"], "file": ["<file>"]}
+    assert (out["text"], out["language_code"]) == ("ok", "ka")
+    assert out["words"][0]["speaker_id"] == "speaker_0"
+    assert (out["provider"], out["model"], out["source"]) == ("elevenlabs", "scribe_v1", "legacy")
+    assert resolver["calls"] == [(None, "stt")]
+
+
+def test_legacy_stt_sends_language_keyterms_and_diarize_off_when_set(wire, resolver):
+    run(voice.transcribe("t-1", b"raw", "call.wav", "audio/wav", transcription={
+        **ORIGINAL, "language_code": "ka", "diarize": False,
+        "keyterms": ["თვე", "policy number"]}))
+    fields = form_fields(wire["sent"][0])
+    assert fields["language_code"] == ["ka"]
+    assert fields["diarize"] == ["false"]
+    assert fields["keyterms"] == ["თვე", "policy number"]     # one part per term
+    assert resolver["calls"] == [("t-1", "stt")]
+
+
+def test_settings_are_resolved_for_the_tenant_when_the_caller_passes_none(wire, resolver,
+                                                                           monkeypatch):
+    asked = []
+
+    async def _resolve_settings(client_id=None, per_file=None):
+        asked.append(client_id)
+        return {**tr.CODE_DEFAULTS, **ORIGINAL, "language_code": "ru"}
+
+    monkeypatch.setattr(tr, "resolve", _resolve_settings)
+    run(voice.transcribe("t-9", b"raw", "call.wav", "audio/wav"))
+    assert asked == ["t-9"]
+    assert form_fields(wire["sent"][0])["language_code"] == ["ru"]
+
+
+def test_georgian_tts_is_v3_plus_laura_with_no_language_code(wire, resolver):
+    audio = run(voice.synthesize(None, "დიახ", language_code="ka",
+                                 voice_settings={"stability": 0.3, "style": 0.4, "speed": 1.1}))
+    assert audio == b"ID3fake-el"
+    tts_req = [r for r in wire["sent"] if "/text-to-speech/" in r["path"]][0]
+    assert tts_req["path"].endswith(f"/text-to-speech/{LAURA}")
+    assert "output_format=mp3_44100_128" in tts_req["url"]
+    assert json.loads(tts_req["body"]) == {"text": "დიახ", "model_id": "eleven_v3",
+                                           "voice_settings": {"stability": 0.5}}
+
+
+def test_english_tts_sends_the_code_on_multilingual_v2_with_the_default_voice(wire, resolver):
+    run(voice.synthesize(None, "hi", language_code="en"))
+    tts_req = [r for r in wire["sent"] if "/text-to-speech/" in r["path"]][0]
+    assert tts_req["path"].endswith(f"/text-to-speech/{RACHEL}")
+    assert json.loads(tts_req["body"]) == {"text": "hi", "model_id": "eleven_multilingual_v2",
+                                           "language_code": "en"}
+
+
+def test_no_language_uses_the_connections_model_and_sends_no_code(wire, resolver):
+    resolver["tts"] = Resolved("tts", "elevenlabs", "eleven_flash_v2_5", "el-key", None,
+                               settings={"voice_id": RACHEL})
+    run(voice.synthesize(None, "hi"))
+    tts_req = [r for r in wire["sent"] if "/text-to-speech/" in r["path"]][0]
+    assert json.loads(tts_req["body"]) == {"text": "hi", "model_id": "eleven_flash_v2_5"}
+
+
+def test_default_voice_falls_back_to_the_admin_setting_for_elevenlabs_only(wire, resolver):
+    resolver["tts"] = legacy_tts(settings={})                   # a connection with no voice
+    ctx = run(voice.tts(None))
+    assert ctx.provider == "elevenlabs"
+    assert run(ctx.default_voice()) == RACHEL                  # the legacy tts_voice_id
+    resolver["tts"] = openai_tts(settings={})
+    ctx = run(voice.tts(None))
+    assert run(ctx.default_voice()) == "alloy"                  # never the ElevenLabs id
+
+
+def test_elevenlabs_models_and_voices_come_back_in_todays_shapes(wire, resolver):
+    models = run(voice.list_models(None))
+    assert [m["model_id"] for m in models] == ["eleven_multilingual_v2", "eleven_v3",
+                                               "eleven_flash_v2_5"]
+    v3 = models[1]
+    assert v3["supports"] == {"presets": True, "style": False, "speaker_boost": True,
+                              "speed": False, "language_code": "rejected"}
+    assert v3["max_chars"] == 5000 and v3["languages"] == ["en", "ka", "ru"]
+    voices = run(voice.list_voices(None))
+    assert voices == [{"voice_id": RACHEL, "name": "Rachel", "category": "premade",
+                       "preview_url": "u", "is_default": True}]
+    ctx = run(voice.tts(None))
+    assert run(ctx.system_voice_ids()) == {RACHEL, LAURA}
+
+
+# ---------------------------------------------------------------------------
+# 2. A tenant on OpenAI reaches the OpenAI adapters
+# ---------------------------------------------------------------------------
+def test_openai_stt_sends_multipart_with_language_prompt_and_word_timestamps(wire, resolver):
+    resolver["stt"] = openai_stt()
+    out = run(voice.transcribe("t-1", b"raw", "call.wav", "audio/wav", transcription={
+        **ORIGINAL, "language_code": "kat", "keyterms": ["თვე", "პოლისი"]}))
+    [req] = wire["sent"]
+    assert req["url"] == "https://api.openai.com/v1/audio/transcriptions"
+    assert req["headers"]["authorization"] == "Bearer sk-test"
+    assert form_fields(req) == {
+        "model": ["whisper-1"], "language": ["ka"],          # ISO-639-3 → 639-1
+        "prompt": ["თვე, პოლისი"], "response_format": ["verbose_json"],
+        "timestamp_granularities[]": ["word"], "file": ["<file>"]}
+    assert (out["text"], out["language_code"], out["provider"]) == ("hello", "en", "openai")
+    # Words without speaker ids: the timeline degrades to one speaker, it does not crash.
+    assert out["words"] == [{"text": "hello", "start": 0.0, "end": 0.4, "type": "word"}]
+    assert "speaker_id" not in out["words"][0]
+    [seg] = segments.build_segments(out["words"])
+    assert seg["speaker"] == segments.DEFAULT_SPEAKER
+    assert "diarize" in out["detail"]
+
+
+def test_openai_gpt4o_asks_for_plain_json_and_honours_the_base_url(wire, resolver):
+    resolver["stt"] = openai_stt("gpt-4o-transcribe", base_url="https://proxy.example/v1/")
+    wire["responses"]["/audio/transcriptions"] = (200, {"text": "hi"})
+    out = run(voice.transcribe("t-1", b"raw", "call.wav", "audio/wav", transcription=ORIGINAL))
+    [req] = wire["sent"]
+    assert req["url"] == "https://proxy.example/v1/audio/transcriptions"
+    fields = form_fields(req)
+    assert fields["response_format"] == ["json"]
+    assert "timestamp_granularities[]" not in fields and "language" not in fields
+    assert out["words"] == [] and out["language_code"] is None and out["text"] == "hi"
+
+
+def test_openai_tts_sends_the_json_body_and_returns_the_bytes(wire, resolver):
+    resolver["tts"] = openai_tts()
+    audio = run(voice.synthesize("t-1", "ok", language_code="en",
+                                 voice_settings={"speed": 1.1, "style": 0.4, "stability": 0.3}))
+    assert audio == b"ID3fake-openai"
+    [req] = wire["sent"]
+    assert req["url"] == "https://api.openai.com/v1/audio/speech"
+    assert req["headers"]["authorization"] == "Bearer sk-test"
+    # style/stability have no OpenAI control (caps say so) and are shaped away; speed stays;
+    # there is no language field on this API.
+    assert json.loads(req["body"]) == {"model": "tts-1", "input": "ok", "voice": "nova",
+                                       "response_format": "mp3", "speed": 1.1}
+    assert resolver["calls"] == [("t-1", "tts")]
+
+
+def test_openai_tts_catalogue_says_what_the_form_may_show(wire, resolver):
+    resolver["tts"] = openai_tts()
+    models = run(voice.list_models("t-1"))
+    assert [m["model_id"] for m in models] == ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"]
+    assert models[0]["supports"] == {"presets": False, "style": False, "speaker_boost": False,
+                                     "speed": True, "language_code": "ignored"}
+    assert models[0]["max_chars"] == 4096
+    voices = run(voice.list_voices("t-1"))
+    assert [v["voice_id"] for v in voices][:3] == ["alloy", "ash", "ballad"]
+    assert [v["voice_id"] for v in voices if v["is_default"]] == ["nova"]
+    assert all(v["preview_url"] is None for v in voices)
+    assert wire["sent"] == []                                   # no network for a fixed list
+    ctx = run(voice.tts("t-1"))
+    assert ctx.valid_voice_id("nova") and not ctx.valid_voice_id("../../v1/dubbing")
+    assert ctx.defaults_for_language("ka") == {"model": "tts-1", "voice": None, "note": ""}
+
+
+# ---------------------------------------------------------------------------
+# 3. Degrade, never crash
+# ---------------------------------------------------------------------------
+def test_a_foreign_model_id_is_replaced_by_the_adapters_default(wire, resolver):
+    resolver["stt"] = openai_stt(model="scribe_v1")             # legacy stt_model showing through
+    run(voice.transcribe(None, b"raw", "a.wav", "audio/wav", transcription=ORIGINAL))
+    assert form_fields(wire["sent"][0])["model"] == ["whisper-1"]
+    resolver["stt"] = legacy_stt(model="whisper-1")
+    run(voice.transcribe(None, b"raw", "a.wav", "audio/wav", transcription=ORIGINAL))
+    assert form_fields(wire["sent"][1])["model_id"] == ["scribe_v1"]
+
+
+def test_an_unknown_provider_is_one_classified_error(wire, resolver):
+    resolver["stt"] = Resolved("stt", "acme", None, "k", None)
+    with pytest.raises(voice.VoiceError) as exc:
+        run(voice.transcribe(None, b"raw", "a.wav", "audio/wav", transcription=ORIGINAL))
+    assert exc.value.code == "unknown_provider"
+    assert wire["sent"] == []
+
+
+def test_openai_key_rejection_is_classified_and_never_echoes_the_key(wire, resolver):
+    resolver["stt"] = openai_stt()
+    wire["responses"]["/audio/transcriptions"] = (
+        401, {"error": {"message": "Incorrect API key provided", "code": "invalid_api_key"}})
+    with pytest.raises(voice.VoiceError) as exc:
+        run(voice.transcribe(None, b"raw", "a.wav", "audio/wav", transcription=ORIGINAL))
+    assert exc.value.code == "invalid_key" and exc.value.status == 401
+    assert "sk-test" not in str(exc.value)
+
+
+def test_probes_report_rather_than_raise(wire, resolver):
+    ok = run(voice.probe(openai_tts()))
+    assert ok["ok"] is True and "bytes" in ok["detail"]
+    assert json.loads(wire["sent"][-1]["body"])["voice"] == "nova"
+
+    ok = run(voice.probe(legacy_stt()))
+    assert ok["ok"] is True and "scribe_v1" in ok["detail"]
+
+    wire["responses"]["/audio/speech"] = (401, {"error": {"code": "invalid_api_key"}})
+    bad = run(voice.probe(openai_tts()))
+    assert bad == {"ok": False, "detail": bad["detail"], "code": "invalid_key"}
+
+    wire["fail"] = httpx.ConnectError("dns")
+    dead = run(voice.probe(legacy_stt()))
+    assert dead["ok"] is False and dead["code"] == "transport"
+    assert run(voice.probe(Resolved("stt", "acme", None, "k", None)))["code"] == "unknown_provider"

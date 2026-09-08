@@ -28,6 +28,7 @@ import {
   ApiError, apiGet, apiMessage, apiSend, getActingTenant, readSession, setActingTenant,
 } from '@/lib/session';
 import { useI18n } from '@/lib/useI18n';
+import { AiTab } from './AiTab';
 import { AnalyseTab } from './AnalyseTab';
 import { BotTab } from './BotTab';
 import { makeJson, makeSend, SCOPE, WsContext, type TabName, type Ws } from './ctx';
@@ -73,6 +74,12 @@ const TABS: { key: TabName; icon: string; label: string }[] = [
      is a compliance verdict made of a typo. `tr.heading` is the shared feature string the
      console and the upload panel also use, so the three surfaces are named alike. */
   { key: 'transcription', icon: '🎙', label: 'tr.heading' },
+  /* Same KIND of thing again — a per-workspace AI setting with an inherited default — and the
+     one underneath all the others: which provider key the text and voice models run on. It
+     sits right after transcription so the three settings tabs read as a group. `ai.tab` is the
+     shared vocabulary the console's registry uses, so the customer and the operator call the
+     surface the same thing. */
+  { key: 'ai', icon: '🔑', label: 'ai.tab' },
   { key: 'health', icon: '🩺', label: 'cur.tab' },
   { key: 'bot', icon: '🤖', label: 'tab.bot' },
   { key: 'history', icon: '🗂', label: 'tab.history' },
@@ -373,6 +380,7 @@ export default function WorkspacePage() {
           <section className={`panel${tab === 'analyze' ? ' active' : ''}`}><AnalyseTab wbRef={wbRef} /></section>
           <section className={`panel${tab === 'rubric' ? ' active' : ''}`}><RubricTab on={tab === 'rubric'} gen={genState} /></section>
           <section className={`panel${tab === 'transcription' ? ' active' : ''}`}><TranscriptionTab on={tab === 'transcription'} gen={genState} /></section>
+          <section className={`panel${tab === 'ai' ? ' active' : ''}`}><AiTab on={tab === 'ai'} gen={genState} /></section>
           <section className={`panel${tab === 'health' ? ' active' : ''}`}><HealthTab on={tab === 'health'} gen={genState} /></section>
           <section className={`panel${tab === 'bot' ? ' active' : ''}`}><BotTab on={tab === 'bot'} gen={genState} /></section>
           <section className={`panel${tab === 'history' ? ' active' : ''}`}><HistoryTab on={tab === 'history'} gen={genState} /></section>

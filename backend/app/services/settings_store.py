@@ -2,6 +2,11 @@
 
 Effective config = DB overrides (app_settings 'integrations' row) merged on top of
 the .env defaults in `settings`. Secrets never leave the backend except masked.
+
+Secrets are ENCRYPTED AT REST: every SECRET_FIELDS / EMBEDDING_SECRETS value is written
+through `secrets.seal()` and read back through `secrets.open()`, so callers of `get_effective`
+and `get_embedding_config` always receive a key ready to send to the provider, and the stored
+blob never holds one in the clear once SECRETS_KEY is set (services/secrets.py has the rules).
 """
 import json
 import logging
@@ -9,6 +14,7 @@ import time
 
 from ..config import settings
 from ..db import pool
+from . import secrets
 
 log = logging.getLogger("cq")
 
@@ -101,9 +107,10 @@ async def get_effective() -> dict:
     overrides = await _load_overrides()
     cfg = dict(DEFAULTS)
     cfg.update({k: v for k, v in overrides.items() if v not in (None, "")})
-    # Secrets: DB override wins, else fall back to env.
-    cfg["anthropic_api_key"] = overrides.get("anthropic_api_key") or settings.anthropic_api_key
-    cfg["elevenlabs_api_key"] = overrides.get("elevenlabs_api_key") or settings.elevenlabs_api_key
+    # Secrets: DB override wins (decrypted here — the stored form is sealed), else the env
+    # fallback, which is plaintext by nature and passes through `open()` unchanged.
+    for field in SECRET_FIELDS:
+        cfg[field] = secrets.open(overrides.get(field)) or getattr(settings, field, "")
     return cfg
 
 
@@ -138,7 +145,7 @@ async def update(patch: dict) -> None:
             if value == "__clear__":
                 overrides.pop(key, None)
             elif value != "":
-                overrides[key] = value
+                overrides[key] = secrets.seal(value)
         else:
             overrides[key] = value
     await _save_key(SETTINGS_KEY, overrides)
@@ -163,6 +170,8 @@ async def get_embedding_config() -> dict:
     }
     cfg.update({k: v for k, v in ov.items() if v not in (None, "")})
     cfg["dim"] = int(cfg.get("dim") or settings.embedding_dim)
+    for field in EMBEDDING_SECRETS:
+        cfg[field] = secrets.open(cfg.get(field))
     return cfg
 
 
@@ -183,7 +192,7 @@ async def set_embedding_config(patch: dict) -> None:
             if value == "__clear__":
                 ov.pop(key, None)
             elif value != "":
-                ov[key] = value
+                ov[key] = secrets.seal(value)
         else:
             ov[key] = value
     await _save_key(EMBEDDINGS_KEY, ov)

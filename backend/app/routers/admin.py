@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
-from ..services import (ai_config, chat_credentials, chat_store, claude, elevenlabs, limits,
-                        settings_store, usage)
+from ..services import (ai_config, chat_credentials, chat_store, claude, limits, settings_store,
+                        usage, voice)
 from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
@@ -95,37 +95,40 @@ async def _probe_ffmpeg() -> dict:
             "detail": "ffmpeg is not installed — uploads go to Scribe untranscoded."}
 
 
-async def _probe_voices(cfg: dict) -> dict:
-    from .tts import system_voice_ids
-    voices = await elevenlabs.list_voices(cfg["elevenlabs_api_key"])
+# The voice probes below test the DEPLOYMENT'S voice provider — what an anonymous caller and
+# every tenant without an assigned or bring-your-own connection runs on (`voice.tts(None)`,
+# `voice.transcribe(None, ...)`). A tenant's own connection is tested from the registry's
+# "Test connection" button (`voice.probe`). The report keys keep their historic
+# `elevenlabs_*` names for the panel; the detail names the provider that actually answered.
+async def _probe_voices() -> dict:
+    ctx = await voice.tts(None)
+    voices = await ctx.voices()
     if not voices:
         return {"level": "warn", "code": "no_voices",
-                "detail": "authenticated, but this account lists 0 voices"}
-    default = cfg.get("tts_voice_id")
+                "detail": f"{ctx.provider}: authenticated, but this account lists 0 voices"}
+    default = await ctx.default_voice()
     if default and default not in {v.get("voice_id") for v in voices} \
-            and default not in system_voice_ids(cfg):
+            and default not in await ctx.system_voice_ids():
         return {"level": "warn", "code": "voice_missing",
                 "detail": f"{len(voices)} voices available; configured default {default} is not one"}
-    return {"level": "ok", "detail": f"{len(voices)} voices available"}
+    return {"level": "ok", "detail": f"{ctx.provider}: {len(voices)} voices available"}
 
 
-async def _probe_stt(cfg: dict) -> dict:
-    """Real POST /v1/speech-to-text on 0.4 s of generated silence. Costs a fraction of a
-    second of Scribe and is the ONLY proof of the speech_to_text permission. It also
-    exercises ffmpeg, the multipart shape and the configured stt_model in one call.
+async def _probe_stt() -> dict:
+    """A real speech-to-text call on 0.4 s of generated silence. Costs a fraction of a
+    second of transcription and is the ONLY proof the key may transcribe. It also
+    exercises ffmpeg, the multipart shape and the configured model in one call.
 
     It runs with the DEPLOYMENT'S transcription defaults (language, diarize, keyterms and —
     the reason this matters — the audio format), so this one button also answers "does
-    ElevenLabs actually accept the encoding we are about to send every customer's call in".
-    That is the check that has to pass before the default is moved off lossy MP3.
+    the provider actually accept the encoding we are about to send every customer's call
+    in". That is the check that has to pass before the default is moved off lossy MP3.
     """
     stt = await transcription_svc.get_default(force=True)
     try:
-        out = await elevenlabs.transcribe(
-            elevenlabs.silence_wav(), "probe.wav", "audio/wav",
-            cfg["elevenlabs_api_key"], cfg["stt_model"], timeout=60.0,
-            **transcription_svc.as_kwargs(stt))
-    except elevenlabs.ElevenLabsError as exc:
+        out = await voice.transcribe(None, voice.silence_wav(), "probe.wav", "audio/wav",
+                                     transcription=stt, timeout=60.0)
+    except voice.VoiceError as exc:
         # A 400/422 that is NOT auth/permission/credit means the request was authorised and
         # only the payload was rejected — don't cry wolf about a working capability, but DO
         # name the format, because that is the most likely thing to have been refused.
@@ -134,29 +137,33 @@ async def _probe_stt(cfg: dict) -> dict:
                     "detail": f"audio_format={stt['audio_format']}: {exc}"}
         raise
     return {"level": "ok",
-            "detail": f"model {cfg['stt_model']} accepted a 0.4 s probe clip as "
-                      f"{stt['audio_format']} (lang={out.get('language_code') or 'n/a'})"}
+            "detail": f"{out.get('provider')} model {out.get('model')} accepted a 0.4 s probe "
+                      f"clip as {stt['audio_format']} (lang={out.get('language_code') or 'n/a'})"}
 
 
-async def _probe_tts(cfg: dict) -> dict:
-    if not cfg.get("tts_voice_id"):
+async def _probe_tts() -> dict:
+    """The configured default model + default voice, no language — what a caller who names
+    nothing gets."""
+    ctx = await voice.tts(None)
+    plan = await ctx.plan()
+    if not plan.voice_id:
         return {"level": "warn", "code": "no_voice_configured", "detail": "no default voice set"}
-    audio = await elevenlabs.text_to_speech(
-        PROBE_TEXT, cfg["elevenlabs_api_key"], cfg["tts_voice_id"], cfg["tts_model"],
-        "en", output_format="mp3_22050_32", timeout=60.0)
-    return {"level": "ok", "detail": f"model {cfg['tts_model']} returned {len(audio)} bytes"}
+    audio = await ctx.synthesize(PROBE_TEXT, plan)
+    return {"level": "ok",
+            "detail": f"{ctx.provider} model {plan.model_id} returned {len(audio)} bytes"}
 
 
-async def _probe_tts_ka(cfg: dict) -> dict:
-    """Georgian is the load-bearing TTS path (CLAUDE.md section 4): eleven_v3 + a
-    Georgian-capable shared voice. eleven_v3 is separately entitled and the shared voice may
-    not be in the account listing at all, so GET /v1/voices cannot vouch for it."""
-    from .tts import GEORGIAN_VOICE, LANGUAGES
-    info = LANGUAGES["ka"]
-    audio = await elevenlabs.text_to_speech(
-        PROBE_TEXT_KA, cfg["elevenlabs_api_key"], info.get("voice") or GEORGIAN_VOICE,
-        info["model"], None, output_format="mp3_22050_32", timeout=60.0)
-    return {"level": "ok", "detail": f"{info['model']} + Georgian voice returned {len(audio)} bytes"}
+async def _probe_tts_ka() -> dict:
+    """Georgian is the load-bearing TTS path (CLAUDE.md section 4): on ElevenLabs, eleven_v3
+    + a Georgian-capable shared voice. eleven_v3 is separately entitled and the shared voice
+    may not be in the account listing at all, so the voice list cannot vouch for it. The
+    model and voice come from the provider's own per-language default, exactly as /tts
+    resolves them for `language_code=ka`."""
+    ctx = await voice.tts(None)
+    plan = await ctx.plan(language_code="ka")
+    audio = await ctx.synthesize(PROBE_TEXT_KA, plan)
+    return {"level": "ok",
+            "detail": f"{plan.model_id} + voice {plan.voice_id} returned {len(audio)} bytes"}
 
 
 async def _probe_embeddings() -> dict:
@@ -236,7 +243,7 @@ async def _capture(coro) -> dict:
     """Never let one probe fail the whole report, and keep the historic {ok, detail} shape."""
     try:
         out = await coro
-    except elevenlabs.ElevenLabsError as exc:
+    except voice.VoiceError as exc:
         out = {"level": "fail", "detail": str(exc), "code": exc.code, "scope": exc.scope}
     except Exception as exc:  # noqa: BLE001
         out = {"level": "fail", "detail": str(exc)}
@@ -249,7 +256,7 @@ async def _capture(coro) -> dict:
 async def test_integrations(deep: bool = False):
     """Verify every third-party capability the product actually uses.
 
-    Costs a few ElevenLabs credits per click (one 0.4 s STT clip + 6 TTS characters) —
+    Costs a few voice-provider credits per click (one 0.4 s STT clip + 6 TTS characters) —
     that is the price of never showing a green tick for something that is broken.
     `deep=true` adds the three non-analysis Anthropic tool schemas.
     """
@@ -257,10 +264,10 @@ async def test_integrations(deep: bool = False):
     probes = {
         "database": _probe_database(),
         "ffmpeg": _probe_ffmpeg(),
-        "elevenlabs_voices": _probe_voices(cfg),
-        "elevenlabs_stt": _probe_stt(cfg),
-        "elevenlabs_tts": _probe_tts(cfg),
-        "elevenlabs_tts_ka": _probe_tts_ka(cfg),
+        "elevenlabs_voices": _probe_voices(),
+        "elevenlabs_stt": _probe_stt(),
+        "elevenlabs_tts": _probe_tts(),
+        "elevenlabs_tts_ka": _probe_tts_ka(),
         "embeddings": _probe_embeddings(),
         # NB: "claude_analysis", not "claude" — the vendor roll-up below writes out["claude"],
         # which would otherwise clobber this probe's own detail.
@@ -526,14 +533,14 @@ class VoicePatch(BaseModel):
 
 @router.get("/voices", dependencies=[Depends(require_admin)])
 async def get_voices():
-    from .tts import GEORGIAN_VOICE, VOICE_ID_RE, system_voice_ids  # noqa: F401 (avoid import cycle at module load)
-
-    cfg = await settings_store.get_effective()
+    # The deployment's provider: curation is one allowlist, applied to whatever voice list
+    # the default connection (or the legacy key) answers with.
+    ctx = await voice.tts(None)
     vcfg = await settings_store.get_voice_config()
-    sysids = system_voice_ids(cfg)
+    sysids = await ctx.system_voice_ids()
     error, live = None, []
     try:
-        live = await elevenlabs.list_voices(cfg["elevenlabs_api_key"])
+        live = await ctx.voices()
     except Exception as exc:  # noqa: BLE001 — report in-band so the panel can render an error
         error = str(exc)
 
@@ -558,8 +565,7 @@ async def get_voices():
 
 @router.put("/voices", dependencies=[Depends(require_admin)])
 async def put_voices(patch: VoicePatch):
-    from .tts import VOICE_ID_RE
-
+    ctx = await voice.tts(None)
     if patch.mode is not None and patch.mode not in ("all", "allowlist"):
         raise HTTPException(status_code=400, detail="mode must be 'all' or 'allowlist'")
     current = await settings_store.get_voice_config()
@@ -568,7 +574,7 @@ async def put_voices(patch: VoicePatch):
     if mode == "allowlist" and not ids:
         raise HTTPException(status_code=400, detail="Select at least one voice.")
     for i in (patch.voice_ids or []):
-        if not VOICE_ID_RE.match(i):
+        if not ctx.valid_voice_id(i):
             raise HTTPException(status_code=400, detail=f"Invalid voice id: {i[:24]}")
     await settings_store.set_voice_config(patch.model_dump(exclude_none=True))
     return await get_voices()

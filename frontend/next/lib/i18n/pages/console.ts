@@ -17,7 +17,7 @@
 import type { Dict } from '../index';
 
 export const en: Dict = {
-  'adm.testnote': 'Each capability is probed for real — the connection test spends a fraction of a second of speech-to-text and a few text-to-speech characters, because ElevenLabs offers no way to read a key’s permissions. “Deep” additionally exercises the fact-check and scoring tools.',
+  'adm.testnote': 'Probes the deployment’s DEFAULT connections — what a workspace with no assignment and no key of its own runs on — plus the database, ffmpeg and embeddings. Each capability is exercised for real: the test spends a fraction of a second of speech-to-text and a few text-to-speech characters, because a voice provider offers no way to read a key’s permissions. “Deep” additionally exercises the fact-check and scoring tools. A single connection is tested from the AI providers tab.',
   'adm.tenants': 'Tenants',
   'adm.embeddings': 'Embeddings',
   'adm.anon': 'Anonymous limits',
@@ -34,6 +34,29 @@ export const en: Dict = {
   'adm.intkeys': 'Integration keys',
   'adm.models': 'Models & voice',
   'adm.instructions': 'Analysis instructions',
+  /* The AI providers tab's own words. The registry vocabulary itself — capabilities, sources,
+     the key and test states — is `ai.*` in features/ai.ts, shared with the AI setup page and
+     the workspace portal so the inheritance chain reads the same everywhere; these are only
+     the pieces no other surface has: the model picker's two non-model rows, the form's own
+     validation, and the pointer left behind in Integrations. */
+  'adm.ai.pointer': 'Provider keys and models now live in the AI providers tab. The connections there were created from the keys that used to be on this page.',
+  'adm.ai.open': 'Open AI providers',
+  'adm.ai.model.default': 'Provider default',
+  'adm.ai.model.other': 'Other…',
+  'adm.ai.model.custom': 'Model id',
+  'adm.ai.name.required': 'Give the connection a name.',
+  'adm.ai.provider.required': 'Pick a provider.',
+  'adm.ai.key.clear': 'Remove the stored key',
+  'adm.ai.key.clearing': 'The stored key is removed when you save. Calls on this connection will fail until a new one is set.',
+  'adm.ai.key.keep': 'Keep it',
+  'adm.ai.showinactive': 'Show inactive ({n})',
+  'adm.ai.updated': 'Updated {when} by {who}',
+  'adm.ai.unavailable': 'This server does not have the AI provider registry yet — deploy the backend first.',
+  'adm.ai.tested': 'Test finished',
+  'adm.ai.reactivate': 'Reactivate',
+  'adm.ai.reactivated': 'Connection reactivated — it is not the default until you make it one.',
+  'adm.ai.defaulted': '“{name}” is now the default',
+  'adm.ai.voices.refresh': 'Voice lists are refreshed from the default text-to-speech connection.',
   /* The transcription card's own words. Everything else on it is `tr.*`, shared with the
      workspace and the upload form so the same setting reads the same way on all three — this
      one line is the console's, because it is the only surface where these values are the
@@ -239,7 +262,7 @@ export const en: Dict = {
 };
 
 export const ka: Dict = {
-  'adm.testnote': 'თითოეული შესაძლებლობა რეალურად მოწმდება — ტესტი ხარჯავს წამის მცირე ნაწილს მეტყველების ამოცნობაზე და რამდენიმე სიმბოლოს ხმის სინთეზზე, რადგან ElevenLabs არ იძლევა გასაღების ნებართვების წაკითხვის საშუალებას. „ღრმა“ დამატებით ამოწმებს ფაქტების შემოწმებისა და შეფასების ხელსაწყოებს.',
+  'adm.testnote': 'ამოწმებს სისტემის ნაგულისხმევ კავშირებს — რაზეც მუშაობს სამუშაო სივრცე, რომელსაც არც მინიჭებული კავშირი აქვს და არც საკუთარი გასაღები — ასევე ბაზას, ffmpeg-ს და ემბედინგებს. თითოეული შესაძლებლობა რეალურად მოწმდება: ტესტი ხარჯავს წამის მცირე ნაწილს მეტყველების ამოცნობაზე და რამდენიმე სიმბოლოს ხმის სინთეზზე, რადგან ხმის პროვაიდერი არ იძლევა გასაღების ნებართვების წაკითხვის საშუალებას. „ღრმა“ დამატებით ამოწმებს ფაქტების შემოწმებისა და შეფასების ხელსაწყოებს. ცალკეული კავშირი AI პროვაიდერების ჩანართიდან მოწმდება.',
   'adm.tenants': 'ორგანიზაციები',
   'adm.embeddings': 'ემბედინგები',
   'adm.anon': 'ანონიმური ლიმიტები',
@@ -256,6 +279,24 @@ export const ka: Dict = {
   'adm.intkeys': 'ინტეგრაციის გასაღებები',
   'adm.models': 'მოდელები და ხმა',
   'adm.instructions': 'ანალიზის ინსტრუქციები',
+  'adm.ai.pointer': 'პროვაიდერების გასაღებები და მოდელები ახლა AI პროვაიდერების ჩანართშია. იქ არსებული კავშირები ამ გვერდზე ყოფილი გასაღებებიდან შეიქმნა.',
+  'adm.ai.open': 'AI პროვაიდერების გახსნა',
+  'adm.ai.model.default': 'პროვაიდერის ნაგულისხმევი',
+  'adm.ai.model.other': 'სხვა…',
+  'adm.ai.model.custom': 'მოდელის id',
+  'adm.ai.name.required': 'მიუთითეთ კავშირის სახელი.',
+  'adm.ai.provider.required': 'აირჩიეთ პროვაიდერი.',
+  'adm.ai.key.clear': 'შენახული გასაღების წაშლა',
+  'adm.ai.key.clearing': 'შენახვისას გასაღები წაიშლება. ამ კავშირზე გამოძახებები ვერ შესრულდება, სანამ ახალი არ დაყენდება.',
+  'adm.ai.key.keep': 'დარჩეს',
+  'adm.ai.showinactive': 'არააქტიურების ჩვენება ({n})',
+  'adm.ai.updated': 'განახლდა {when}, {who}',
+  'adm.ai.unavailable': 'ამ სერვერზე AI პროვაიდერების რეესტრი ჯერ არ არის — ჯერ ბექენდი განაახლეთ.',
+  'adm.ai.tested': 'ტესტი დასრულდა',
+  'adm.ai.reactivate': 'გააქტიურება',
+  'adm.ai.reactivated': 'კავშირი გააქტიურდა — ნაგულისხმევი არ იქნება, სანამ ასეთად არ დანიშნავთ.',
+  'adm.ai.defaulted': '„{name}“ ახლა ნაგულისხმევია',
+  'adm.ai.voices.refresh': 'ხმების სია ნაგულისხმევი ტექსტიდან-მეტყველების კავშირიდან განახლდება.',
   'adm.transcription.desc': 'ამ პარამეტრებს მემკვიდრეობით იღებს ყველა სამუშაო სივრცე, რომელსაც საკუთარი არ შეუნახავს; ცალკეული ჩანაწერისთვის მათი შეცვლა ატვირთვისას შეიძლება.',
   'adm.voices': 'ხმები',
   'adm.voicevis': 'მომხმარებლისთვის ხილული ხმები',
@@ -457,7 +498,7 @@ export const ka: Dict = {
 };
 
 export const ru: Dict = {
-  'adm.testnote': 'Каждая возможность проверяется по-настоящему — тест расходует доли секунды распознавания речи и несколько символов синтеза, поскольку ElevenLabs не позволяет прочитать разрешения ключа. «Глубокая» проверка дополнительно задействует инструменты проверки фактов и оценки.',
+  'adm.testnote': 'Проверяет подключения по умолчанию — те, на которых работает организация без назначенного подключения и без собственного ключа, — а также базу данных, ffmpeg и эмбеддинги. Каждая возможность проверяется по-настоящему: тест расходует доли секунды распознавания речи и несколько символов синтеза, поскольку голосовой провайдер не позволяет прочитать разрешения ключа. «Глубокая» проверка дополнительно задействует инструменты проверки фактов и оценки. Отдельное подключение проверяется на вкладке AI-провайдеров.',
   'adm.tenants': 'Организации',
   'adm.embeddings': 'Эмбеддинги',
   'adm.anon': 'Лимиты для анонимных пользователей',
@@ -474,6 +515,24 @@ export const ru: Dict = {
   'adm.intkeys': 'Ключи интеграций',
   'adm.models': 'Модели и голос',
   'adm.instructions': 'Инструкции анализа',
+  'adm.ai.pointer': 'Ключи провайдеров и модели теперь на вкладке AI-провайдеров. Подключения там были созданы из ключей, которые раньше находились на этой странице.',
+  'adm.ai.open': 'Открыть AI-провайдеров',
+  'adm.ai.model.default': 'По умолчанию у провайдера',
+  'adm.ai.model.other': 'Другая…',
+  'adm.ai.model.custom': 'Идентификатор модели',
+  'adm.ai.name.required': 'Дайте подключению название.',
+  'adm.ai.provider.required': 'Выберите провайдера.',
+  'adm.ai.key.clear': 'Удалить сохранённый ключ',
+  'adm.ai.key.clearing': 'При сохранении ключ будет удалён. Вызовы через это подключение не будут работать, пока не задан новый.',
+  'adm.ai.key.keep': 'Оставить',
+  'adm.ai.showinactive': 'Показать неактивные ({n})',
+  'adm.ai.updated': 'Обновлено {when}, автор: {who}',
+  'adm.ai.unavailable': 'На этом сервере ещё нет реестра AI-провайдеров — сначала обновите бэкенд.',
+  'adm.ai.tested': 'Проверка завершена',
+  'adm.ai.reactivate': 'Активировать снова',
+  'adm.ai.reactivated': 'Подключение снова активно — оно не станет подключением по умолчанию, пока вы его таким не сделаете.',
+  'adm.ai.defaulted': '«{name}» теперь по умолчанию',
+  'adm.ai.voices.refresh': 'Списки голосов обновляются из подключения синтеза речи по умолчанию.',
   'adm.transcription.desc': 'Эти настройки наследует каждая организация, которая не сохранила свои, а для отдельной записи их можно переопределить при загрузке.',
   'adm.voices': 'Голоса',
   'adm.voicevis': 'Голоса, видимые клиентам',
