@@ -1,0 +1,102 @@
+/* Page-scoped styles for the audio editor.
+
+   The waveform is the only surface in the app that needs a canvas lane vocabulary, so this
+   never belonged in brand.css — and in the new stack it must not go in globals.css either:
+   the editor widens `main` to 1200px, and an element selector there would widen every other
+   page with it. A CSS Module keeps both the lane vocabulary and that one width on this route.
+
+   Every colour is a theme token, so light/dark and the red accent follow the rest of the
+   product with nothing restated here. */
+
+/* globals.css sizes `main` at 960px with an element selector, which a class outranks. */
+.wide { max-width: 1200px; }
+
+.wrap {
+  position: relative;
+  height: 280px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--input-bg);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  /* Without this a drag across the waveform scrolls the page on a touch screen instead of
+     selecting, and the pointer events never arrive. */
+  touch-action: none;
+}
+.canvas:focus-visible { outline: 2px solid var(--beam); outline-offset: -2px; }
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+  padding: 0 20px;
+  pointer-events: none;
+}
+
+/* `min-height` so the toolbar does not jump the moment the first file loads and this line
+   gains its text. */
+.time { margin-top: 8px; font-size: 12.5px; color: var(--muted); min-height: 18px; }
+
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.bar .sep { width: 1px; align-self: stretch; background: var(--hairline); margin: 0 4px; }
+
+.group { border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 12px 14px; }
+.group h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+
+.drop {
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-md);
+  padding: 22px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  transition: border-color .18s, color .18s;
+}
+.drop.over { border-color: var(--beam); color: var(--paper); }
+
+.layers { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.layer.on { border-color: var(--beam); background: color-mix(in oklab, var(--beam) 8%, transparent); }
+.layer .nm {
+  font-weight: 600;
+  font-size: 13.5px;
+  flex: 1;
+  min-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer .meta { color: var(--muted); font-size: 12px; }
+.layer input[type=number] { width: 86px; }
+
+@media (max-width: 640px) {
+  .wrap { height: 200px; }
+}

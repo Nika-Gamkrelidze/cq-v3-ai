@@ -74,6 +74,7 @@ import * as workbench from './features/workbench';
 import * as account from './pages/account';
 import * as aicfg from './pages/aicfg';
 import * as consolePage from './pages/console';
+import * as copilot from './pages/copilot';
 import * as home from './pages/home';
 import * as usage from './pages/usage';
 import * as workspace from './pages/workspace';
@@ -86,7 +87,7 @@ export type Dict = Record<string, string>;
 const MODULES: Record<Lang, Dict>[] = [
   chrome,
   analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, tts, workbench,
-  account, aicfg, consolePage, home, usage, workspace,
+  account, aicfg, consolePage, copilot, home, usage, workspace,
 ];
 
 function assemble(lang: Lang): Dict {

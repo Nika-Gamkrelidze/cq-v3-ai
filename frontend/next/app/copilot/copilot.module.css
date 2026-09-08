@@ -1,0 +1,125 @@
+/* Page-scoped styles for /copilot — the `.cd-*` block that lived inside copilot-demo.html.
+   ========================================================================================
+   It stays page-scoped, and that is a decision rather than tidiness (docs/MIGRATION.md,
+   "Migration-specific hazards"): the very first rule below narrows `main`, and appending this
+   file to globals.css would narrow EVERY page's main to 1180px — a layout regression on five
+   pages, produced by moving a stylesheet. A CSS Module cannot do that: `.main` here is a
+   hashed class name that only this page's `<main>` carries.
+
+   globals.css has no message-list / bubble / rail vocabulary and this page is still a demo
+   harness rather than a shipped surface, so nothing here is promoted into the shared sheet
+   yet. Everything is built from the existing light/dark custom properties
+   (--paper/--mist/--muted/--hairline/--input-bg/--beam/--ok/--alert…) so both themes work
+   without a single hardcoded colour.
+
+   Class names lost the `cd-` prefix: the module hashes them, so the prefix that used to keep
+   them out of brand.css's namespace has nothing left to do. `:global(...)` marks the shared
+   classes a rule reaches INTO (.tab, .actions, .rec-status) — without it the module would
+   rename those too and the selector would match nothing. */
+
+.main { max-width: 1180px; }
+
+.grid { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; }
+@media (max-width: 980px) { .grid { grid-template-columns: minmax(0,1fr); } }
+
+.head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+.head h3 { margin:0; }
+
+/* ---- thread ---- */
+.threadList { display:flex; flex-direction:column; gap:10px; min-height:120px; max-height:46vh; overflow-y:auto; padding-right:4px; }
+.msg { max-width:86%; padding:10px 13px; border-radius:14px; font-size:14px; line-height:1.55;
+       border:1px solid var(--hairline); background:var(--input-bg); color:var(--paper); white-space:pre-wrap; word-break:break-word; }
+.msg .who { display:block; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+.msg.customer { border-bottom-left-radius:4px; }
+.msg.operator { margin-left:auto; border-bottom-right-radius:4px;
+                background:color-mix(in oklab,var(--beam) 13%,var(--input-bg));
+                border-color:color-mix(in oklab,var(--beam) 42%,var(--hairline)); }
+
+/* ---- stage timings: the product claim, made legible ---- */
+.stages { display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 12px; }
+.stage { display:inline-flex; align-items:baseline; gap:6px; padding:4px 10px; border-radius:999px;
+         font-size:11.5px; border:1px solid var(--hairline); background:var(--input-bg); color:var(--muted);
+         font-variant-numeric:tabular-nums; }
+.stage b { color:var(--paper); font-weight:700; }
+.stage.first { border-color:color-mix(in oklab,var(--ok) 55%,transparent); color:var(--ok); }
+.stage.first b { color:var(--ok); }
+.stage.warm { border-color:color-mix(in oklab,var(--beam) 55%,transparent); color:var(--beam); }
+.stage.warm b { color:var(--beam); }
+
+/* ---- grounding banner ---- */
+.ground { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 12px; border-radius:var(--r-md);
+          border:1px solid var(--hairline); background:var(--input-bg); font-size:13px; margin-bottom:12px; }
+.ground.yes { border-color:color-mix(in oklab,var(--ok) 45%,transparent); background:color-mix(in oklab,var(--ok) 8%,var(--input-bg)); }
+.ground.no  { border-color:color-mix(in oklab,var(--alert) 45%,transparent); background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); }
+.ground .num { color:var(--muted); font-variant-numeric:tabular-nums; }
+
+/* ---- tier-1 KB passage cards (rendered BEFORE any model output) ---- */
+.sec { margin-top:16px; }
+.secHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.secHead h4 { margin:0; font-family:var(--font-display); font-size:13px; letter-spacing:.02em; color:var(--paper); }
+.badge { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:3px 9px; border-radius:999px;
+         background:color-mix(in oklab,var(--ok) 16%,transparent); color:var(--ok); }
+.badge.zero { background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+.pass { border:1px solid var(--hairline); border-left:3px solid var(--ok); border-radius:var(--r-md);
+        padding:10px 12px; margin-top:8px; background:var(--input-bg); font-size:13.5px; line-height:1.55; }
+.pass .passT { font-weight:700; color:var(--paper); margin-bottom:3px; }
+.pass .passN { color:var(--beam); font-weight:800; margin-right:6px; }
+.pass .passS { color:var(--mist); }
+
+/* ---- draft variants ---- */
+.var { border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px 13px; margin-top:10px; background:var(--input-bg); }
+.varHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+.varKind { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--beam); }
+.varText { font-size:14px; line-height:1.6; color:var(--paper); white-space:pre-wrap; word-break:break-word; min-height:1.2em; }
+.varText.streaming:after { content:'▍'; color:var(--beam); animation:cdblink 1s steps(1) infinite; }
+@keyframes cdblink { 50% { opacity:0; } }
+.var :global(.actions) { margin-top:10px; }
+.var textarea { min-height:92px; margin-top:8px; }
+
+.cites { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.cite { cursor:pointer; border:1px solid color-mix(in oklab,var(--beam) 45%,var(--hairline)); background:transparent;
+        color:var(--beam); font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:999px; font-family:inherit; }
+.cite:hover { background:color-mix(in oklab,var(--beam) 12%,transparent); }
+
+.refusal { border:1px solid color-mix(in oklab,var(--alert) 45%,transparent); border-radius:var(--r-md);
+           background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); padding:12px 13px; margin-top:10px; font-size:13.5px; line-height:1.6; }
+.refusal .rH { font-weight:700; color:var(--coral); margin-bottom:6px; }
+
+.note { font-size:11.5px; color:var(--muted); line-height:1.6; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--mist); word-break:break-all; }
+
+/* ---- autopilot (P3) ----
+   The answer bubble is styled as the customer would see it, so the demo shows the product
+   and the instrumentation side by side rather than only the instrumentation. */
+.mode { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.mode :global(.tab) { font-size:13px; padding:8px 16px; }
+.modeNote { font-size:11.5px; color:var(--muted); flex:1 1 240px; }
+
+.answer { border:1px solid color-mix(in oklab,var(--ok) 38%,var(--hairline)); border-radius:var(--r-md);
+          background:color-mix(in oklab,var(--ok) 6%,var(--input-bg)); padding:12px 13px; margin-top:8px; }
+.answer.ungrounded { border-color:color-mix(in oklab,var(--pending) 45%,var(--hairline));
+                     background:color-mix(in oklab,var(--pending) 7%,var(--input-bg)); }
+.answerText { font-size:14.5px; line-height:1.62; color:var(--paper); white-space:pre-wrap; word-break:break-word; min-height:1.2em; }
+.answerText.streaming:after { content:'▍'; color:var(--beam); animation:cdblink 1s steps(1) infinite; }
+.answerFoot { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+
+.ai { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+      padding:3px 9px; border-radius:999px; background:color-mix(in oklab,var(--beam) 14%,transparent); color:var(--beam); }
+
+.handoff { border:1px solid color-mix(in oklab,var(--pending) 45%,transparent); border-radius:var(--r-md);
+           background:color-mix(in oklab,var(--pending) 8%,var(--input-bg)); padding:11px 12px; margin-top:10px; font-size:13.5px; line-height:1.6; }
+.handoff .hH { font-weight:700; color:var(--pending); margin-bottom:5px; }
+.handoff .hGoal { color:var(--mist); margin-top:6px; }
+
+.blocked { border:1px solid color-mix(in oklab,var(--alert) 45%,transparent); border-radius:var(--r-md);
+           background:color-mix(in oklab,var(--alert) 8%,var(--input-bg)); padding:12px 13px; font-size:13.5px; line-height:1.6; }
+.blocked .bH { font-weight:700; color:var(--coral); margin-bottom:6px; }
+
+/* ---- voice row: mic in, speaker out. Both reuse endpoints that already shipped. ---- */
+.voice { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+.voice :global(.rec-status) { margin:0; }
+
+/* The legacy sheet hid an EMPTY #ttsHost with `:empty`. The React <AudioPlayer> renders
+   nothing at all until something is loaded, so the margin is all that is left to carry — and
+   the host itself is hidden from the page when a new turn resets it (see resetTurn). */
+.ttsHost { margin-top:12px; }

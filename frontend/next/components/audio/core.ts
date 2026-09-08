@@ -1,0 +1,515 @@
+/* Audio editing operations, as pure functions over PCM buffers.
+   =============================================================
+   The port of `frontend/public/audio-edit-core.js`, and it keeps that file's defining
+   property: it is UI-free and library-free. No wavesurfer, no DOM, no fetch, and — new here —
+   no React and no Web Audio either. wavesurfer draws waveforms and handles the drag-to-select
+   UI; it has no editing primitives, so everything that actually changes audio lives here.
+   Keeping the two apart means the editing rules can be reasoned about (and tested) without a
+   canvas, and swapping the waveform library later touches none of this.
+
+   Every operation returns a NEW buffer and never mutates its input — that is what makes undo a
+   stack of references rather than a diff, and it is why the caller can hold a history without
+   copying defensively.
+
+   All of it runs in the browser. A customer's call recording is decoded, edited and encoded
+   locally; the only thing that ever reaches the server is the finished file the user chooses
+   to convert, and only when they pick a format we do not encode ourselves.
+
+   WHAT CHANGED IN THE PORT, and why.
+
+   The legacy module allocated every result through `new OfflineAudioContext(...)
+   .createBuffer(...)` — the only portable way to MAKE an `AudioBuffer`. That is one audio
+   context constructed and thrown away per operation, and `draw()` was calling `trim()` inside
+   the 60fps playback loop (docs/MIGRATION.md defect 4). Here results are allocated as
+   `PcmBuffer`: a plain object over `Float32Array`s with the three fields and the one method the
+   rest of this file ever touches. The arithmetic is unchanged and the sample values are
+   identical — an `AudioBuffer`'s channel data is a `Float32Array` too — but nothing in this
+   module needs a browser any more, which is what lets `lib/__tests__/audioCore.test.mts` run
+   the whole thing under `node --test`.
+
+   A decoded recording arrives as a real `AudioBuffer` and satisfies `AudioBufferLike` as it
+   stands, so layers hold whichever they were last given and no call site cares. Exactly one
+   place needs the real thing back — `AudioBufferSourceNode.buffer` for playback — and
+   `engine.ts` copies the finished mix into one there. */
+
+/** The shape every function here reads: what an `AudioBuffer` and a `PcmBuffer` have in
+    common. Deliberately read-only and deliberately small — widening it to the full
+    `AudioBuffer` interface (`copyToChannel`, `copyFromChannel`) would put a browser type back
+    in the middle of the arithmetic for no caller's benefit. */
+export interface AudioBufferLike {
+  readonly numberOfChannels: number;
+  readonly length: number;
+  readonly sampleRate: number;
+  readonly duration: number;
+  getChannelData(channel: number): Float32Array;
+}
+
+/** A buffer of decoded audio, with no audio context behind it.
+
+    `length` is floored at 1 for the same reason the legacy `ctx()` did it: an operation that
+    lands on an empty result must still produce a buffer, and `new OfflineAudioContext(ch, 0,
+    rate)` throws. Out-of-range channel access THROWS rather than clamping, matching
+    `AudioBuffer.getChannelData` — every caller in this file bounds the index itself, so a
+    throw here can only ever be a real bug rather than a silently mixed-up channel. */
+export class PcmBuffer implements AudioBufferLike {
+  readonly numberOfChannels: number;
+  readonly length: number;
+  readonly sampleRate: number;
+  private readonly channels: Float32Array[];
+
+  constructor(numberOfChannels: number, length: number, sampleRate: number) {
+    this.numberOfChannels = Math.max(1, numberOfChannels | 0);
+    this.length = Math.max(1, length | 0);
+    this.sampleRate = sampleRate;
+    this.channels = Array.from({ length: this.numberOfChannels }, () => new Float32Array(this.length));
+  }
+
+  get duration(): number {
+    return this.length / this.sampleRate;
+  }
+
+  getChannelData(channel: number): Float32Array {
+    const c = this.channels[channel];
+    if (!c) throw new RangeError(`PcmBuffer: no channel ${channel} (of ${this.numberOfChannels})`);
+    return c;
+  }
+}
+
+/** Allocate a result shaped like `like`: same sample rate, same channel count unless named. */
+export function make(like: AudioBufferLike, length: number, channels?: number): PcmBuffer {
+  return new PcmBuffer(channels || like.numberOfChannels, length, like.sampleRate);
+}
+
+/** Copy a span of every channel from `src` into `dst` at `at`. */
+export function blit(
+  src: AudioBufferLike, dst: AudioBufferLike, srcStart: number, count: number, at: number,
+): void {
+  const n = Math.min(dst.numberOfChannels, src.numberOfChannels);
+  for (let c = 0; c < n; c++) {
+    const from = src.getChannelData(c).subarray(srcStart, srcStart + count);
+    dst.getChannelData(c).set(from, at);
+  }
+}
+
+/** Seconds -> a sample index clamped inside the buffer. Every op funnels through this, so a
+    selection dragged past the end (or a float that lands a sample beyond it) can never produce
+    a negative length or read out of bounds. */
+export function idx(buf: AudioBufferLike, seconds: number): number {
+  const i = Math.round((seconds || 0) * buf.sampleRate);
+  return Math.max(0, Math.min(buf.length, i));
+}
+
+export interface Span { a: number; b: number; len: number }
+
+export function span(buf: AudioBufferLike, from: number, to: number): Span {
+  let a = idx(buf, from);
+  let b = idx(buf, to);
+  if (b < a) { const t = a; a = b; b = t; }
+  return { a, b, len: b - a };
+}
+
+/** `[a,b)` for an operation whose bounds may both be null, meaning "the whole buffer". */
+function bounds(buf: AudioBufferLike, from: number | null, to: number | null): { a: number; b: number } {
+  return from == null && to == null ? { a: 0, b: buf.length } : span(buf, from ?? 0, to ?? 0);
+}
+
+// ---- structural edits ----------------------------------------------------
+
+/** Everything OUTSIDE [from,to) — the selection is removed and the audio closes up. */
+export function cut(buf: AudioBufferLike, from: number, to: number): AudioBufferLike {
+  const { a, b, len } = span(buf, from, to);
+  if (!len) return buf;
+  const out = make(buf, buf.length - len);
+  blit(buf, out, 0, a, 0);
+  blit(buf, out, b, buf.length - b, a);
+  return out;
+}
+
+/** Only [from,to) — everything else is discarded. */
+export function trim(buf: AudioBufferLike, from: number, to: number): AudioBufferLike {
+  const { a, len } = span(buf, from, to);
+  if (!len) return buf;
+  const out = make(buf, len);
+  blit(buf, out, a, len, 0);
+  return out;
+}
+
+/** [from,to) replaced by silence of the same length: the timeline does not shift, which is
+    what you want when redacting a card number out of a call. */
+export function silence(buf: AudioBufferLike, from: number, to: number): AudioBufferLike {
+  const { a, b, len } = span(buf, from, to);
+  if (!len) return buf;
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  for (let c = 0; c < out.numberOfChannels; c++) out.getChannelData(c).fill(0, a, b);
+  return out;
+}
+
+/** Insert `seconds` of silence at `at`, pushing the rest later. */
+export function insertSilence(buf: AudioBufferLike, at: number, seconds: number): AudioBufferLike {
+  const pad = Math.max(0, Math.round((seconds || 0) * buf.sampleRate));
+  if (!pad) return buf;
+  const a = idx(buf, at);
+  const out = make(buf, buf.length + pad);
+  blit(buf, out, 0, a, 0);
+  blit(buf, out, a, buf.length - a, a + pad);
+  return out;
+}
+
+// ---- level -------------------------------------------------------------
+
+/** Multiply [from,to) by `gain`. `null` bounds mean the whole buffer.
+
+    Samples are CLAMPED to [-1,1] rather than left to wrap: a float32 buffer will happily hold
+    3.0, sound fine in this tab, and then wrap into loud digital noise the moment it is encoded
+    to a 16-bit format. Clipping is audible and honest; wrapping is neither. */
+export function gain(
+  buf: AudioBufferLike, factor: number, from: number | null = null, to: number | null = null,
+): AudioBufferLike {
+  const { a, b } = bounds(buf, from, to);
+  if (b <= a || factor === 1) return buf;
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  for (let c = 0; c < out.numberOfChannels; c++) {
+    const d = out.getChannelData(c);
+    for (let i = a; i < b; i++) {
+      const v = d[i] * factor;
+      d[i] = v > 1 ? 1 : v < -1 ? -1 : v;
+    }
+  }
+  return out;
+}
+
+export const dbToGain = (db: number): number => Math.pow(10, (db || 0) / 20);
+
+/** Peak of [from,to) (or the whole buffer), across all channels. */
+export function peak(
+  buf: AudioBufferLike, from: number | null = null, to: number | null = null,
+): number {
+  const { a, b } = bounds(buf, from, to);
+  let m = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = a; i < b; i++) { const v = Math.abs(d[i]); if (v > m) m = v; }
+  }
+  return m;
+}
+
+/** Scale so the loudest sample hits `target` (default -1 dBFS of headroom).
+
+    Peak normalisation, not loudness (LUFS): it is what "make this louder without clipping"
+    means to someone looking at a waveform, and it is exactly reversible. Silence is left alone
+    — scaling a digital-zero region by anything is still zero, and dividing by its peak would
+    be a division by zero. */
+export function normalize(
+  buf: AudioBufferLike, targetPeak: number | null = null,
+  from: number | null = null, to: number | null = null,
+): AudioBufferLike {
+  const target = targetPeak == null ? 0.891 : targetPeak;   // ~-1 dBFS
+  const p = peak(buf, from, to);
+  if (!p) return buf;
+  return gain(buf, target / p, from, to);
+}
+
+/** Linear ramp across [from,to): 'in' rises 0->1, 'out' falls 1->0. */
+export function fade(
+  buf: AudioBufferLike, from: number, to: number, dir: 'in' | 'out',
+): AudioBufferLike {
+  const { a, b, len } = span(buf, from, to);
+  if (len < 2) return buf;
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  for (let c = 0; c < out.numberOfChannels; c++) {
+    const d = out.getChannelData(c);
+    for (let i = a; i < b; i++) {
+      const t = (i - a) / (len - 1);
+      d[i] *= (dir === 'out' ? 1 - t : t);
+    }
+  }
+  return out;
+}
+
+/** Flip the sign of every sample in the range. Cheap, and the standard way to test whether two
+    takes are phase-cancelling each other. */
+export function invert(
+  buf: AudioBufferLike, from: number | null = null, to: number | null = null,
+): AudioBufferLike {
+  const { a, b } = bounds(buf, from, to);
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  for (let c = 0; c < out.numberOfChannels; c++) {
+    const d = out.getChannelData(c);
+    for (let i = a; i < b; i++) d[i] = -d[i];
+  }
+  return out;
+}
+
+/** Reverse the range in place-of-copy. */
+export function reverse(
+  buf: AudioBufferLike, from: number | null = null, to: number | null = null,
+): AudioBufferLike {
+  const { a, b } = bounds(buf, from, to);
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  for (let c = 0; c < out.numberOfChannels; c++) {
+    const d = out.getChannelData(c);
+    for (let i = a, j = b - 1; i < j; i++, j--) { const t = d[i]; d[i] = d[j]; d[j] = t; }
+  }
+  return out;
+}
+
+// ---- channels ----------------------------------------------------------
+/* Call recordings are very often two-channel with the agent on one side and the customer on
+   the other, so per-channel work is the point of this section, not a flourish. */
+
+/** One channel as its own mono buffer — "give me just the customer's side". */
+export function extractChannel(buf: AudioBufferLike, channel: number): AudioBufferLike {
+  const out = make(buf, buf.length, 1);
+  out.getChannelData(0).set(buf.getChannelData(Math.min(channel, buf.numberOfChannels - 1)));
+  return out;
+}
+
+/** Average every channel down to one. */
+export function toMono(buf: AudioBufferLike): AudioBufferLike {
+  if (buf.numberOfChannels === 1) return buf;
+  const out = make(buf, buf.length, 1);
+  const d = out.getChannelData(0);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const s = buf.getChannelData(c);
+    for (let i = 0; i < buf.length; i++) d[i] += s[i] / buf.numberOfChannels;
+  }
+  return out;
+}
+
+/** Duplicate a mono buffer to stereo (no-op for anything already multi-channel). */
+export function toStereo(buf: AudioBufferLike): AudioBufferLike {
+  if (buf.numberOfChannels >= 2) return buf;
+  const out = make(buf, buf.length, 2);
+  out.getChannelData(0).set(buf.getChannelData(0));
+  out.getChannelData(1).set(buf.getChannelData(0));
+  return out;
+}
+
+export function swapChannels(
+  buf: AudioBufferLike, x: number | null = null, y: number | null = null,
+): AudioBufferLike {
+  if (buf.numberOfChannels < 2) return buf;
+  const a = x == null ? 0 : x, b = y == null ? 1 : y;
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  const t = Float32Array.from(out.getChannelData(a));
+  out.getChannelData(a).set(out.getChannelData(b));
+  out.getChannelData(b).set(t);
+  return out;
+}
+
+/** Gain on ONE channel only — the usual fix for a recording where the agent's mic is hot and
+    the caller is barely audible. */
+export function channelGain(
+  buf: AudioBufferLike, channel: number, factor: number,
+): AudioBufferLike {
+  const out = make(buf, buf.length);
+  blit(buf, out, 0, buf.length, 0);
+  const d = out.getChannelData(Math.min(channel, out.numberOfChannels - 1));
+  for (let i = 0; i < d.length; i++) {
+    const v = d[i] * factor;
+    d[i] = v > 1 ? 1 : v < -1 ? -1 : v;
+  }
+  return out;
+}
+
+export const muteChannel = (buf: AudioBufferLike, channel: number): AudioBufferLike =>
+  channelGain(buf, channel, 0);
+
+// ---- encoding ----------------------------------------------------------
+
+/** PCM -> the bytes of a 16-bit WAV file.
+
+    WAV is encoded HERE and every other format is not: a RIFF header plus interleaved int16 is
+    a page of arithmetic, while mp3/opus/gsm mean either a multi-megabyte wasm encoder in the
+    page or a second implementation of what the server's ffmpeg already does. So the editor
+    produces WAV locally, and anything else is the existing converter's job — one
+    implementation, one format catalogue, one quota.
+
+    Dithering is deliberately omitted: this is speech destined for transcription and QA, where
+    the honest 16-bit truncation is inaudible and a noise floor would be a lie.
+
+    Split from `toWav` so the header can be asserted byte for byte in a test without a `Blob`. */
+export function toWavBytes(buf: AudioBufferLike): ArrayBuffer {
+  const channels = buf.numberOfChannels, rate = buf.sampleRate, frames = buf.length;
+  const bytes = 44 + frames * channels * 2;
+  const view = new DataView(new ArrayBuffer(bytes));
+  let p = 0;
+  const str = (s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); };
+  const u32 = (v: number) => { view.setUint32(p, v, true); p += 4; };
+  const u16 = (v: number) => { view.setUint16(p, v, true); p += 2; };
+
+  str('RIFF'); u32(bytes - 8); str('WAVE');
+  str('fmt '); u32(16); u16(1); u16(channels);
+  u32(rate); u32(rate * channels * 2); u16(channels * 2); u16(16);
+  str('data'); u32(frames * channels * 2);
+
+  const data: Float32Array[] = [];
+  for (let c = 0; c < channels; c++) data.push(buf.getChannelData(c));
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channels; c++) {
+      let v = data[c][i];
+      v = v > 1 ? 1 : v < -1 ? -1 : v;
+      // Asymmetric on purpose: int16 runs -32768..32767, so the two directions scale by
+      // different amounts. Using 32768 for both would clip every full-scale positive peak.
+      view.setInt16(p, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+      p += 2;
+    }
+  }
+  return view.buffer;
+}
+
+/** The same bytes as a `Blob`, which is what a download and a `FormData` part want. */
+export function toWav(buf: AudioBufferLike): Blob {
+  return new Blob([toWavBytes(buf)], { type: 'audio/wav' });
+}
+
+// ---- layers ------------------------------------------------------------
+
+export interface MixLayer {
+  buffer: AudioBufferLike | null;
+  offset?: number;
+  gain?: number;
+  muted?: boolean;
+}
+
+/** Mix layers onto one timeline.
+
+    `layers` are `{buffer, offset, gain, muted}` — offset in SECONDS from the start of the
+    timeline, which is what makes overlaying possible at all: a jingle at 0:00, the call at
+    0:02, a bed of room tone under both. Sample rates are allowed to differ (a 8 kHz telephony
+    capture under a 44.1 kHz music bed is the normal case), so everything is resampled to
+    `rate` — the highest input rate unless the caller names one, because resampling UP is
+    lossless-ish and resampling everything down to the phone call's rate would quietly destroy
+    the music.
+
+    Summing clips: two layers at full scale add to 2.0. The mix is scaled down only when it
+    would actually clip, and by the amount needed — never a blanket /n, which would make a
+    single quiet layer inexplicably quieter just because an empty second one exists.
+
+    Both halves of that paragraph are in docs/MIGRATION.md as decisions the port must preserve,
+    because both read like oversights and neither is one. */
+export function mixdown(layers: MixLayer[] | null, rate?: number): PcmBuffer | null {
+  const live = (layers || []).filter((l): l is MixLayer & { buffer: AudioBufferLike } =>
+    !!l && !!l.buffer && !l.muted);
+  if (!live.length) return null;
+  const sr = rate || live.reduce((m, l) => Math.max(m, l.buffer.sampleRate), 0);
+  const channels = live.reduce((m, l) => Math.max(m, l.buffer.numberOfChannels), 1);
+  const end = live.reduce((m, l) => Math.max(m, (l.offset || 0) + l.buffer.duration), 0);
+  const frames = Math.max(1, Math.ceil(end * sr));
+  const out = new PcmBuffer(channels, frames, sr);
+
+  for (const l of live) {
+    const b = l.buffer;
+    const g = l.gain == null ? 1 : l.gain;
+    const at = Math.round((l.offset || 0) * sr);
+    const ratio = b.sampleRate / sr;
+    const n = Math.min(frames - at, Math.round(b.duration * sr));
+    for (let c = 0; c < channels; c++) {
+      // A mono layer plays on every channel; a stereo layer keeps its sides.
+      const src = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+      const dst = out.getChannelData(c);
+      if (ratio === 1) {
+        for (let i = 0; i < n; i++) dst[at + i] += src[i] * g;
+      } else {
+        // Linear interpolation. Not a windowed sinc, deliberately: this runs on every redraw
+        // of a multi-layer timeline, and for speech under a music bed the difference is
+        // inaudible where the cost is not.
+        for (let i = 0; i < n; i++) {
+          const p = i * ratio, j = p | 0, f = p - j;
+          const a = src[j] || 0, bb = src[j + 1] === undefined ? a : src[j + 1];
+          dst[at + i] += (a + (bb - a) * f) * g;
+        }
+      }
+    }
+  }
+
+  let m = 0;
+  for (let c = 0; c < channels; c++) {
+    const d = out.getChannelData(c);
+    for (let i = 0; i < frames; i++) { const v = Math.abs(d[i]); if (v > m) m = v; }
+  }
+  if (m > 1) {
+    const k = 1 / m;
+    for (let c = 0; c < channels; c++) {
+      const d = out.getChannelData(c);
+      for (let i = 0; i < frames; i++) d[i] *= k;
+    }
+  }
+  return out;
+}
+
+// ---- drawing ------------------------------------------------------------
+
+export interface PeakPair { min: number; max: number }
+
+/** The scan both peak functions share, over an explicit SAMPLE range.
+
+    One implementation on purpose: `peaks` used to be the only entry point, and the waveform
+    drew a zoomed-in layer by `peaks(trim(buffer, from, to), cols)` — allocating and copying
+    the slice, inside the 60fps playback loop (docs/MIGRATION.md defect 4). Reading the range
+    in place removes the copy, and having `peaks` delegate here is what makes the two provably
+    the same picture rather than two similar loops that drift. */
+function scan(
+  buf: AudioBufferLike, a: number, b: number, width: number, channel?: number | null,
+): PeakPair[] {
+  const w = Math.max(1, width | 0);
+  const out: PeakPair[] = new Array(w);
+  const chans = channel == null
+    ? Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c))
+    : [buf.getChannelData(Math.min(channel, buf.numberOfChannels - 1))];
+  const step = (b - a) / w;
+  for (let x = 0; x < w; x++) {
+    const from = a + Math.floor(x * step);
+    const to = Math.min(b, a + Math.floor((x + 1) * step));
+    let mn = 0, mx = 0;
+    for (const d of chans) {
+      for (let i = from; i < to; i++) { const v = d[i]; if (v < mn) mn = v; else if (v > mx) mx = v; }
+    }
+    out[x] = { min: mn, max: mx };
+  }
+  return out;
+}
+
+/** Peak pairs per pixel column, for drawing. Returns [{min,max}] of length `width`.
+    Computed from the buffer rather than re-decoding, so redrawing after an edit costs a scan
+    and not another decode of a thirty-minute call. */
+export function peaks(
+  buf: AudioBufferLike, width: number, channel?: number | null,
+): PeakPair[] {
+  return scan(buf, 0, buf.length, width, channel);
+}
+
+/** The same columns for the slice `[from,to)` in SECONDS, without materialising the slice. */
+export function peaksBetween(
+  buf: AudioBufferLike, from: number, to: number, width: number, channel?: number | null,
+): PeakPair[] {
+  const { a, b } = span(buf, from, to);
+  return scan(buf, a, b, width, channel);
+}
+
+// ---- display ------------------------------------------------------------
+
+/** Seconds -> `m:ss.d`, the editor's clock.
+
+    Tenths, unlike `lib/format.ts`'s `duration`, because this is what a person marks an in- and
+    out-point against: a whole-second readout cannot tell two adjacent marks apart.
+
+    The rounding happens ONCE, on the whole value, before the minutes are split off. The
+    legacy version formatted the remainder independently (`(s - m*60).toFixed(1)`), which
+    prints 119.97 s as `1:60.0` — the same trap `format.ts` documents for `fmtDur` and floors
+    to avoid. Not one of MIGRATION.md's listed defects; a one-line arithmetic fix rather than a
+    behaviour decision, and the only display in the editor it changes is the tenth of a second
+    either side of a minute boundary. */
+export function clock(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '0:00.0';
+  const tenths = Math.max(0, Math.round(seconds * 10));
+  const m = Math.floor(tenths / 600);
+  const r = (tenths - m * 600) / 10;
+  return `${m}:${r < 10 ? '0' : ''}${r.toFixed(1)}`;
+}

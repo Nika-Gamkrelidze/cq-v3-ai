@@ -1,0 +1,19 @@
+/* The console's only page-scoped rule.
+
+   `admin.html` styled everything with the shared sheet plus inline `style=` attributes, and all
+   of those moved across as React `style` props — except one, which cannot be expressed that way:
+   `.tip` carries its own `margin: 0 0 0 6px`, and two of the checkbox rows deliberately clear it
+   so the ⓘ sits on the ROW'S own 8px gap rather than adding 6px to it. A `style` prop on a
+   wrapper cannot reach the button's margin, so it needs a rule.
+
+   Scoped to a module rather than appended to globals.css: nothing else in the app wants this,
+   and a page's private spacing tweak in the shared sheet is how a shared sheet stops being
+   shared. */
+
+.tipFlush {
+  display: inline-flex;
+}
+
+.tipFlush :global(.tip) {
+  margin-left: 0;
+}

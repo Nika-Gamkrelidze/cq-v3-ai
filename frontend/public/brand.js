@@ -1612,17 +1612,17 @@ const CQ = (() => {
     const { admin, tenant, user } = session();
     const signedIn = !!(admin || tenant || user);
     const items = [
-      { id: 'navPublic', i18n: 'nav.public', href: 'index.html', show: true },
-      { id: 'navEditor', i18n: 'ed.nav', href: 'editor.html', show: true },
-      { id: 'navConsole', i18n: 'nav.console', href: 'admin.html', show: !!admin },
-      { id: 'navKb', i18n: 'nav.kb', href: 'tenant.html', show: !!admin },
-      { id: 'navWorkspace', i18n: 'nav.workspace', href: 'tenant.html', show: !admin && !!tenant },
-      { id: 'navAccount', i18n: 'pb.nav.account', href: 'account.html', show: !!user },
+      { id: 'navPublic', i18n: 'nav.public', href: '/', show: true },
+      { id: 'navEditor', i18n: 'ed.nav', href: '/editor', show: true },
+      { id: 'navConsole', i18n: 'nav.console', href: '/console', show: !!admin },
+      { id: 'navKb', i18n: 'nav.kb', href: '/workspace', show: !!admin },
+      { id: 'navWorkspace', i18n: 'nav.workspace', href: '/workspace', show: !admin && !!tenant },
+      { id: 'navAccount', i18n: 'pb.nav.account', href: '/account', show: !!user },
       { id: 'logout', i18n: 'nav.logout', href: '#', show: signedIn },
       // account.html is the one sign-in gate now — its own subtabs cover both signing in
       // (any role: registered user, workspace user, or operator) and registering, so a
       // second nav item just for "create account" duplicated a door that page already has.
-      { id: 'navSignin', i18n: 'nav.signin', href: 'account.html', show: !signedIn },
+      { id: 'navSignin', i18n: 'nav.signin', href: '/account', show: !signedIn },
     ];
     return items.map(n => ({ id: n.id, i18n: n.i18n, href: n.href,
                              cls: n.show ? '' : 'hidden' }));

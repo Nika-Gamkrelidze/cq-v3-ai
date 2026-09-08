@@ -10,12 +10,39 @@ pages and four shared modules, calling **155 backend routes**.
 |---|---|---|---|
 | AI usage | *(new)* | `/usage` | ✅ ported |
 | AI setup | *(new)* | `/ai-config` | ✅ ported |
-| Public app | `index.html` | `/` | ⬜ |
-| Audio editor | `editor.html` | `/editor` | ⬜ |
-| Account | `account.html` | `/account` | ⬜ |
-| Console | `admin.html` | `/console` | ⬜ |
-| Workspace | `tenant.html` | `/workspace` | ⬜ |
-| Copilot demo | `copilot-demo.html` | `/copilot` | ⬜ (nothing links to it) |
+| Public app | `index.html` | `/` | ✅ ported |
+| Audio editor | `editor.html` | `/editor` | ✅ ported |
+| Account | `account.html` | `/account` | ✅ ported |
+| Console | `admin.html` | `/console` | ✅ ported |
+| Workspace | `tenant.html` | `/workspace` | ✅ ported |
+| Copilot demo | `copilot-demo.html` | `/copilot` | ✅ ported (nothing links to it) |
+
+**Every page is ported. The legacy files are still in the tree on purpose** — see "Cutover"
+below. Both navs now point at the clean routes, so the ported pages are what a user reaches;
+`tenant.html` and `admin.html` remain reachable by typing the URL, as a fallback until the
+ports have been used in anger.
+
+## Cutover — the state we are in, and what is left
+
+The image copies `frontend/public/` first and the Next export **on top**, so a ported route
+wins over a same-named legacy file. That means:
+
+| URL | Serves |
+|---|---|
+| `/`, `/account`, `/editor` (and their `.html` twins) | the PORT — the legacy file is overwritten in the image |
+| `/workspace`, `/console`, `/copilot` | the PORT |
+| `/tenant.html`, `/admin.html`, `/copilot-demo.html`, `/kb-admin.html` | still the LEGACY page |
+
+Remaining, deliberately not done yet:
+1. Delete the legacy pages and the four shared modules (`brand.js`, `brand.css`,
+   `workbench.js`, `timeline.js`, `audio-edit-core.js`, `audio-editor.js`). One reversible
+   commit, once the ports have been exercised.
+2. Add `301`s for the old URLs (`tenant.html` → `/workspace`, `admin.html` → `/console`,
+   `copilot-demo.html` → `/copilot`, `kb-admin.html` → `/workspace`) in BOTH
+   `deploy/nginx.conf` and `deploy/tls-ssl.conf` — a redirect in only one of them is not
+   deployed. Holding these back is what keeps the fallback reachable.
+3. Delete the `DICT` from `brand.js`; `check_i18n.py`'s "shared between the stacks" count then
+   falls to zero, which is the migration's own definition of done.
 
 Shared modules: `brand.js` (2018), `workbench.js` (1235), `timeline.js` (1032),
 `audio-edit-core.js` + `audio-editor.js` (856).

@@ -1,0 +1,88 @@
+/* Page-scoped CSS for /account.
+   ============================
+   Two groups, and neither belongs in globals.css:
+
+   1. The four rules `account.html` carried in its own <style> block — usage meters, the
+      clickable history row, the analyser dots. They are this page's, and appending them to
+      the shared sheet would put a page's private vocabulary in front of every other page.
+
+   2. The advanced-voice-settings panel (`.tts-adv` … `.seg`), which lives in `brand.css`
+      lines 505-540 but was deliberately left OUT of `globals.css`: it dresses ONE form, and
+      that form is mirrored in `index.html` and `account.html` rather than shared. The copy
+      below is that block verbatim, scoped. The legacy pages keep the brand.css copy until
+      phase 3 deletes them; the mirroring note in the legacy source ("change both") applies to
+      the two ported pages the same way. */
+
+/* ---- Usage meters on the Profile tab -------------------------------------------------
+   Same visual language as the rubric's weight bars (.sc-bar) — a number, its ceiling, and
+   how much of it is gone. */
+.useRow { padding: 10px 0; border-bottom: 1px solid color-mix(in oklab, var(--hairline) 60%, transparent); }
+.useRow:last-child { border-bottom: none; }
+.useHead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.useHead b { color: var(--paper); font-weight: 600; }
+.useHead span { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* A history row is a link to something: say so with the cursor, and make the whole row the
+   target rather than a tiny "open" affordance in the last column. */
+tr.actRow { cursor: pointer; }
+tr.actRow:hover td { background: color-mix(in oklab, var(--beam) 7%, transparent); }
+/* Not in the legacy sheet: the row is reachable by keyboard here (tabIndex + Enter), and a
+   focus ring is the only thing that says which row Enter would open. */
+tr.actRow:focus-visible { outline: 2px solid var(--beam); outline-offset: -2px; }
+
+.ranDots { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* The password prompt in front of a destructive action (rubric reset) reuses the confirm
+   modal's shell, so it looks like every other dialog in the app. The legacy rule was
+   `.cq-modal label:first-of-type` — a global reach into a dialog this page does not own, so
+   here the label carries the class itself. */
+.askPwLabel { margin-top: 0; }
+
+/* ---- Advanced voice settings (mirrors brand.css 505-540) ------------------------------
+   A <details> so the resting form is one extra line and the primary button stays put.
+   Inside, each .tts-row is a three-column grid — label, control, value — so a stack of
+   sliders lines up whatever each one is called in the current language. */
+.ttsAdv { margin-top: 12px; }
+.ttsAdv > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600; color: var(--mist); padding: 4px 0; }
+.ttsAdv > summary::-webkit-details-marker { display: none; }
+.ttsAdv > summary::before { content: '▸'; font-size: 11px; color: var(--muted); transition: transform .18s var(--ease); }
+.ttsAdv[open] > summary::before { transform: rotate(90deg); }
+.ttsAdv > summary:hover { color: var(--beam); }
+.ttsAdvBody { margin-top: 10px; padding: 12px 14px 14px; border: 1px solid var(--hairline); border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--surface-2) 40%, transparent); }
+.ttsRow { display: grid; grid-template-columns: minmax(96px, 132px) 1fr auto; column-gap: 12px; row-gap: 3px; align-items: center; }
+.ttsRow + .ttsRow { margin-top: 12px; }
+.ttsRow > label, .ttsRow > .ttsLbl { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.ttsRow > :global(.cq-select), .ttsRow > select, .ttsRow > :global(.hint), .ttsRow > .ttsEnds { grid-column: 2 / -1; }
+.ttsRow > :global(.hint) { margin-top: 0; }
+.ttsRow > input[type=range] { width: 100%; margin: 0; padding: 0; border: none; background: transparent; height: 22px;
+  accent-color: var(--beam); cursor: pointer; }
+.ttsRow > input[type=range]:focus { box-shadow: none; }
+.ttsVal { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--mist); min-width: 56px; text-align: center;
+  padding: 3px 7px; border-radius: 7px; background: var(--input-bg); border: 1px solid var(--hairline); }
+.ttsEnds { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: -2px; }
+.ttsRowCheck, .ttsRowReset { grid-template-columns: 1fr; }
+.ttsRowCheck > :global(.hint), .ttsRowReset > .ttsLink { grid-column: 1; }
+.ttsCheck { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; color: var(--paper); font-size: 13px; font-weight: 500; }
+.ttsCheck input[type=checkbox] { margin: 0; padding: 0; flex: none; }
+.ttsControls { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+.ttsLink { background: none; border: none; padding: 0; color: var(--mist); font: inherit; font-size: 12.5px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; justify-self: start; }
+.ttsLink:hover { color: var(--beam); }
+
+/* The three-way stability preset. A segmented control rather than a slider because v3 offers
+   exactly three values, and a slider that snaps to thirds invites a number that does not exist. */
+.seg { display: inline-flex; border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden; background: var(--input-bg); justify-self: start; }
+.seg button { background: transparent; border: none; color: var(--muted); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 7px 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--hairline); }
+.seg button:hover { color: var(--paper); }
+.seg button[aria-pressed="true"] { background: var(--beam); color: #0a1f30; }
+
+@media (max-width: 640px) {
+  .ttsRow { grid-template-columns: 1fr auto; }
+  .ttsRow > label, .ttsRow > .ttsLbl, .ttsRow > :global(.cq-select), .ttsRow > :global(.hint), .ttsRow > .ttsEnds { grid-column: 1 / -1; }
+  .seg { grid-column: 1 / -1; display: flex; justify-self: stretch; }
+  .seg button { flex: 1; padding: 10px 8px; }
+}

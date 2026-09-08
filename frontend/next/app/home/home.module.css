@@ -1,0 +1,96 @@
+/* Advanced voice settings — the one block of brand.css that globals.css does not carry.
+   =====================================================================================
+   `app/globals.css` was copied from `brand.css` BEFORE the advanced voice panel shipped, so
+   `.tts-adv*`, `.tts-row*`, `.tts-val`, `.tts-check`, `.tts-controls`, `.tts-link`,
+   `.tts-ends` and `.seg` exist in the legacy sheet and nowhere in the new one. Appending them
+   to globals.css is not an option under the parallel port (six agents, one file), so they live
+   here as a MODULE: the rules are identical to brand.css lines 505-540 and 585-589, only the
+   class names are hashed. If /account grows the same panel it gets its own hashed copy, which
+   is duplication but never a collision — and both disappear the day globals.css is refreshed
+   from brand.css.
+
+   Shape, verbatim from the source: a <details> so the form's resting height is one extra line
+   and the primary button stays where the visitor's eye already went. Inside, each row is a
+   three-column grid — label, control, value badge — with the hint and end-label rows spanning
+   the control columns, so the labels form one clean left rail whatever mix of controls the
+   selected model happens to get. */
+
+.adv { margin-top: 12px; }
+.adv > summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; color: var(--mist); user-select: none; padding: 2px 0;
+  transition: color .2s var(--ease);
+}
+.adv > summary::-webkit-details-marker { display: none; }
+.adv > summary::before { content: '▸'; font-size: 11px; color: var(--muted); transition: transform .18s var(--ease); }
+.adv[open] > summary::before { transform: rotate(90deg); }
+.adv > summary:hover { color: var(--beam); }
+.advBody {
+  margin-top: 10px; padding: 12px 14px 14px; border: 1px solid var(--hairline);
+  border-radius: var(--r-md); background: color-mix(in oklab, var(--input-bg) 55%, transparent);
+}
+
+.row {
+  display: grid; grid-template-columns: minmax(96px, 132px) 1fr auto;
+  column-gap: 12px; row-gap: 3px; align-items: center;
+}
+.row + .row { margin-top: 12px; }
+.row > label, .row > .lbl { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.row > :global(.cq-select), .row > :global(.hint), .row > .ends { grid-column: 2 / -1; }
+.row > :global(.hint) { margin-top: 0; }
+/* The global input rule paints a bordered box; a slider wants none of that, just the brand thumb. */
+.row > input[type=range] {
+  width: 100%; margin: 0; padding: 0; border: none; background: transparent; height: 22px;
+  accent-color: var(--beam); cursor: pointer;
+}
+.row > input[type=range]:focus { box-shadow: none; }
+
+.val {
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--mist); min-width: 56px;
+  text-align: center; padding: 2px 8px; border: 1px solid var(--hairline); border-radius: 999px;
+  background: var(--input-bg); white-space: nowrap;
+}
+.ends { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: -2px; }
+
+.rowCheck, .rowReset { grid-template-columns: 1fr; }
+.rowCheck > :global(.hint), .rowReset > .link { grid-column: 1; }
+.check {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;
+  color: var(--paper); font-size: 13px; font-weight: 500;
+}
+.check input[type=checkbox] { margin: 0; padding: 0; flex: none; }
+
+.controls { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+
+.link {
+  background: none; border: none; padding: 0; color: var(--mist); font: inherit; font-size: 12.5px;
+  cursor: pointer; text-decoration: underline; text-underline-offset: 3px; justify-self: start;
+}
+.link:hover { color: var(--beam); }
+
+/* Segmented control: the language switch's shape, with the active segment filled. */
+.seg {
+  display: inline-flex; border: 1px solid var(--hairline); border-radius: 999px; overflow: hidden;
+  background: var(--input-bg); justify-self: start;
+}
+.seg button {
+  background: transparent; border: none; color: var(--muted); font-family: inherit;
+  font-size: 12.5px; font-weight: 600; padding: 7px 14px; cursor: pointer;
+  transition: background .18s, color .18s;
+}
+.seg button + button { border-left: 1px solid var(--hairline); }
+.seg button:hover { color: var(--paper); }
+.seg button[aria-pressed="true"] { background: var(--beam); color: #0a1f30; }
+
+@media (max-width: 640px) {
+  /* The label takes its own line and the slider + badge share the next. */
+  .row { grid-template-columns: 1fr auto; }
+  .row > label, .row > .lbl, .row > :global(.cq-select), .row > :global(.hint), .row > .ends { grid-column: 1 / -1; }
+  .seg { grid-column: 1 / -1; display: flex; justify-self: stretch; }
+  .seg button { flex: 1; padding: 10px 8px; }
+}
+
+/* The API status dot. `Header` takes only a `tag` — the legacy page passed an `extra` slot
+   that the ported component does not have and that is not this page's to add — so the dot
+   moved down beside the eyebrow, which is the first line of the page either way. */
+.status { margin-left: 8px; vertical-align: middle; }

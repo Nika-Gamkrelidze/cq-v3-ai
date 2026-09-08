@@ -20,14 +20,14 @@ interface Item {
 }
 
 const ITEMS: Item[] = [
-  { key: 'nav.public', href: '/index.html', roles: 'all' },
-  { key: 'nav.editor', href: '/editor.html', roles: 'all' },
+  { key: 'nav.public', href: '/', roles: 'all' },
+  { key: 'nav.editor', href: '/editor', roles: 'all' },
   { key: 'nav.usage', href: '/usage', roles: ['superadmin'] },
   { key: 'nav.aicfg', href: '/ai-config', roles: ['superadmin'] },
-  { key: 'nav.console', href: '/admin.html', roles: ['superadmin'] },
-  { key: 'nav.kb', href: '/tenant.html', roles: ['superadmin'] },
-  { key: 'nav.workspace', href: '/tenant.html', roles: ['tenant'] },
-  { key: 'nav.account', href: '/account.html', roles: ['user'] },
+  { key: 'nav.console', href: '/console', roles: ['superadmin'] },
+  { key: 'nav.kb', href: '/workspace', roles: ['superadmin'] },
+  { key: 'nav.workspace', href: '/workspace', roles: ['tenant'] },
+  { key: 'nav.account', href: '/account', roles: ['user'] },
 ];
 
 export default function Header({ tag }: { tag?: string }) {
@@ -48,7 +48,7 @@ export default function Header({ tag }: { tag?: string }) {
 
   return (
     <header className="app-header">
-      <a className="brand" href="/index.html">
+      <a className="brand" href="/">
         <img className="brand-logo on-dark" src="/cq-logo-on-dark.png" alt="CommuniQ" />
         <img className="brand-logo on-light" src="/cq-logo.png" alt="CommuniQ" />
         {tag ? <span className="brand-tag">{tag}</span> : null}
@@ -66,7 +66,7 @@ export default function Header({ tag }: { tag?: string }) {
             onClick={e => {
               e.preventDefault();
               signOut();
-              window.location.href = '/index.html';
+              window.location.href = '/';
             }}
           >
             {t('nav.logout')}
@@ -76,7 +76,7 @@ export default function Header({ tag }: { tag?: string }) {
           // (any role: registered user, workspace user, or operator) and registering, so a
           // second top-nav link just for "create account" duplicated a door that page already
           // has.
-          <a href="/account.html">{t('nav.signin')}</a>
+          <a href="/account">{t('nav.signin')}</a>
         )}
 
         <div className="lang-switch" role="group" aria-label="Language">
