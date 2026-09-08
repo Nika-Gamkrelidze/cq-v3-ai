@@ -1,35 +1,46 @@
-"""Google Gemini as a speech-to-text adapter.
+"""Google Gemini as a speech-to-text adapter — two Google APIs behind one adapter.
 
-Gemini has no transcription endpoint. It is a multimodal model: the audio goes in as a part of
-a `generateContent` request and the transcript comes back as generated text — so this adapter
-asks for the transcript as STRUCTURED OUTPUT (`responseSchema`, the same JSON-schema discipline
-the text adapters keep) rather than parsing prose, and it is the model, not a signal-processing
-pipeline, that labels speakers and places timestamps.
+Google sells speech-to-text two ways, and the connection's MODEL ID decides which one it gets:
 
-That has two consequences worth being honest about, both written into the result's `detail`:
+  * ``gemini-3.5-transcribe`` (the default) — a DEDICATED transcription model on the
+    Interactions API (``POST /v1beta/interactions``). Native speaker diarization, word-level
+    timestamps, BCP-47 language hints, custom vocabulary, 85+ languages (Georgian is
+    ``ka-GE``). Recordings up to one hour; 30 minutes when diarization or timestamps are on.
+  * any other id (``gemini-3.8-flash``, ``gemini-2.5-pro``, …) — a multimodal CHAT model on
+    ``generateContent``: the audio goes in as a part and the transcript comes back as
+    structured output against a schema (the same JSON-schema discipline the text adapters
+    keep). Timings are SEGMENT-level and approximate — a model can say an utterance ran from
+    about 0:12 to 0:19; word timings from it would be fabricated, so each segment is ONE
+    ``words`` entry — and speakers are labelled by ear, not by voiceprint. Kept for the case
+    where a chat model's reading of context beats the ASR model on a hard recording.
 
-  * Timings are SEGMENT-level and approximate. A model can tell you an utterance ran from
-    about 0:12 to 0:19; word-by-word timings from it would be fabricated. So each segment is
-    returned as ONE `words` entry carrying the whole utterance, and `segments.build_segments`
-    treats it as a single word with a speaker and a span — the timeline highlights per turn.
-  * Diarization is by ear, not by voiceprint. It is usually right on a two-party call and it is
-    the model's judgement; it is not the acoustic clustering Scribe does.
+``gemini-3.5-transcribe-live`` is a WebSocket streaming model with no unary endpoint; the
+adapter refuses it in words rather than sending an HTTP request that cannot succeed.
+
+How the four transcription settings map on the Transcribe model (the knobs are ElevenLabs'):
+  language_code  → ``language_codes: [<BCP-47>]`` (``ka`` → ``ka-GE``). Unset = automatic
+                   detection, which also follows code-switching mid-call.
+  diarize        → ``mode.diarization_mode = "speaker"`` plus word timestamps.
+  keyterms       → ``custom_vocabulary`` — BUT Google rejects a request that combines it with
+                   diarization or timestamps. So speaker separation wins when both are set
+                   (the timeline and per-speaker scoring are what this product is built on)
+                   and the key terms are dropped with a warning; with speaker separation off
+                   the key terms are sent and the transcript comes back without timings, and
+                   the analysis works from the text alone (``segments_from_text``).
+  audio_format   → honoured exactly as for Scribe (``services/audio.to_stt_format``).
+On a chat model the same settings become sentences in the instruction, the only way a chat
+model takes them.
+
+The transcription is sent with ``store: false``: Google keeps Interactions by default for
+server-side conversation state, which a customer's call recording has no use for.
+
+Payload size: a short clip is inlined as base64; anything bigger goes through the Files API
+(resumable upload → wait ACTIVE → reference by URI → delete). Google's guidance for the
+Transcribe model is to upload anything longer than a few seconds, so its inline threshold is
+deliberately small; a ``generateContent`` request must simply stay under 20 MB.
 
 UNTESTED AGAINST THE LIVE API until a key is added — the registry's "Test connection" is the
-verification; what tests/test_voice.py pins is the request shape and the response mapping.
-
-How the four transcription settings map (they are ElevenLabs' knobs):
-  language_code  → a sentence in the instruction naming the language; the schema also asks the
-                   model to report the language it heard, which wins when present.
-  diarize        → the instruction asks for per-speaker labels (speaker_0, speaker_1 …) or for
-                   one label for everything.
-  keyterms       → listed in the instruction as spellings that occur in the audio — the same
-                   lever ElevenLabs calls keyterms, expressed the only way a chat model takes it.
-  audio_format   → honoured exactly as for Scribe (`services/audio.to_stt_format`).
-
-Payload size: an inline part must keep the whole request under 20 MB, so above a threshold the
-audio is pushed through the Files API first (resumable upload → wait for ACTIVE → reference by
-URI → delete), which is what makes a long call on a lossless format work at all.
+verification; what tests/test_voice.py pins is the request shapes and the response mappings.
 """
 from __future__ import annotations
 
@@ -46,21 +57,53 @@ log = logging.getLogger("cq")
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-DEFAULT_MODEL = "gemini-2.5-flash"
-# Base64 grows bytes by 4/3 and the whole request must stay under 20 MB; 14 MB of raw audio
-# leaves room for the instruction and the JSON envelope.
+INTERACTIONS_URL = f"{BASE_URL}/interactions"
+DEFAULT_MODEL = "gemini-3.5-transcribe"
+# generateContent: base64 grows bytes by 4/3 and the whole request must stay under 20 MB;
+# 14 MB of raw audio leaves room for the instruction and the JSON envelope.
 INLINE_MAX_BYTES = 14 * 1024 * 1024
-MAX_OUTPUT_TOKENS = 32768      # a dense hour of Georgian is well inside this
+# Transcribe: Google says to upload "files longer than a few seconds". 1 MB of the default
+# mono 16 kHz MP3 is a few minutes — the probe clip stays inline, a real call is uploaded.
+TRANSCRIBE_INLINE_MAX_BYTES = 1024 * 1024
+MAX_CUSTOM_VOCABULARY = 1000    # Google's cap; best results "with up to 100 terms"
+MAX_OUTPUT_TOKENS = 32768       # a dense hour of Georgian is well inside this
 FILE_ACTIVE_POLL_S = 2.0
 FILE_ACTIVE_TIMEOUT_S = 180.0
-DETAIL = ("Gemini transcribes as a language model: speaker labels are by ear and timings are "
-          "approximate, per segment rather than per word.")
+
+DETAIL_GENERATE = ("Gemini transcribes as a language model: speaker labels are by ear and "
+                   "timings are approximate, per segment rather than per word.")
+DETAIL = DETAIL_GENERATE        # the name the first version exported
+DETAIL_TRANSCRIBE = "Gemini Transcribe labels speakers and times every word natively."
+NOTE_TERMS_DROPPED = (" Key terms were not sent: Gemini Transcribe cannot combine custom "
+                      "vocabulary with speaker separation — turn speaker separation off for "
+                      "a file to use them.")
+NOTE_TERMS_NO_TIMES = (" Key terms were sent as custom vocabulary, which on Gemini Transcribe "
+                       "means no word timings: the analysis works from the text alone.")
+NOTE_TERMS_RULE = " Key terms apply only when speaker separation is off."
 
 _LANG_NAMES = {
     "ka": "Georgian", "en": "English", "ru": "Russian", "de": "German", "fr": "French",
     "es": "Spanish", "it": "Italian", "tr": "Turkish", "uk": "Ukrainian", "hy": "Armenian",
     "az": "Azerbaijani", "ar": "Arabic", "pt": "Portuguese", "pl": "Polish",
     "kat": "Georgian", "eng": "English", "rus": "Russian",
+}
+
+# The Transcribe model takes BCP-47 tags with a region (the codes on Google's supported-
+# languages table). Our settings hold ISO-639-1/-3 codes, ElevenLabs' convention.
+_BCP47 = {
+    "ka": "ka-GE", "kat": "ka-GE", "en": "en-US", "eng": "en-US", "ru": "ru-RU", "rus": "ru-RU",
+    "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "tr": "tr-TR", "uk": "uk-UA",
+    "hy": "hy-AM", "az": "az-AZ", "ar": "ar-EG", "pt": "pt-PT", "pl": "pl-PL", "he": "he-IL",
+    "el": "el-GR", "kk": "kk-KZ", "ro": "ro-RO", "bg": "bg-BG", "cs": "cs-CZ", "nl": "nl-NL",
+    "sv": "sv-SE", "fi": "fi-FI", "da": "da-DK", "hu": "hu-HU", "ja": "ja-JP", "ko": "ko-KR",
+    "hi": "hi-IN", "id": "id-ID", "vi": "vi-VN", "th": "th-TH", "fa": "fa-IR", "uz": "uz-UZ",
+}
+
+# The Interactions API's audio mime type is an ENUM; the common aliases mapped onto it.
+_INTERACTIONS_MIME = {
+    "audio/mp4": "audio/m4a", "audio/x-m4a": "audio/m4a", "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav", "audio/vnd.wave": "audio/wav", "audio/x-flac": "audio/flac",
+    "audio/x-aiff": "audio/aiff", "audio/mp3": "audio/mp3",
 }
 
 # Gemini's OpenAPI subset: UPPERCASE types, no additionalProperties.
@@ -92,6 +135,52 @@ def _headers(res) -> dict:
         raise voice_base.VoiceError("Gemini API key is not configured for speech-to-text "
                                     "(set one on the connection).", code="invalid_key")
     return {"x-goog-api-key": res.api_key}
+
+
+def is_transcribe_model(model: str | None) -> bool:
+    """The dedicated ASR family (``gemini-3.5-transcribe``, later versions), by name."""
+    return "transcribe" in (model or "").lower()
+
+
+def bcp47(code: str | None) -> str | None:
+    """``ka`` → ``ka-GE``; a tag that already carries a region passes through; an unknown
+    bare code is sent as it is (BCP-47 allows a bare language subtag) and Google's answer
+    says whether it took it."""
+    c = (code or "").strip()
+    if not c:
+        return None
+    if "-" in c or "_" in c:
+        return c.replace("_", "-")
+    return _BCP47.get(c.lower(), c.lower())
+
+
+def transcription_config(*, language_code: str | None, diarize: bool,
+                         keyterms: list[str] | None) -> tuple[dict, str]:
+    """The Transcribe model's ``transcription_config`` for our settings, plus the sentence
+    that says what could not be honoured (empty when everything was). Pure."""
+    tc: dict = {}
+    lang = bcp47(language_code)
+    if lang:
+        tc["language_codes"] = [lang]
+    terms: list[str] = []
+    for k in keyterms or []:
+        k = (k or "").strip()
+        if k and k not in terms:
+            terms.append(k)
+    note = ""
+    if diarize:
+        tc["mode"] = {"type": "verbatim", "diarization_mode": "speaker",
+                      "timestamp_granularities": ["word"]}
+        if terms:
+            log.warning("gemini transcribe: %d key terms dropped — Google rejects custom "
+                        "vocabulary combined with speaker diarization", len(terms))
+            note = NOTE_TERMS_DROPPED
+    elif terms:
+        tc["custom_vocabulary"] = terms[:MAX_CUSTOM_VOCABULARY]
+        note = NOTE_TERMS_NO_TIMES
+    else:
+        tc["mode"] = {"type": "verbatim", "timestamp_granularities": ["word"]}
+    return tc, note
 
 
 def instruction(*, language_code: str | None, diarize: bool, keyterms: list[str] | None) -> str:
@@ -134,8 +223,23 @@ def _num(v):
     return f if f >= 0 else None
 
 
+def _secs(v) -> float | None:
+    """``"0.450s"`` (the Interactions API's Duration) or a bare number → seconds; None
+    for anything else, never a fabricated 0."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if v >= 0 else None
+    if isinstance(v, str):
+        s = v.strip()
+        if s.endswith("s"):
+            s = s[:-1].strip()
+        return _num(s)
+    return None
+
+
 def words_from(body: dict, *, asked_language: str | None) -> tuple[list[dict], str, str | None]:
-    """The model's JSON → (words, text, language_code). Each segment is ONE word entry."""
+    """The chat model's JSON → (words, text, language_code). Each segment is ONE word entry."""
     words: list[dict] = []
     for seg in body.get("segments") or []:
         if not isinstance(seg, dict):
@@ -152,6 +256,47 @@ def words_from(body: dict, *, asked_language: str | None) -> tuple[list[dict], s
     if lang and len(lang) != 2:
         lang = None
     return words, text, lang or (asked_language.strip().lower()[:2] if asked_language else None)
+
+
+def words_from_interaction(data: dict) -> tuple[list[dict], str]:
+    """An Interaction → (words, text). The transcript is the text content of the model's
+    output steps; with timestamps or diarization on, every word arrives as a ``word_info``
+    annotation on it. Google's speaker labels (``spk_1``, ``spk_2``) are renamed to the
+    house ``speaker_0``, ``speaker_1`` in order of first appearance, so the first voice heard
+    is ``speaker_0`` on every provider. Without annotations ``words`` is empty and the
+    analysis falls back to the text (``analysis.py`` → ``segments_from_text``)."""
+    texts: list[str] = []
+    words: list[dict] = []
+    labels: dict[str, str] = {}
+
+    def speaker(label) -> str:
+        label = str(label or "").strip()
+        if not label:
+            return "speaker_0"
+        if label not in labels:
+            labels[label] = f"speaker_{len(labels)}"
+        return labels[label]
+
+    for step in data.get("steps") or []:
+        if not isinstance(step, dict) or step.get("type") not in (None, "model_output"):
+            continue
+        for content in step.get("content") or []:
+            if not isinstance(content, dict) or content.get("type") != "text":
+                continue
+            t = str(content.get("text") or "").strip()
+            if t:
+                texts.append(t)
+            for ann in content.get("annotations") or []:
+                if not isinstance(ann, dict) or ann.get("type") != "word_info":
+                    continue
+                w = str(ann.get("text") or "").strip()
+                if not w:
+                    continue
+                words.append({"text": w, "start": _secs(ann.get("start_offset")),
+                              "end": _secs(ann.get("end_offset")), "type": "word",
+                              "speaker_id": speaker(ann.get("speaker"))})
+    text = "\n".join(texts) or " ".join(w["text"] for w in words)
+    return words, text
 
 
 class GeminiSTT:
@@ -216,18 +361,78 @@ class GeminiSTT:
                          audio_format: str | None = None,
                          timeout: float | None = None) -> dict:
         model = self.model(res)
+        if is_transcribe_model(model) and model.lower().endswith("-live"):
+            raise voice_base.VoiceError(
+                f"{model} is Google's streaming model (WebSockets only) and cannot transcribe "
+                f"a recording; set the connection's model to {DEFAULT_MODEL}.",
+                code="invalid_model")
         payload = await audio_mod.to_stt_format(audio, filename or "audio", content_type or "",
                                                 audio_format)
         mime = _mime(payload.content_type, payload.filename)
         timeout = timeout or 300.0
+        if is_transcribe_model(model):
+            return await self._transcribe_interactions(
+                res, model, payload.data, mime, language_code=language_code, diarize=diarize,
+                keyterms=keyterms, timeout=timeout)
+        return await self._transcribe_generate(
+            res, model, payload.data, mime, language_code=language_code, diarize=diarize,
+            keyterms=keyterms, timeout=timeout)
+
+    async def _transcribe_interactions(self, res, model: str, data: bytes, mime: str, *,
+                                       language_code: str | None, diarize: bool,
+                                       keyterms: list[str] | None, timeout: float) -> dict:
+        """The dedicated ASR model: ``POST /interactions`` with a ``transcription_config``."""
+        mime = _INTERACTIONS_MIME.get(mime, mime)
+        tc, note = transcription_config(language_code=language_code, diarize=diarize,
+                                        keyterms=keyterms)
         uploaded: str | None = None
-        if len(payload.data) <= INLINE_MAX_BYTES:
+        if len(data) <= TRANSCRIBE_INLINE_MAX_BYTES:
+            audio_part = {"type": "audio", "mime_type": mime,
+                          "data": base64.b64encode(data).decode("ascii")}
+        else:
+            log.info("gemini transcribe: %d bytes; using the Files API", len(data))
+            uploaded, uri = await self._upload(res, data, mime, timeout)
+            audio_part = {"type": "audio", "mime_type": mime, "uri": uri}
+        body = {
+            "model": model,
+            "input": [audio_part],
+            "store": False,
+            "generation_config": {"transcription_config": tc},
+        }
+        try:
+            resp = await voice_base.http_request(
+                "POST", INTERACTIONS_URL, "Speech-to-text", vendor="Gemini", timeout=timeout,
+                headers={**_headers(res), "Content-Type": "application/json"}, json=body)
+        finally:
+            if uploaded:
+                await self._delete_quietly(res, uploaded)
+        payload = resp.json()
+        data_out = payload if isinstance(payload, dict) else {}
+        words, text = words_from_interaction(data_out)
+        status = str(data_out.get("status") or "completed")
+        if status != "completed" and not text:
+            err = data_out.get("error")
+            msg = str(err.get("message") or "") if isinstance(err, dict) else str(err or "")
+            raise voice_base.VoiceError(
+                f"Gemini did not complete the transcription (status {status!r}"
+                f"{': ' + msg if msg else ''}).", code="bad_response")
+        lang = language_code.strip().lower()[:2] if language_code and language_code.strip() \
+            else None
+        return {"text": text, "language_code": lang, "words": words,
+                "detail": DETAIL_TRANSCRIBE + note}
+
+    async def _transcribe_generate(self, res, model: str, data: bytes, mime: str, *,
+                                   language_code: str | None, diarize: bool,
+                                   keyterms: list[str] | None, timeout: float) -> dict:
+        """A chat model: ``generateContent`` with the audio as a part and a transcript schema."""
+        uploaded: str | None = None
+        if len(data) <= INLINE_MAX_BYTES:
             audio_part = {"inlineData": {"mimeType": mime,
-                                         "data": base64.b64encode(payload.data).decode("ascii")}}
+                                         "data": base64.b64encode(data).decode("ascii")}}
         else:
             log.info("gemini stt: %d bytes exceeds the inline limit; using the Files API",
-                     len(payload.data))
-            uploaded, uri = await self._upload(res, payload.data, mime, timeout)
+                     len(data))
+            uploaded, uri = await self._upload(res, data, mime, timeout)
             audio_part = {"fileData": {"mimeType": mime, "fileUri": uri}}
         body = {
             "contents": [{"role": "user", "parts": [
@@ -250,8 +455,8 @@ class GeminiSTT:
         finally:
             if uploaded:
                 await self._delete_quietly(res, uploaded)
-        data = resp.json() or {}
-        candidates = data.get("candidates") or []
+        out = resp.json() or {}
+        candidates = out.get("candidates") or []
         cand = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
         if cand.get("finishReason") == "MAX_TOKENS":
             raise voice_base.VoiceError("Gemini stopped before the end of the transcript "
@@ -266,9 +471,10 @@ class GeminiSTT:
                                         f"{exc}", code="bad_response") from exc
         words, text, lang = words_from(parsed if isinstance(parsed, dict) else {},
                                        asked_language=language_code)
-        return {"text": text, "language_code": lang, "words": words, "detail": DETAIL}
+        return {"text": text, "language_code": lang, "words": words, "detail": DETAIL_GENERATE}
 
     async def probe(self, res) -> dict:
+        model = self.model(res)
         try:
             await self.transcribe(res, silence_wav(), "probe.wav", "audio/wav",
                                   diarize=False, audio_format="original", timeout=60.0)
@@ -276,8 +482,9 @@ class GeminiSTT:
             return {"ok": False, "detail": str(exc), "code": exc.code}
         except Exception as exc:  # noqa: BLE001 — a probe never raises
             return {"ok": False, "detail": str(exc), "code": "http"}
-        return {"ok": True,
-                "detail": f"Gemini model {self.model(res)} accepted a 0.4 s probe clip. {DETAIL}"}
+        about = DETAIL_TRANSCRIBE + NOTE_TERMS_RULE if is_transcribe_model(model) \
+            else DETAIL_GENERATE
+        return {"ok": True, "detail": f"Gemini model {model} accepted a 0.4 s probe clip. {about}"}
 
 
 adapter = GeminiSTT()

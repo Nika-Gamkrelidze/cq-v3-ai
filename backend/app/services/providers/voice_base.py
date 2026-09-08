@@ -59,7 +59,8 @@ class VoiceError(RuntimeError):
     """A classified voice-provider failure — the ONE exception type every adapter raises.
 
     `code`  — invalid_key | missing_permission | quota | blocked | transport | http |
-              unknown_provider | not_configured
+              unknown_provider | not_configured | invalid_model (an id this adapter cannot
+              serve, e.g. a streaming-only model) | bad_response | truncated | upload | timeout
     `scope` — the permission the provider named as missing, when it named one
     `raw`   — first 500 chars of the response body (kept for the admin panel / job row)
 

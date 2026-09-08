@@ -38,8 +38,10 @@ CATALOG: dict[str, dict[str, dict]] = {
         },
         "gemini": {
             "label": "Google (Gemini)",
-            # Known, not exhaustive: the current flagship and the fast model.
-            "known_models": ["gemini-2.5-pro", "gemini-2.5-flash"],
+            # Known, not exhaustive: the 2.5 pair and the current stable Flash generations
+            # (Gemini 3.x Flash thinks by default; its thoughts are billed as output tokens).
+            "known_models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.8-flash",
+                             "gemini-3.7-flash"],
             "allows_base_url": False,
             "fields": [],
         },
@@ -60,9 +62,12 @@ CATALOG: dict[str, dict[str, dict]] = {
     
         "gemini": {
             "label": "Google (Gemini)",
-            # Multimodal generateContent with a transcript schema — no transcription endpoint.
-            # Known, not exhaustive; both take audio. Flash is the sensible default for calls.
-            "known_models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+            # gemini-3.5-transcribe is Google's dedicated speech-to-text model (Interactions
+            # API: native diarization + word timestamps, 85+ languages incl. Georgian). Any
+            # other id is a chat model asked for a transcript through generateContent —
+            # segment-level timings, speakers by ear. Known, not exhaustive.
+            "known_models": ["gemini-3.5-transcribe", "gemini-3.8-flash", "gemini-3.5-flash",
+                             "gemini-2.5-flash", "gemini-2.5-pro"],
             "allows_base_url": False,
             "fields": [],
         },

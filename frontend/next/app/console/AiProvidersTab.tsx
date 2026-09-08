@@ -59,6 +59,15 @@ function providerLabel(t: Translate, id: string, entry?: AiProviderEntry): strin
   return s === key ? (entry?.label || id) : s;
 }
 
+/** The first sentence of a provider's error message, capped, for the table cell — a
+    Google or OpenAI error can run to a paragraph, and the ⓘ next to it carries the whole. */
+function firstSentence(text: string, max = 180): string {
+  const s = text.trim();
+  const cut = s.search(/[.!?](\s|$)/);
+  const head = cut > 20 ? s.slice(0, cut + 1) : s;
+  return head.length > max ? `${head.slice(0, max - 1).trimEnd()}…` : head;
+}
+
 export default function AiProvidersTab({ onVoiceChanged }: {
   /** A speech connection changed — the Voices tab's list may now come from another account. */
   onVoiceChanged: () => void;
@@ -151,7 +160,12 @@ export default function AiProvidersTab({ onVoiceChanged }: {
       const last: AiLastTest = { ok: !!r?.ok, at: r?.at || new Date().toISOString(), detail: r?.detail || null };
       setConns(list => (list || []).map(x => (x.id === c.id ? { ...x, last_test: last } : x)));
       setNote(null);
-      toast(`${t('adm.ai.tested')}: ${t(last.ok ? 'ai.test.ok' : 'ai.test.fail')}`, last.ok ? 'ok' : 'err');
+      // A failure carries the provider's own reason, and stays up long enough to read it:
+      // "Failed" alone sends an operator to guess at the key, the model id and the network.
+      toast(last.ok
+        ? `${t('adm.ai.tested')}: ${t('ai.test.ok')}`
+        : `${t('adm.ai.tested')}: ${t('ai.test.fail')}${last.detail ? ` — ${last.detail}` : ''}`,
+      last.ok ? 'ok' : 'err', last.ok ? 3600 : 12000);
     } catch (e) {
       if (e instanceof SessionExpired) return;
       // A non-2xx is still a test result — the row shows it as a failure with the server's own
@@ -381,6 +395,14 @@ function ConnRow({
           <Tip text={last ? (last.detail || '') : t('ai.untested.hint')} />
         </span>
         {last?.at ? <div className="hint">{t('ai.test.at', { when: dateTime(last.at) })}</div> : null}
+        {/* …except that a FAILURE's reason must not hide behind the ⓘ: it is the one thing
+            the operator came to this row for. The first sentence sits in the cell, wrapped
+            to a fixed width so it cannot push the other columns; the ⓘ keeps the whole. */}
+        {last && last.ok === false && last.detail ? (
+          <div className="hint" style={{ maxWidth: 360, whiteSpace: 'normal' }}>
+            {firstSentence(last.detail)}
+          </div>
+        ) : null}
       </td>
       <td className="inline">
         {off ? (
