@@ -173,7 +173,10 @@ def test_catalog_shape():
     assert not catalog.allows_base_url("tts", "elevenlabs")
     for pid, entry in catalog.CATALOG["tts"].items():
         assert "voice_id" in entry["fields"], pid
-    assert not catalog.is_known("llm", "elevenlabs") and not catalog.is_known("stt", "gemini")
+    # Negative space: a voice provider is not a text provider, and Gemini speaks no TTS here
+    # (it IS an STT provider now — a multimodal transcript, added 2026-09-08).
+    assert not catalog.is_known("llm", "elevenlabs") and not catalog.is_known("tts", "gemini")
+    assert catalog.is_known("stt", "gemini")
     assert catalog.providers_for("nope") == {}
 
 

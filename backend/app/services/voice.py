@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from . import ai_resolve, settings_store
 from . import transcription as transcription_svc
 from .ai_resolve import Resolved
-from .providers import stt_elevenlabs, stt_openai, tts_elevenlabs, tts_openai
+from .providers import stt_elevenlabs, stt_gemini, stt_openai, tts_elevenlabs, tts_openai
 from .providers.voice_base import (LANGUAGE_REJECTED, MAX_TEXT_CHARS, SPEED_MAX,  # noqa: F401
                                    SPEED_MIN, STABILITY_PRESETS, STTAdapter, TTSAdapter,
                                    VoiceError, silence_wav)
@@ -35,6 +35,7 @@ log = logging.getLogger("cq")
 STT_ADAPTERS: dict[str, STTAdapter] = {
     stt_elevenlabs.adapter.id: stt_elevenlabs.adapter,
     stt_openai.adapter.id: stt_openai.adapter,
+    stt_gemini.adapter.id: stt_gemini.adapter,
 }
 TTS_ADAPTERS: dict[str, TTSAdapter] = {
     tts_elevenlabs.adapter.id: tts_elevenlabs.adapter,

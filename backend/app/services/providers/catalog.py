@@ -57,6 +57,15 @@ CATALOG: dict[str, dict[str, dict]] = {
             "allows_base_url": True,
             "fields": [],
         },
+    
+        "gemini": {
+            "label": "Google (Gemini)",
+            # Multimodal generateContent with a transcript schema — no transcription endpoint.
+            # Known, not exhaustive; both take audio. Flash is the sensible default for calls.
+            "known_models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+            "allows_base_url": False,
+            "fields": [],
+        },
     },
     "tts": {
         "elevenlabs": {

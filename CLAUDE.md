@@ -144,8 +144,9 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   base_url, sealed key, settings)`, one **default per capability** — plus per-workspace
   **assignment** (`tenant_ai_assignments`, a dropdown on `/ai-config`) and a workspace's **own
   key** (`tenant_ai_overrides`, the portal's *Your own AI subscription* tab; owners only, never
-  a base URL). Text providers: Anthropic, OpenAI, Gemini; voice: ElevenLabs, OpenAI — STT and
-  TTS are resolved independently. Console: *AI providers* tab (Test connection / Make default /
+  a base URL). Text providers: Anthropic, OpenAI, Gemini; speech-to-text: ElevenLabs, OpenAI, Gemini
+  (multimodal `generateContent` with a transcript schema — segment-level timings, speakers by
+  ear); text-to-speech: ElevenLabs, OpenAI — STT and TTS are resolved independently. Console: *AI providers* tab (Test connection / Make default /
   Deactivate). Provider keys are **encrypted at rest** (`services/secrets.py`, `SECRETS_KEY`).
 - **Conversational AI — customer chat bot + operator copilot** (`routers/chat.py`, mounted at
   `/v1/chat/*`; design in `docs/ADR-001-conversational-ai.md`). The customer's **chat service**

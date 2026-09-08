@@ -21,6 +21,7 @@ only its OUTPUT), and `audio_format="original"` keeps ffmpeg out of the multipar
 No database: nothing here touches the app's pool.
 """
 import asyncio
+import base64
 import json
 import re
 
@@ -354,3 +355,129 @@ def test_probes_report_rather_than_raise(wire, resolver):
     dead = run(voice.probe(legacy_stt()))
     assert dead["ok"] is False and dead["code"] == "transport"
     assert run(voice.probe(Resolved("stt", "acme", None, "k", None)))["code"] == "unknown_provider"
+
+
+# --------------------------------------------------------------------------- #
+# Gemini speech-to-text: a multimodal model asked for a structured transcript
+# --------------------------------------------------------------------------- #
+from app.services.providers import stt_gemini  # noqa: E402
+
+
+def gemini_stt(model="gemini-2.5-flash"):
+    return Resolved("stt", "gemini", model, "AIza-test", None, connection_id="c-3",
+                    source="assigned")
+
+
+def _gemini_reply(payload: dict, finish: str = "STOP") -> tuple[int, dict]:
+    return (200, {"candidates": [{"finishReason": finish,
+                                  "content": {"parts": [{"text": json.dumps(payload)}]}}]})
+
+
+def _first(wire, key, reply):
+    # The fixture's "/models" key would match ":generateContent" first — ours must be checked first.
+    wire["responses"] = {key: reply, **wire["responses"]}
+
+
+def test_gemini_stt_inlines_the_audio_with_a_transcript_schema_and_maps_segments(wire, resolver):
+    resolver["stt"] = gemini_stt()
+    _first(wire, ":generateContent", _gemini_reply({
+        "language_code": "ka",
+        "segments": [{"speaker": "speaker_0", "start": 0.0, "end": 2.5, "text": "გამარჯობა"},
+                     {"speaker": "speaker_1", "start": 2.6, "end": 5.0, "text": "36 თვემდე"}]}))
+    out = run(voice.transcribe("t-1", b"RIFFraw", "call.wav", "audio/wav", transcription={
+        **ORIGINAL, "language_code": "ka", "keyterms": ["თვემდე"], "diarize": True}))
+    [req] = wire["sent"]
+    assert req["url"].endswith("/models/gemini-2.5-flash:generateContent")
+    assert req["headers"]["x-goog-api-key"] == "AIza-test"
+    assert "key=" not in req["url"], "the key must travel in a header, never the URL"
+    body = json.loads(req["body"])
+    parts = body["contents"][0]["parts"]
+    inline = parts[0]["inlineData"]
+    assert inline["mimeType"] == "audio/wav"
+    assert base64.b64decode(inline["data"]) == b"RIFFraw"
+    text = parts[1]["text"]
+    assert "Georgian" in text and "speaker_0, speaker_1" in text and "თვემდე" in text
+    gc = body["generationConfig"]
+    assert gc["responseMimeType"] == "application/json" and gc["temperature"] == 0
+    assert gc["responseSchema"]["type"] == "OBJECT"
+    assert "additionalProperties" not in json.dumps(gc["responseSchema"])
+    # The mapping: one `words` entry per segment, carrying the speaker and the span.
+    assert (out["text"], out["language_code"], out["provider"]) == ("გამარჯობა 36 თვემდე", "ka", "gemini")
+    assert [w["speaker_id"] for w in out["words"]] == ["speaker_0", "speaker_1"]
+    assert out["words"][1]["start"] == 2.6 and out["words"][1]["end"] == 5.0
+    segs = segments.build_segments(out["words"])
+    assert [s["speaker"] for s in segs] == ["speaker_0", "speaker_1"]
+    assert "approximate" in out["detail"]
+
+
+def test_gemini_stt_without_diarization_or_language_asks_for_one_speaker(wire, resolver):
+    resolver["stt"] = gemini_stt()
+    _first(wire, ":generateContent", _gemini_reply({"language_code": "", "segments": [
+        {"speaker": "speaker_0", "start": "n/a", "end": None, "text": "hi"}]}))
+    out = run(voice.transcribe("t-1", b"x", "a.mp3", "audio/mpeg",
+                               transcription={**ORIGINAL, "diarize": False}))
+    text = json.loads(wire["sent"][0]["body"])["contents"][0]["parts"][1]["text"]
+    assert "Label every segment speaker_0" in text and "The audio is in" not in text
+    # Unparseable timings become None (text-mode segments), never a crash or a fake number.
+    assert out["words"] == [{"text": "hi", "start": None, "end": None, "type": "word",
+                             "speaker_id": "speaker_0"}]
+    assert out["language_code"] is None
+
+
+def test_gemini_stt_uses_the_files_api_above_the_inline_limit(monkeypatch, resolver):
+    """A long call on a lossless format cannot be inlined; it goes resumable-upload → wait
+    ACTIVE → reference by URI → delete, and the transcript request carries fileData."""
+    resolver["stt"] = gemini_stt()
+    monkeypatch.setattr(stt_gemini, "INLINE_MAX_BYTES", 8)
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, str(request.url)))
+        if request.url.path.endswith("/upload/v1beta/files"):
+            assert request.headers["x-goog-upload-command"] == "start"
+            assert request.headers["x-goog-upload-header-content-type"] == "audio/flac"
+            return httpx.Response(200, headers={"X-Goog-Upload-URL":
+                                                "https://generativelanguage.googleapis.com/upload/session/1"})
+        if "upload/session/1" in str(request.url):
+            assert request.headers["x-goog-upload-command"] == "upload, finalize"
+            assert request.read() == b"BIGFLACBYTES"
+            return httpx.Response(200, json={"file": {"name": "files/abc", "state": "ACTIVE",
+                                                      "uri": "https://generativelanguage.googleapis.com/v1beta/files/abc"}})
+        if request.url.path.endswith(":generateContent"):
+            body = json.loads(request.read())
+            assert body["contents"][0]["parts"][0] == {"fileData": {
+                "mimeType": "audio/flac",
+                "fileUri": "https://generativelanguage.googleapis.com/v1beta/files/abc"}}
+            return httpx.Response(200, json=_gemini_reply({"language_code": "en", "segments": [
+                {"speaker": "speaker_0", "start": 0, "end": 1, "text": "long"}]})[1])
+        if request.method == "DELETE" and request.url.path.endswith("/files/abc"):
+            return httpx.Response(200, json={})
+        return httpx.Response(404, json={"error": f"unexpected {request.url}"})
+
+    monkeypatch.setattr(voice_base, "_transport", httpx.MockTransport(handler))
+    out = run(voice.transcribe("t-1", b"BIGFLACBYTES", "call.flac", "audio/flac",
+                               transcription=ORIGINAL))
+    assert out["text"] == "long"
+    assert [m for m, _ in calls] == ["POST", "POST", "POST", "DELETE"]
+
+
+def test_gemini_stt_truncated_transcript_is_a_clear_error(wire, resolver):
+    resolver["stt"] = gemini_stt()
+    _first(wire, ":generateContent", _gemini_reply({"language_code": "ka", "segments": []},
+                                                    finish="MAX_TOKENS"))
+    with pytest.raises(voice_base.VoiceError) as exc:
+        run(voice.transcribe("t-1", b"x", "a.mp3", "audio/mpeg", transcription=ORIGINAL))
+    assert exc.value.code == "truncated"
+
+
+def test_gemini_probe_reports_ok_and_names_the_model(wire, resolver):
+    _first(wire, ":generateContent", _gemini_reply({"language_code": "en", "segments": []}))
+    out = run(voice.probe(gemini_stt("gemini-2.5-pro")))
+    assert out["ok"] is True and "gemini-2.5-pro" in out["detail"]
+
+
+def test_gemini_is_offered_for_speech_to_text():
+    """The dropdown is catalog-driven, so this is what puts Gemini in it."""
+    from app.services.providers import catalog
+    assert "gemini" in catalog.CATALOG["stt"] and "gemini" in voice.STT_ADAPTERS
+    assert catalog.CATALOG["stt"]["gemini"]["allows_base_url"] is False
