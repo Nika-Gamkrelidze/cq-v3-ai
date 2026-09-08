@@ -33,12 +33,18 @@ let storageThrows = false;
 
 const {
   scopedHeaders, adminOnlyHeaders, authHeaders, readSession, signOut,
-  apiGet, apiSend, ApiError,
+  apiGet, apiGetOrNull, apiSend, ApiError,
+  setActingTenant, getActingTenant, apiBase,
 } = await import('../session.ts');
 
-/** Put exactly these tokens in the tab. */
+/** Put exactly these tokens in the tab, and nobody acting as anybody.
+ *
+ *  The act-as selection is MODULE state that outlives one test, so clearing it here rather than
+ *  in each test is what keeps a later test from reading an earlier one's workspace — which
+ *  would show up as a header appearing in a table row that pins its absence. */
 function signedIn(t: { admin?: string; tenant?: string; user?: string } = {}): void {
   store.clear();
+  setActingTenant(null);
   if (t.admin) store.set('cq_admin_token', t.admin);
   if (t.tenant) store.set('cq_tenant_token', t.tenant);
   if (t.user) store.set('cq_user_token', t.user);
@@ -66,6 +72,9 @@ test('tenant sends the workspace Bearer only', () => {
   signedIn(ALL);
   assert.deepEqual(scopedHeaders('tenant'), { Authorization: 'Bearer T' });
   signedIn({ admin: 'A' });
+  // A superadmin with NO workspace picked: nothing, not a bare admin token. That token with no
+  // selector beside it is an unscoped superadmin request, and `/recordings`' owner predicate
+  // for one is literally `True` — a workspace panel would list every tenant's calls.
   assert.deepEqual(scopedHeaders('tenant'), {});
 });
 
@@ -173,10 +182,13 @@ test('storage that throws reads as signed out rather than crashing the page', ()
 
 /* ---------------- transports ---------------- */
 
-/** Answer the next fetch with this, and record what was sent. */
+/** Answer the next fetch with this, and record what was sent — including WHERE, which is how
+ *  the API base is pinned end to end rather than only at `apiBase()`. */
 let lastInit: RequestInit | undefined;
+let lastUrl = '';
 function serve(make: () => Response | Promise<Response> | never): void {
-  (globalThis as unknown as { fetch: unknown }).fetch = async (_u: string, init: RequestInit) => {
+  (globalThis as unknown as { fetch: unknown }).fetch = async (u: string, init: RequestInit) => {
+    lastUrl = u;
     lastInit = init;
     return make();
   };
@@ -243,4 +255,212 @@ test('the scope reaches the wire, and JSON bodies get their Content-Type', async
     'Content-Type': 'application/json',
   });
   assert.equal(lastInit?.body, '{"x":1}');
+});
+
+/* ---------------- acting as a workspace ----------------
+
+   The other half of the same leak. The table above pins which credential leaves the browser;
+   this pins WHICH WORKSPACE it is about. An operator's `X-Admin-Token` reaches the customer's
+   own routes, and there the selector is the only thing standing between "this workspace's
+   documents" and every workspace's — `/admin/*` is not involved, so nothing else narrows it.
+
+   Both directions are load-bearing and both are silent when wrong: a missing selector reads as
+   a full-tenant listing that looks like a very busy workspace, and a selector on `/admin/*`
+   reads as an expired console session (the principal becomes tenant-shaped and the route
+   refuses it) on the very request that populates the picker. */
+
+test('an acting operator scopes the customer routes', () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('11111111-2222-3333-4444-555555555555');
+  // `tenant` — the scope name the component contract exposes, so a Workbench mounted in the
+  // operator console does not have to know it is in the operator console.
+  assert.deepEqual(scopedHeaders('tenant'), {
+    'X-Admin-Token': 'A',
+    'X-Act-As-Tenant': '11111111-2222-3333-4444-555555555555',
+  });
+  // A slug is equally valid — the backend resolves either.
+  setActingTenant('acme');
+  assert.deepEqual(scopedHeaders('tenant'), { 'X-Admin-Token': 'A', 'X-Act-As-Tenant': 'acme' });
+  assert.deepEqual(scopedHeaders('operator'), { 'X-Admin-Token': 'A', 'X-Act-As-Tenant': 'acme' });
+  // And a per-call override still wins over the session's selection.
+  assert.deepEqual(scopedHeaders('tenant', 'other'),
+    { 'X-Admin-Token': 'A', 'X-Act-As-Tenant': 'other' });
+});
+
+test('adminOnlyHeaders NEVER carries the selector, however it was set', () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('acme');
+  // GET /admin/tenants, made from a console that is already looking at a workspace: the normal
+  // state of the page, and the one where folding this into `scopedHeaders('operator')` breaks.
+  assert.deepEqual(adminOnlyHeaders(), { 'X-Admin-Token': 'A' });
+  assert.deepEqual(adminOnlyHeaders({ 'Content-Type': 'application/json' }),
+    { 'X-Admin-Token': 'A', 'Content-Type': 'application/json' });
+  assert.deepEqual(scopedHeaders('admin'), { 'X-Admin-Token': 'A' });
+  // Still refuses an explicit one — the module's selection is not an explicit one.
+  assert.throws(() => scopedHeaders('admin', 'acme'), /cannot act as a tenant/);
+});
+
+test('clearing the workspace removes the header', () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('acme');
+  setActingTenant(null);
+  assert.equal(getActingTenant(), null);
+  // `tenant` sends nothing rather than a bare admin token; `operator` may send the bare token,
+  // because its extra job is the pre-selection screen.
+  assert.deepEqual(scopedHeaders('tenant'), {});
+  assert.deepEqual(scopedHeaders('operator'), { 'X-Admin-Token': 'A' });
+  // '' is the same decision spelled the way an unselected <select> spells it, and it must NOT
+  // fall back to the session's selection.
+  setActingTenant('acme');
+  assert.deepEqual(scopedHeaders('tenant', ''), {});
+  setActingTenant('');
+  assert.equal(getActingTenant(), null);
+});
+
+test('the workspace survives a reload, under the key tenant.html already uses', async () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('acme');
+  // The point of persisting at all: an operator working one account should not have to re-pick
+  // it after every refresh. Written under `cq_console_tenant` so the un-ported `tenant.html`
+  // restores the same workspace.
+  assert.equal(store.get('cq_console_tenant'), 'acme');
+
+  // A SECOND MODULE INSTANCE is what a reload actually is: fresh module state, same storage.
+  // The query string is a cache-buster — Node keys the ESM cache by URL — and the specifier is
+  // held in a variable because `tsc` types a non-literal dynamic import as `any` and so does
+  // not try to resolve `../session.ts?reloaded=1` as a path.
+  const reloaded = '../session.ts?reloaded=1';
+  const fresh = await import(reloaded);
+  assert.equal(fresh.getActingTenant(), 'acme');
+  assert.deepEqual(fresh.scopedHeaders('tenant'), { 'X-Admin-Token': 'A', 'X-Act-As-Tenant': 'acme' });
+
+  signedIn({ admin: 'A' });                        // clears this module's copy, not the other's
+  assert.equal(store.get('cq_console_tenant'), undefined);
+});
+
+test('a customer session ignores the selector entirely', () => {
+  // Belt and braces for the header being inert for everyone else: a tenant Bearer with a
+  // workspace id left over in this tab must not ask the server to act as anybody, and the
+  // public surface must stay bare.
+  signedIn({ tenant: 'T', user: 'U' });
+  setActingTenant('acme');
+  assert.deepEqual(scopedHeaders('tenant'), { Authorization: 'Bearer T' });
+  assert.deepEqual(scopedHeaders('operator'), { Authorization: 'Bearer T' });
+  assert.deepEqual(scopedHeaders('user'), { Authorization: 'Bearer U' });
+  assert.deepEqual(scopedHeaders('public'), {});
+});
+
+test('signing out forgets the workspace too', () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('acme');
+  signOut();
+  assert.equal(getActingTenant(), null);
+  assert.equal(store.get('cq_console_tenant'), undefined);
+});
+
+test('storage that throws still tracks the workspace for this page view', () => {
+  signedIn({ admin: 'A' });
+  storageThrows = true;
+  try {
+    setActingTenant('acme');                       // must not throw in private mode
+    assert.equal(getActingTenant(), 'acme');       // in memory, just not persisted
+  } finally {
+    storageThrows = false;
+    setActingTenant(null);
+  }
+});
+
+/* ---------------- where the API lives ---------------- */
+
+/** Pretend the page is being viewed at this address. Node has no `location`; the export sniffs
+ *  one when there is one, and must not need one when there is not (`next build` in Node). */
+function viewedAt(url: string | null): void {
+  const g = globalThis as unknown as { location?: unknown };
+  if (url === null) { delete g.location; return; }
+  const u = new URL(url);
+  g.location = { protocol: u.protocol, hostname: u.hostname, port: u.port };
+}
+
+test('the API base is /api on the default port and the :8000 form on a dev server', () => {
+  // Production, both schemes. `location.port` is '' for a default port in every browser; the
+  // explicit spellings are what a proxy or a port-forward produces.
+  viewedAt('http://217.147.236.219/tenant.html');
+  assert.equal(apiBase(), '/api');
+  viewedAt('https://ai.communiq.ge/workspace');
+  assert.equal(apiBase(), '/api');
+  viewedAt('http://ai.communiq.ge:80/workspace');
+  assert.equal(apiBase(), '/api');
+  viewedAt('https://ai.communiq.ge:443/workspace');
+  assert.equal(apiBase(), '/api');
+
+  // `npm run dev`. THE HAZARD: '/api' here is http://localhost:3000/api, which 404s every call
+  // — including on `/usage` and `/ai-config`, which shipped against the hardcoded const.
+  viewedAt('http://localhost:3000/workspace');
+  assert.equal(apiBase(), 'http://localhost:8000');
+  viewedAt('http://192.168.1.20:3000/workspace');
+  assert.equal(apiBase(), 'http://192.168.1.20:8000');
+
+  // `next build` prerendering in Node: no location at all, and no host to bake into a bundle
+  // that nginx will serve at a different address anyway.
+  viewedAt(null);
+  assert.equal(apiBase(), '/api');
+});
+
+test('the base reaches the wire', async () => {
+  signedIn({ admin: 'A' });
+  serve(() => new Response('{}', { status: 200 }));
+  viewedAt('http://localhost:3000/usage');
+  await apiGet('/admin/usage/tenants', { scope: 'admin' });
+  assert.equal(lastUrl, 'http://localhost:8000/admin/usage/tenants');
+  viewedAt('http://217.147.236.219/usage');
+  await apiGet('/admin/usage/tenants', { scope: 'admin' });
+  assert.equal(lastUrl, '/api/admin/usage/tenants');
+  viewedAt(null);
+});
+
+/* ---------------- apiGetOrNull ---------------- */
+
+test('null means the request failed; [] means the workspace genuinely has none', async () => {
+  signedIn({ tenant: 'T' });
+
+  // The shipped QA bug: a dead proxy told the customer their knowledge base was empty.
+  serve(() => { throw new TypeError('Failed to fetch'); });
+  assert.equal(await apiGetOrNull('/kb/documents', { scope: 'tenant' }), null);
+  serve(() => new Response(JSON.stringify({ detail: 'nope' }), { status: 500 }));
+  assert.equal(await apiGetOrNull('/kb/documents', { scope: 'tenant' }), null);
+  serve(() => new Response('<html>502 Bad Gateway</html>', { status: 200 }));
+  assert.equal(await apiGetOrNull('/kb/documents', { scope: 'tenant' }), null);
+
+  // And the value that must NOT come back as null, which is the whole reason for the function:
+  // an empty list the server really sent. `deepEqual` on [] would also pass for null under
+  // `assert.equal`, so the emptiness is asserted through the array itself.
+  serve(() => new Response('[]', { status: 200 }));
+  const docs = await apiGetOrNull<unknown[]>('/kb/documents', { scope: 'tenant' });
+  assert.ok(Array.isArray(docs));
+  assert.equal(docs.length, 0);
+
+  serve(() => new Response('{"documents":[],"total":0}', { status: 200 }));
+  assert.deepEqual(await apiGetOrNull('/kb/documents', { scope: 'tenant' }),
+    { documents: [], total: 0 });
+});
+
+test('apiGetOrNull does not swallow an abort', async () => {
+  signedIn({ tenant: 'T' });
+  serve(() => { throw new DOMException('The user aborted a request.', 'AbortError'); });
+  // An operator switching workspace mid-flight aborts the old load. Rendering "could not load"
+  // for it would be the same lie as rendering "none" for a failure.
+  await assert.rejects(apiGetOrNull('/kb/documents', { scope: 'tenant' }), (e: unknown) => {
+    assert.ok(e instanceof DOMException);
+    assert.equal(e.name, 'AbortError');
+    return true;
+  });
+});
+
+test('apiGetOrNull sends the same scoped headers as apiGet', async () => {
+  signedIn({ admin: 'A' });
+  setActingTenant('acme');
+  serve(() => new Response('[]', { status: 200 }));
+  await apiGetOrNull('/kb/documents', { scope: 'tenant' });
+  assert.deepEqual(lastInit?.headers, { 'X-Admin-Token': 'A', 'X-Act-As-Tenant': 'acme' });
+  setActingTenant(null);
 });

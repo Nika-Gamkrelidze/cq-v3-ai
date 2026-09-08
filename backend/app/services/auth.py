@@ -29,7 +29,9 @@ Passwords: stdlib PBKDF2. Tokens: stdlib HMAC-signed JSON (no external deps).
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
+import logging
 import secrets
 from dataclasses import dataclass, field
 
@@ -38,6 +40,8 @@ from fastapi import Header, HTTPException, Request
 from ..config import settings
 from ..db import pool
 from . import attribution
+
+log = logging.getLogger("cq")
 
 # ---- password hashing ------------------------------------------------------
 _PBKDF2_ROUNDS = 200_000
@@ -315,29 +319,107 @@ async def resolve_principal(
             raise HTTPException(status_code=401, detail="Invalid API key")
         return _remember(Principal(kind="tenant", client_id=str(row["id"]), role="apikey", via="apikey"))
 
-    # 4. Anonymous — keyed by client IP.
+    # 4. Anonymous — keyed by the visitor's own address.
     # The IP is a quota key, so a caller must not be able to choose it. Both nginx configs set
-    # X-Real-IP from $remote_addr (the real peer), so that is the trusted source. They also set
-    # X-Forwarded-For with $proxy_add_x_forwarded_for, which *appends* our peer to whatever the
-    # client sent — so the FIRST element is attacker-supplied (reading it let anyone mint a fresh
-    # quota bucket per request) while the LAST element is the one our own proxy added. Hence:
-    # X-Real-IP, then the last XFF element, then the socket peer.
-    # App-side fix only: no nginx change and no container recreate needed to close this.
-    return _remember(Principal(kind="anonymous", via="none", anon_key=client_ip(request)))
+    # X-Real-IP from $remote_addr (the real peer), so that is the trusted source. X-Forwarded-For
+    # is only as good as the proxy that wrote it: our own edge now REPLACES it with $remote_addr,
+    # but a deployment whose proxy *appends* (`$proxy_add_x_forwarded_for`, the shape this ran on
+    # for months) leaves the FIRST element attacker-supplied — reading it let anyone mint a fresh
+    # quota bucket per request — while the LAST element is the one our proxy added. So the order
+    # stays: X-Real-IP, then the last XFF element, then the socket peer. The app must not depend
+    # on the edge being configured correctly to be safe.
+    #
+    # `visitor_key`, NOT `client_ip`: the address we are handed is only a quota identity if it
+    # can actually single out one visitor. When it is our own NAT looking back at us it cannot,
+    # and the key is None so the anonymous tier fails CLOSED (limits.py) instead of pooling every
+    # visitor on earth into one shared allowance.
+    return _remember(Principal(kind="anonymous", via="none", anon_key=visitor_key(request)))
 
 
 def client_ip(request: Request) -> str:
-    """The caller's real IP, by the same rule the anonymous quota key uses.
+    """The address this request arrived from, by the trust rule the whole app shares.
 
     Shared rather than re-derived per call site: this is a trust decision (X-Real-IP, then the
     LAST X-Forwarded-For element, then the socket peer — never the first XFF element, which the
     client controls), and a second hand-written copy is how one of them ends up reading the
     spoofable end of the header.
+
+    This reports WHAT WE SAW — the `client_ip` audit column on job/TTS rows, and the per-address
+    registration cap, want exactly that. It is not the same question as "who is this visitor":
+    for the anonymous quota identity use `visitor_key()`, which additionally refuses an address
+    that our own network substituted for the caller's.
     """
     xff = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
     return (request.headers.get("x-real-ip", "").strip()
             or (xff[-1] if xff else "")
             or (request.client.host if request.client else "unknown"))
+
+
+# Addresses that cannot single out one visitor of a PUBLIC deployment, because a packet from a
+# real visitor is never sourced from one: they are what a request looks like after the machine's
+# own network stack has substituted its address for the caller's — a container reached through a
+# published port on a host that masquerades (unconditional on Docker Desktop, the default outcome
+# on a firewalld host) hands nginx the bridge gateway, 172.x.0.1, for every visitor alike.
+#
+# Deliberately NOT here: 100.64.0.0/10. Carrier-grade NAT is a genuine visitor address shared by
+# many real subscribers — the same accepted trade as an office egress or a home router, and the
+# one most of this product's mobile traffic arrives on. Treating it as unusable would refuse the
+# anonymous tier to a large share of the actual audience.
+_NOT_A_VISITOR = tuple(ipaddress.ip_network(n) for n in (
+    "0.0.0.0/32", "127.0.0.0/8",                     # unspecified, loopback
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",  # RFC1918 — Docker's bridges live here
+    "169.254.0.0/16",                                 # link-local
+    "::/128", "::1/128", "fc00::/7", "fe80::/10",     # the v6 equivalents
+))
+
+# Logged once per process, not per request: this is a deployment fault that will hold for the
+# life of the container, and a public endpoint must not be able to fill a disk by being used.
+_addressing_warned = False
+
+
+def can_identify_visitor(addr: str) -> bool:
+    """Is `addr` capable of telling one anonymous visitor apart from another?
+
+    False does NOT mean "malicious" — it means the address is one this deployment's own network
+    could have substituted, so keying a quota on it would put every visitor in one bucket.
+    Sharing between real people behind one NAT (an office, a household, a carrier) is accepted
+    and always has been; that is a coarse key, not a broken one.
+    """
+    addr = (addr or "").strip()
+    if not addr or addr == "unknown":
+        return False
+    try:
+        ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    except ValueError:
+        # Not an IP at all — an ASGI test transport reports "testclient". Nothing in our network
+        # path can produce such a value, so it is not the failure this guard is looking for.
+        return True
+    if settings.anon_trust_private_client_ips:
+        return True
+    return not any(ip in net for net in _NOT_A_VISITOR if ip.version == net.version)
+
+
+def visitor_key(request: Request) -> str | None:
+    """The anonymous quota identity for this request, or None when there isn't one.
+
+    None is a deliberate, loud failure state rather than a fallback key. The alternative — the
+    one this replaces — was to hand back whatever address arrived, which on a NAT-masked
+    deployment is a single constant: every anonymous visitor then shared one row in `anon_usage`,
+    so the first person to spend the day's twenty TTS calls locked out everybody else on every
+    other device. A quota that cannot be per-visitor must refuse, not pool.
+    """
+    global _addressing_warned
+    addr = client_ip(request)
+    if can_identify_visitor(addr):
+        return addr
+    if not _addressing_warned:
+        _addressing_warned = True
+        log.error(
+            "anonymous quota disabled: this request arrived as %r, which cannot identify a "
+            "visitor — the client address is being rewritten before it reaches the app (the "
+            "container's NAT gateway). Fix the host so the container sees real peer addresses; "
+            "set ANON_TRUST_PRIVATE_CLIENT_IPS=true only for local/LAN deployments.", addr)
+    return None
 
 
 def assert_expected_tenant(principal: Principal, expected: str | None) -> None:

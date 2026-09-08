@@ -1,0 +1,66 @@
+/* Only what globals.css genuinely cannot cover for the React select.
+
+   globals.css styles `.cq-select-panel` as an ABSOLUTELY positioned child of `.cq-select`
+   (`position:absolute; top:calc(100% + 6px); min-width:100%`, shown by
+   `.cq-select.open .cq-select-panel`). This component renders the panel through a PORTAL on
+   <body> instead — see the note in Select.tsx — so every one of those positioning rules is
+   now wrong: the panel has no positioned ancestor to hang off, and `min-width:100%` would
+   resolve against the viewport and paint a 100vw-wide menu.
+
+   So the module re-states POSITIONING ONLY. Everything visual — the surface, border, radius,
+   shadow, padding, max-width, scroll — still comes from the shared sheet, which stays the one
+   place the menu's appearance is defined. Every selector below pairs the module class with the
+   global one, so it beats globals.css on specificity rather than on stylesheet order (Next
+   does not promise which chunk lands first). */
+
+.panel:global(.cq-select-panel) {
+  display: block;
+  position: fixed;
+  /* Corrected in a layout effect before the browser paints; these are the values it starts
+     from so a half-positioned menu can never flash at the bottom of the document. */
+  top: 0;
+  left: 0;
+  right: auto;
+  bottom: auto;
+  min-width: 0;
+  /* Above `.cq-modal-bg` (110), because a portalled panel is a SIBLING of the dialog rather
+     than a child of it: at the sheet's own z-index of 60 a select inside a confirm modal
+     would open behind the backdrop. Below `#cq-tip` (120), which is documented as the one
+     thing that clears everything. The cost is that an open menu now also covers a toast
+     (100) it used to slide under — cosmetic, and only where the two overlap. */
+  z-index: 115;
+  animation: panelIn 0.16s var(--ease);
+}
+
+/* Not `fade` from globals.css: a CSS Module only rewrites animation names it declares
+   itself, so referring to a global keyframe from here is not portable. Same 4px rise. */
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The keyboard cursor. The shared sheet has `:hover` and `.sel` but nothing for "the option
+   ArrowDown is currently on", which a pointer-free user needs to see. Drawn as a ring so it
+   is still legible ON the selected row, where `.sel`'s tint is already spoken for. */
+.active:global(.cq-opt) {
+  background: color-mix(in oklab, var(--surface-2) 55%, transparent);
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--beam) 55%, transparent);
+}
+
+/* `.cq-opt:hover` would otherwise light up an option that cannot be chosen. */
+.disabled:global(.cq-opt),
+.disabled:global(.cq-opt):hover {
+  opacity: 0.45;
+  background: transparent;
+  color: var(--mist);
+  cursor: default;
+}
+
+/* A disabled trigger has to LOOK disabled — the legacy control was a button painted over a
+   native select and had no disabled state at all, which is how the workspace read-only mode
+   shipped a picker that looked live. */
+.trigger:global(.cq-select-trigger):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

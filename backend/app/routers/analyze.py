@@ -134,6 +134,13 @@ def _scope(principal: Principal, first: int = 1):
     if principal.kind == "integration":
         raise HTTPException(status_code=403,
                             detail="This integration credential cannot read audio jobs.")
+    if not principal.anon_key:
+        # An anonymous caller this deployment cannot tell apart from any other (see
+        # `auth.visitor_key`). Matching them on the shared key would hand a stranger the
+        # transcript of every anonymous visitor's call — a far worse failure than the quota
+        # pooling that comes from the same cause. Written as a decision, not left to
+        # `anon_key = NULL` matching no row, which is a property of the data.
+        return "FALSE", []
     return f"anon_key = ${first} AND principal_type = 'anonymous'", [principal.anon_key]
 
 

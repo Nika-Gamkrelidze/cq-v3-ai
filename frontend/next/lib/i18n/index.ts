@@ -27,14 +27,56 @@
         is the one that gets lost in a rebase — which is why it is machine-checked and not a
         review item. What the operator sees when it goes missing is raw key names. */
 
+/* WHO OWNS WHICH PREFIX — the whole map, so a port does not have to grep for it.
+
+     chrome.ts              nav. login. session. err. btn. th. tab. rec. drop. lang. role.
+                            feat. cap. res. toast. msg. f. tip.
+     features/analysis.ts   an. fc. sn. stt. hist.
+     features/bot.ts        bot.
+     features/convert.ts    cv.
+     features/curation.ts   cur.
+     features/editor.ts     ed.
+     features/kb.ts         kb. kba. tkb. vis. bulk. imp.
+     features/retrieval.ts  retr. pg.
+     features/scoring.ts    sc.
+     features/timeline.ts   tl.
+     features/tts.ts        tts. quota.
+     features/workbench.ts  wb.
+     pages/account.ts       ac.            (account.html  -> /account)
+     pages/aicfg.ts         aicfg.         (new page      -> /ai-config)
+     pages/console.ts       adm. pb. cred. kill. v.   (admin.html -> /console)
+     pages/home.ts          hero.          (index.html    -> /)
+     pages/usage.ts         usage.         (new page      -> /usage)
+     pages/workspace.ts     tn. con.       (tenant.html   -> /workspace)
+
+   features/ vs pages/ is not a filing preference: a prefix is a FEATURE when more than one
+   surface renders it, and a PAGE's when exactly one does. That is why the workbench, the
+   timeline and the audio editor are features although one page mounts each today (they are
+   components, and `ed.title` and three `wb.` keys are already read from a second page), and
+   why the console's five prefixes are a page's although they are five separate tabs.
+
+   The prefix is the unit of ownership, never the individual key: a module that claims `kb.`
+   claims all of it. Splitting one prefix across two modules type-checks and passes the
+   duplicate check, and then nobody can answer "where does this string live?" without a grep. */
+
 import * as chrome from './chrome';
 import * as analysis from './features/analysis';
+import * as bot from './features/bot';
 import * as convert from './features/convert';
+import * as curation from './features/curation';
+import * as editor from './features/editor';
+import * as kb from './features/kb';
 import * as retrieval from './features/retrieval';
 import * as scoring from './features/scoring';
+import * as timeline from './features/timeline';
 import * as tts from './features/tts';
+import * as workbench from './features/workbench';
+import * as account from './pages/account';
 import * as aicfg from './pages/aicfg';
+import * as consolePage from './pages/console';
+import * as home from './pages/home';
 import * as usage from './pages/usage';
+import * as workspace from './pages/workspace';
 
 export type Lang = 'en' | 'ka' | 'ru';
 export const LANGS: Lang[] = ['en', 'ka', 'ru'];
@@ -43,8 +85,8 @@ export type Dict = Record<string, string>;
 
 const MODULES: Record<Lang, Dict>[] = [
   chrome,
-  analysis, convert, retrieval, scoring, tts,
-  aicfg, usage,
+  analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, tts, workbench,
+  account, aicfg, consolePage, home, usage, workspace,
 ];
 
 function assemble(lang: Lang): Dict {

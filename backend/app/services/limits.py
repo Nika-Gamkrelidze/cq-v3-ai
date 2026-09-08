@@ -5,6 +5,10 @@ Two mechanisms live here, deliberately kept separate:
   * `reserve()` / `snapshot()` — the *anonymous* quota, counted per anon_key per day in
     `anon_usage`. Limits come from the admin-configured 'anonymous' settings.
     `snapshot()`'s shape is read by the frontend — do not change it.
+    An anonymous principal with NO anon_key is refused (503) rather than counted: the key is
+    the visitor's address, and `auth.visitor_key` withholds it when the deployment's own NAT
+    has replaced it. Metering everyone on one shared key is the failure mode that gave the
+    whole internet a single daily allowance — see `_anon_unidentifiable`.
   * `reserve_counter()` — the general metering primitive on `usage_counters`, used for the
     tenant/integration dimensions (end-user/hour, tenant/minute, tenant/day) that the chat
     endpoints enforce.
@@ -105,6 +109,21 @@ def _anon_gate(cfg: dict, feature: str) -> None:
 def _anon_exhausted(limit: int) -> HTTPException:
     return HTTPException(status_code=429,
                          detail=f"Daily anonymous limit reached ({limit}). Sign in to continue.")
+
+
+# The anonymous tier's other refusal, and the one that must never be quiet: we have no way to
+# tell this visitor from any other (`auth.visitor_key` returned None — the address reaching the
+# app is the deployment's own NAT, not the caller's). The bug this replaces was to carry on with
+# that constant as the key, which gave every anonymous visitor on earth ONE daily allowance: the
+# first person to spend it locked out everybody else, on every other device, until midnight.
+#
+# 503, not 403 or 429: nothing is wrong with this caller or their allowance — the SERVER cannot
+# meter right now, and that is a temporary, operator-fixable condition. `auth.visitor_key` logs
+# the diagnosis and the remedy once per process.
+def _anon_unidentifiable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail="Anonymous access is temporarily unavailable on this server. Please sign in.")
 
 
 def _counter_exhausted(kind: str, limit: int, bucket: str) -> HTTPException:
@@ -237,6 +256,10 @@ async def reserve(principal: Principal, kind: str, size_bytes: int = 0) -> None:
         return
     cfg = await settings_store.get_anonymous_config()
     _anon_gate(cfg, feature)
+    # Before the size check and before the counter: an anonymous caller we cannot tell apart
+    # from every other one has no allowance of their own to spend.
+    if not principal.anon_key:
+        raise _anon_unidentifiable()
     if kind == "analyses":
         mb = int(cfg.get("max_audio_mb") or 0)
         if mb and size_bytes > mb * 1024 * 1024:
@@ -378,6 +401,8 @@ async def check(principal: Principal, kind: str) -> None:
         return
     cfg = await settings_store.get_anonymous_config()
     _anon_gate(cfg, feature)
+    if not principal.anon_key:
+        raise _anon_unidentifiable()
     limit = _anon_limit(cfg, max_key, default_max)
     if not limit:
         return
@@ -425,6 +450,27 @@ async def _user_snapshot(user_id: str) -> dict:
     }
 
 
+def _unidentified_snapshot(cfg: dict) -> dict:
+    """The anonymous snapshot when the caller cannot be told apart from any other (see
+    `_anon_unidentifiable`). Same keys, same types, same nesting the frontend already reads —
+    `enabled: False` is the field it already renders a sign-in prompt from. `visitor_identified`
+    is additive and exists so this state is diagnosable from one unauthenticated GET /limits,
+    which on a server without SSH access is the only way to see it."""
+    return {
+        "anonymous": True,
+        "enabled": False,
+        "visitor_identified": False,
+        "features": cfg.get("features") or {},
+        "max_analyses_per_day": _anon_limit(cfg, "max_analyses_per_day", _KIND["analyses"][3]),
+        "max_tts_per_day": _anon_limit(cfg, "max_tts_per_day", _KIND["tts"][3]),
+        "max_conversions_per_day": _anon_limit(cfg, "max_conversions_per_day",
+                                               _KIND["conversions"][3]),
+        "max_audio_mb": int(cfg.get("max_audio_mb") or 0),
+        "used": {"analyses": 0, "tts": 0, "conversions": 0},
+        "remaining": {"analyses": 0, "tts": 0, "conversions": 0},
+    }
+
+
 async def snapshot(principal: Principal) -> dict:
     if principal.kind == "user" and principal.user_id:
         return await _user_snapshot(principal.user_id)
@@ -432,6 +478,12 @@ async def snapshot(principal: Principal) -> dict:
         return {"anonymous": False, "unlimited": True, "kind": principal.kind,
                 "client_id": principal.client_id}
     cfg = await settings_store.get_anonymous_config()
+    if not principal.anon_key:
+        # Deliberately NOT an exception: this is what the public page fetches on load, and a
+        # banner ("sign in") is a better place to learn the tier is shut than a broken page —
+        # the same call `_user_snapshot` makes for a deactivated account. It also must not read
+        # the pooled row: reporting a stranger's consumption as this visitor's is the bug.
+        return _unidentified_snapshot(cfg)
     today = dt.date.today()
     async with pool().acquire() as conn:
         row = await conn.fetchrow(

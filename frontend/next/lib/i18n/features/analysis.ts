@@ -42,6 +42,15 @@ export const en: Dict = {
   'sn.mode': 'Sentiment',
   'sn.disabled': 'Sentiment analysis is turned off for this workspace.',
   'sn.done': 'Sentiment ready',
+
+  // Transcription (stt.*) — the public page's own panel and the workbench's
+  // transcript step read the same three lines — and the recent-analyses list.
+  'hist.heading': 'Recent analyses',
+  'hist.none': 'No analyses yet.',
+
+  'stt.heading': 'Turn a recording into text',
+  'stt.nofile': 'Choose an audio file first.',
+  'stt.done': 'Transcript ready',
 };
 
 export const ka: Dict = {
@@ -79,6 +88,15 @@ export const ka: Dict = {
   'sn.mode': 'განწყობა',
   'sn.disabled': 'განწყობის ანალიზი გამორთულია ამ სამუშაო სივრცისთვის.',
   'sn.done': 'განწყობის შეფასება მზადაა',
+
+  // Transcription (stt.*) — the public page's own panel and the workbench's
+  // transcript step read the same three lines — and the recent-analyses list.
+  'hist.heading': 'ბოლო ანალიზები',
+  'hist.none': 'ჯერ არ არის ანალიზი.',
+
+  'stt.heading': 'აქციეთ ჩანაწერი ტექსტად',
+  'stt.nofile': 'ჯერ აირჩიეთ აუდიო ფაილი.',
+  'stt.done': 'ტრანსკრიფცია მზადაა',
 };
 
 export const ru: Dict = {
@@ -116,4 +134,13 @@ export const ru: Dict = {
   'sn.mode': 'Тональность',
   'sn.disabled': 'Анализ тональности отключён для этого рабочего пространства.',
   'sn.done': 'Оценка тональности готова',
+
+  // Transcription (stt.*) — the public page's own panel and the workbench's
+  // transcript step read the same three lines — and the recent-analyses list.
+  'hist.heading': 'Недавние анализы',
+  'hist.none': 'Анализов пока нет.',
+
+  'stt.heading': 'Превратите запись в текст',
+  'stt.nofile': 'Сначала выберите аудиофайл.',
+  'stt.done': 'Расшифровка готова',
 };

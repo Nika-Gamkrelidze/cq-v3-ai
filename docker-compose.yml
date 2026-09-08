@@ -119,6 +119,36 @@ services:
     container_name: cq-web
     depends_on:
       - api
+    # PUBLISHED PORTS DECIDE WHETHER THE APP CAN SEE ITS VISITORS.
+    # A published port reaches the container through the host's NAT. Where that path rewrites
+    # the source address — unconditional on Docker Desktop, and the usual outcome on a firewalld
+    # host whose zone masquerades — every visitor arrives at nginx as ONE address, the bridge
+    # gateway (172.x.0.1). nginx then honestly copies that constant into X-Real-IP, and the app
+    # keys the anonymous daily quota on it: one shared allowance for the entire internet, so the
+    # first visitor to spend it locked out everyone else. No nginx directive can undo this
+    # (`real_ip` needs a header from a trusted upstream proxy; the kernel's NAT sends none) —
+    # the address is gone before the packet enters the container.
+    #
+    # The fix belongs on the HOST, and it is verifiable without SSH:
+    #   curl -s https://ai.communiq.ge/api/health   ->  "client_addressing": "ok" | "nat-masked"
+    # "nat-masked" means the host is still rewriting it. On this server (Rocky 8 + firewalld) the
+    # two candidates are the zone's masquerade rule applying to forwarded traffic, and dockerd's
+    # userland proxy: `firewall-cmd --list-all` / `--zone=docker --list-all`, and
+    # `{"userland-proxy": false}` in /etc/docker/daemon.json + `systemctl restart docker`.
+    # Until it reads "ok" the app REFUSES the anonymous tier (503) rather than pooling everyone.
+    #
+    # If the host cannot be fixed, the in-repo escape hatch is host networking for THIS service
+    # only — nginx then binds the host's own :80/:443 and $remote_addr is the real peer:
+    #
+    #     network_mode: host          # replaces the `ports:` block below (delete it)
+    #     extra_hosts:                # host networking has no compose DNS; keep ONE nginx.conf
+    #       - "api:127.0.0.1"         #   -> api's published 127.0.0.1:8000
+    #       - "host.docker.internal:127.0.0.1"
+    #
+    # Consequences, deliberately not enabled by default: the container loses the compose network
+    # (the api is reached over its published loopback port instead), and Docker Desktop does not
+    # support host networking the way Linux does, so every developer's `http://localhost/` would
+    # stop working the moment this is committed.
     ports:
       - "80:80"
       - "443:443"

@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { ModalHost } from '@/components/ui/Modal';
+import { ToastHost } from '@/components/ui/Toast';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -25,7 +27,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
-      <body>{children}</body>
+      {/* The two singleton hosts. They live in the LAYOUT, not on each page, because
+          `toast()` and `confirmDialog()` are module-level functions any code can call — a page
+          that forgot to mount them would swallow its own notices, and a page that mounted its
+          own copy would render every toast twice. The layout is also what makes them survive a
+          client-side navigation: a confirm awaited across one keeps its promise. */}
+      <body>
+        {children}
+        <ToastHost />
+        <ModalHost />
+      </body>
     </html>
   );
 }

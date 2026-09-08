@@ -1,0 +1,232 @@
+/* The call timeline's own stylesheet.
+   ==================================
+   These rules exist NOWHERE in `globals.css`: the legacy module injected them at runtime as
+   `<style id="cq-timeline-css">`, so `brand.css` — which `globals.css` is a copy of — never
+   carried a single `.tl-` rule. They are ported here verbatim, as a CSS Module beside the
+   component, rather than appended to `globals.css`, because the shared sheet is edited by
+   every page port at once and this is one module's private surface.
+
+   WHY `.host :global(...)` AND NOT PLAIN `:global(...)`. Next compiles `.module.css` with
+   css-loader in `pure` mode, which rejects a rule whose selector has no local class — a
+   top-level `:global(.tl-wave)` is a build error, not a silent no-op. So the component's root
+   carries the local `.host` class alongside the global `tl`, and every descendant rule is
+   scoped through it. The `.tl-*` names themselves stay global and unhashed, exactly as the
+   legacy module wrote them, which is what keeps the ported markup readable next to the
+   original and what lets `.tl-good` and friends be referenced from JS as plain strings.
+
+   Tokens: the design contract names --ready/--contradicted/--card/--line/--accent/--text;
+   brand.css ships --ok/--alert/--card-bg/--hairline/--beam/--paper. `var(a, var(b))` takes
+   whichever exists, contract name first. --tl-sat/--tl-lig are the S and L of the §3 score
+   gradient; they are theme-scoped so a score colour stays readable on the near-white light
+   track (see the light block below). */
+
+.host {
+  --tl-good: var(--ready, var(--ok));
+  --tl-mid: var(--mid, var(--pending));
+  --tl-bad: var(--contradicted, var(--alert));
+  --tl-none: var(--muted);
+  --tl-line: var(--line, var(--hairline));
+  --tl-card: var(--card, var(--card-bg));
+  --tl-accent: var(--accent, var(--beam));
+  --tl-text: var(--text, var(--paper));
+  --tl-pos: 0%;
+  --tl-sat: 65%;
+  --tl-lig: 45%;
+  position: relative;
+  font-family: var(--font-sans);
+  color: var(--tl-text);
+}
+
+/* Light theme: the brand level tokens and the §3 gradient both sit at 1.5–2.6:1 against the
+   light lane track (rgb(217,218,218)) — unreadable as the only carrier of a verdict. Darkened
+   here to ≥3.4:1 (levels) and ≥3.2:1 (gradient, worst case score 50) while keeping each hue. */
+:global([data-theme='light']) .host {
+  --tl-good: #1a804f;
+  --tl-mid: #eab308;
+  --tl-bad: #e20607;
+  --tl-sat: 60%;
+  --tl-lig: 30%;
+}
+
+.host *, .host *::before, .host *::after { box-sizing: border-box; }
+.host:focus-visible { outline: none; }
+
+/* transport */
+.host :global(.tl-transport) { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.host :global(.tl-transport .cq-play) { margin: 0; transition: transform .16s var(--ease); }
+.host :global(.tl-transport .cq-play:disabled) { opacity: .5; cursor: default; transform: none; }
+.host :global(.tl-time) { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.host :global(.tl-time b) { color: var(--tl-text); font-weight: 600; }
+.host :global(.tl-speed) { display: inline-flex; gap: 4px; margin-left: auto; }
+.host :global(.tl-speed button) {
+  font-family: inherit; border: 1px solid var(--tl-line); background: transparent; color: var(--mist);
+  border-radius: 999px; padding: 5px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; line-height: 1.2;
+  transition: all .16s var(--ease);
+}
+.host :global(.tl-speed button:hover) { color: var(--tl-text); border-color: color-mix(in oklab, var(--tl-accent) 55%, transparent); }
+.host :global(.tl-speed button.on) {
+  background: color-mix(in oklab, var(--tl-accent) 16%, transparent);
+  border-color: color-mix(in oklab, var(--tl-accent) 55%, transparent); color: var(--tl-accent);
+}
+.host :global(.tl-speed button:disabled) { opacity: .45; cursor: default; }
+.host :global(.tl-speed button:disabled:hover) { color: var(--mist); border-color: var(--tl-line); }
+.host :global(.tl-dl) { margin: 0; }
+.host :global(.tl-dl[aria-disabled='true']) { opacity: .45; pointer-events: none; }
+
+/* waveform + playhead */
+.host :global(.tl-wave) {
+  position: relative; height: 72px; border-radius: var(--r-md); border: 1px solid var(--tl-line);
+  background: var(--input-bg); overflow: hidden; cursor: pointer; touch-action: none; user-select: none;
+}
+.host :global(.tl-wave:focus-visible) { outline: 2px solid var(--tl-accent); outline-offset: 2px; }
+.host :global(.tl-canvas) { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.host :global(.tl-played) {
+  position: absolute; top: 0; bottom: 0; left: 0; width: var(--tl-pos);
+  background: color-mix(in oklab, var(--tl-accent) 14%, transparent); pointer-events: none;
+}
+.host :global(.tl-playhead) {
+  position: absolute; top: 0; bottom: 0; left: var(--tl-pos); width: 2px; margin-left: -1px;
+  background: var(--tl-accent); box-shadow: 0 0 8px color-mix(in oklab, var(--tl-accent) 70%, transparent); pointer-events: none;
+}
+.host :global(.tl-wave.tl-busy)::after {
+  content: attr(data-busy); position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; font-size: 12px; color: var(--muted); pointer-events: none;
+}
+.host :global(.tl-note) { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+
+/* rows: speaker strip + one thin lane per analyser dimension */
+.host :global(.tl-rows) { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.host :global(.tl-row) { display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: center; gap: 10px; }
+.host :global(.tl-row[hidden]) { display: none; }
+.host :global(.tl-rowname) {
+  font-size: 11.5px; color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.host :global(.tl-rowname > span) { overflow: hidden; text-overflow: ellipsis; }
+.host :global(.tl-sw) { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--tl-sw, var(--muted)); }
+.host :global(.tl-track) {
+  position: relative; height: 14px; border-radius: 4px; overflow: hidden;
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+}
+.host :global(.tl-speakers .tl-track) { height: 20px; }
+.host :global(.tl-track)::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: var(--tl-pos); width: 1px;
+  background: var(--tl-accent); opacity: .75; pointer-events: none;
+}
+
+/* speaker blocks */
+.host :global(.s0) { --tl-sp: var(--mist); }
+.host :global(.s1) { --tl-sp: var(--tl-accent); }
+.host :global(.s2) { --tl-sp: var(--navy-400); }
+.host :global(.s3) { --tl-sp: var(--coral); }
+.host :global(.s4) { --tl-sp: var(--muted); }
+.host :global(.s5) { --tl-sp: var(--tl-text); }
+.host :global(.tl-seg) {
+  position: absolute; top: 2px; bottom: 2px; min-width: 3px; border-radius: 3px; cursor: pointer;
+  background: color-mix(in oklab, var(--tl-sp) 38%, transparent);
+  border: 1px solid color-mix(in oklab, var(--tl-sp) 70%, transparent);
+}
+.host :global(.tl-seg.now) { background: color-mix(in oklab, var(--tl-sp) 70%, transparent); border-color: var(--tl-text); }
+.host :global(.tl-seg.hl) { outline: 2px solid var(--tl-accent); outline-offset: -1px; }
+
+/* spans — fully opaque on purpose: a translucent fill blends the track back in and costs
+   contrast exactly where the colour IS the information. */
+.host :global(.tl-span) {
+  position: absolute; top: 2px; bottom: 2px; min-width: 4px; border: 0; padding: 0; margin: 0;
+  border-radius: 3px; cursor: pointer; background: var(--tl-none);
+}
+.host :global(.tl-span.lv-good) { background: var(--tl-good); }
+.host :global(.tl-span.lv-mid) { background: var(--tl-mid); }
+.host :global(.tl-span.lv-bad) { background: var(--tl-bad); }
+.host :global(.tl-span.lv-none) { background: var(--tl-none); }
+.host :global(.tl-span:hover), .host :global(.tl-span:focus-visible) { outline: 2px solid var(--tl-text); outline-offset: -1px; z-index: 1; }
+/* A navy hairline separates two adjacent spans of the same colour on the light track. */
+:global([data-theme='light']) .host :global(.tl-span) { box-shadow: inset 0 0 0 1px rgba(7, 38, 60, .38); }
+
+/* legend */
+.host :global(.tl-legend) { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; }
+.host :global(.tl-legend label) {
+  display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 2px 0;
+  font-size: 12px; color: var(--mist); cursor: pointer; font-weight: 500;
+}
+.host :global(.tl-legend input) { width: auto; margin: 0; padding: 0; accent-color: var(--tl-accent); }
+.host :global(.tl-legend label.off) { color: var(--muted); }
+.host :global(.tl-h) {
+  font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  margin: 14px 0 6px;
+}
+
+/* transcript */
+.host :global(.tl-transcript) {
+  max-height: 320px; overflow: auto; border: 1px solid var(--tl-line); border-radius: var(--r-md);
+  background: var(--input-bg); padding: 4px 0; scroll-behavior: smooth;
+}
+.host :global(.tl-p) {
+  margin: 0; padding: 7px 12px; border-left: 3px solid var(--tl-mark, transparent); font-size: 13px;
+  line-height: 1.5; color: var(--mist); cursor: pointer; display: flex; gap: 8px; flex-wrap: wrap;
+  align-items: baseline; transition: background-color .12s;
+  background-origin: border-box; background-repeat: no-repeat; background-size: 3px 100%;
+  background-position: left top;
+}
+/* Marked by two or more visible lanes: the 3px strip is split between their colours instead of
+   the last lane silently overwriting the others (background-color stays free for now/hover). */
+.host :global(.tl-p.tl-multi) { background-image: var(--tl-marks); }
+.host :global(.tl-p:hover) { background-color: color-mix(in oklab, var(--surface-2) 45%, transparent); }
+.host :global(.tl-p:focus-visible) { outline: 2px solid var(--tl-accent); outline-offset: -2px; border-radius: 4px; }
+.host :global(.tl-p.now) { background-color: color-mix(in oklab, var(--tl-accent) 11%, transparent); color: var(--tl-text); }
+.host :global(.tl-p.hl) { box-shadow: inset 0 0 0 2px var(--tl-accent); }
+.host :global(.tl-chip) {
+  flex: none; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; line-height: 1.5;
+  color: var(--tl-text); background: color-mix(in oklab, var(--tl-sp, var(--muted)) 18%, transparent);
+  border: 1px solid color-mix(in oklab, var(--tl-sp, var(--muted)) 45%, transparent);
+}
+.host :global(.tl-ts) { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.host :global(.tl-txt) { flex: 1 1 100%; min-width: 0; }
+.host :global(.tl-empty) { padding: 18px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+@media (min-width: 641px) {
+  .host :global(.tl-txt) { flex: 1 1 0; }
+}
+
+/* tooltip: one fixed element on <body>, same recipe as #cq-tip in brand.css; never in the row
+   it explains, so opening it moves nothing. It is portaled out of the component because .card
+   uses backdrop-filter, which makes the card the containing block for position:fixed — the
+   same trap that hid the workspace picker behind KB health. A CLASS, where the legacy module
+   used the id #cq-tl-tip: React renders one node per open tip rather than sharing a singleton,
+   and two of those carrying one id is invalid markup. Nothing outside this file ever named it. */
+.tip {
+  position: fixed; top: 0; left: 0; z-index: 120; visibility: hidden; opacity: 0; pointer-events: none;
+  max-width: min(320px, calc(100vw - 24px)); padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--card-solid); border: 1px solid var(--hairline); box-shadow: var(--shadow);
+  color: var(--mist); font-family: var(--font-sans); font-size: 12.5px; line-height: 1.5;
+  white-space: normal; overflow-wrap: anywhere; text-align: left;
+  transition: opacity .14s var(--ease), visibility .14s var(--ease);
+}
+.tip.open { visibility: visible; opacity: 1; }
+.tip b { display: block; color: var(--paper); font-weight: 600; }
+.tip b + span { display: block; margin-top: 2px; }
+.tip::after {
+  content: ''; position: absolute; width: 9px; height: 9px; left: var(--cq-tip-ax, 50%);
+  margin-left: -5px; background: var(--card-solid); border: 1px solid var(--hairline); transform: rotate(45deg);
+}
+.tip[data-place='below']::after { top: -5px; border-right: 0; border-bottom: 0; }
+.tip[data-place='above']::after { bottom: -5px; border-left: 0; border-top: 0; }
+
+/* phone: lane names sit above their row, controls grow to thumb size */
+@media (max-width: 640px) {
+  .host :global(.tl-row) { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .host :global(.tl-rowname) { font-size: 11px; }
+  .host :global(.tl-wave) { height: 64px; }
+  .host :global(.tl-speed) { margin-left: 0; }
+  .host :global(.tl-speed button) { padding: 10px 13px; font-size: 12.5px; min-height: 44px; }
+  .host :global(.tl-transport .cq-dl) { width: 44px; height: 44px; }
+  .host :global(.tl-track) { height: 16px; }
+  .host :global(.tl-speakers .tl-track) { height: 22px; }
+  .host :global(.tl-p) { padding: 9px 12px; }
+  /* a legend row is a checkbox you hit with a thumb, not a mouse: 44px tall, 20px box */
+  .host :global(.tl-legend) { gap: 0 14px; }
+  .host :global(.tl-legend label) { min-height: 44px; padding: 10px 0; font-size: 12.5px; }
+  .host :global(.tl-legend input) { width: 20px; height: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .host :global(.tl-transcript) { scroll-behavior: auto; }
+}

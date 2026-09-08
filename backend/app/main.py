@@ -12,6 +12,7 @@ from . import db
 from .routers import (admin, analyze, auth, calls, chat, chat_config, convert, curation, kb,
                      kb_admin, partner, recordings, scoring, sentiment, tenants, tts)
 from .services import analysis
+from .services import auth as auth_service
 from .services.migrate import run_startup_migrations
 
 log = logging.getLogger("cq")
@@ -121,13 +122,22 @@ app.openapi = _custom_openapi
 
 
 @app.get("/health")
-async def health():
+async def health(request: Request):
+    # `client_addressing` is additive and answers a question that otherwise needs a shell on the
+    # box: does this container see real peer addresses, or is every visitor arriving as the
+    # deployment's own NAT gateway? The latter silently pooled every anonymous visitor into one
+    # daily allowance for months. It reports what THIS request looked like, so one
+    # unauthenticated `curl /api/health` from anywhere confirms the network path — before and
+    # after the host-side fix — with no SSH and no VPN.
+    addressing = "ok" if auth_service.can_identify_visitor(auth_service.client_ip(request)) \
+        else "nat-masked"
     try:
         async with db.pool().acquire() as conn:
             await conn.fetchval("SELECT 1")
-        return {"status": "ok", "database": "connected"}
+        return {"status": "ok", "database": "connected", "client_addressing": addressing}
     except Exception as exc:  # noqa: BLE001
-        return {"status": "degraded", "database": "unavailable", "detail": str(exc)}
+        return {"status": "degraded", "database": "unavailable", "detail": str(exc),
+                "client_addressing": addressing}
 
 
 # Serve the static frontend from the API too, so the whole app is reachable on a

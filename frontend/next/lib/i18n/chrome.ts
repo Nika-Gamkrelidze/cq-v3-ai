@@ -177,6 +177,12 @@ export const en: Dict = {
   'res.nokb': 'No knowledge base context matched.',
   'res.empty': '(empty)',
   'res.done': 'Analysis complete',
+
+  // The tip bubble's own label and the marker on the account's default voice —
+  // both rendered by shared components rather than by any one page.
+  'tip.label': 'More information',
+
+  'f.voice.isdefault': 'default',
 };
 
 export const ka: Dict = {
@@ -344,6 +350,12 @@ export const ka: Dict = {
   'res.nokb': 'ცოდნის ბაზაში შესაბამისი კონტექსტი ვერ მოიძებნა.',
   'res.empty': '(ცარიელი)',
   'res.done': 'ანალიზი დასრულდა',
+
+  // The tip bubble's own label and the marker on the account's default voice —
+  // both rendered by shared components rather than by any one page.
+  'tip.label': 'დამატებითი ინფორმაცია',
+
+  'f.voice.isdefault': 'ნაგულისხმევი',
 };
 
 export const ru: Dict = {
@@ -515,4 +527,10 @@ export const ru: Dict = {
   'res.nokb': 'Совпадений в базе знаний не найдено.',
   'res.empty': '(пусто)',
   'res.done': 'Анализ завершён',
+
+  // The tip bubble's own label and the marker on the account's default voice —
+  // both rendered by shared components rather than by any one page.
+  'tip.label': 'Дополнительная информация',
+
+  'f.voice.isdefault': 'по умолчанию',
 };

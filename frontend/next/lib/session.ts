@@ -8,7 +8,7 @@
    Nothing in this file is a permission. It decides what to SHOW and which header to send;
    every route re-checks the credential server-side.
 
-   Two things live here that a "just fetch it" client would not have, both because the legacy
+   Three things live here that a "just fetch it" client would not have, all because the legacy
    code has them and the port must not lose them:
 
      * SCOPE IS EXPLICIT (§scopedHeaders). A tab can hold three tokens at once, and picking
@@ -18,7 +18,10 @@
        That path guesses by precedence, warns in dev naming the request, and goes away with
        `authHeaders`. New code names its scope.
      * ERRORS CARRY AN i18n KEY, not a sentence (§ApiError). `lib/` has no dictionary and no
-       language — pages render the key with their own `t`. */
+       language — pages render the key with their own `t`.
+     * AN OPERATOR CAN ACT AS A WORKSPACE (§acting as a workspace). One superadmin console and
+       one customer portal are the same page driving the same routes, told apart by a header —
+       so "which workspace" is session state here, not a parameter every call site remembers. */
 
 export type Role = 'superadmin' | 'tenant' | 'user' | 'anonymous';
 
@@ -46,33 +49,165 @@ export function signOut(): void {
     sessionStorage.removeItem('cq_tenant_token');
     sessionStorage.removeItem('cq_user_token');
   } catch { /* nothing to clear */ }
+  // The workspace an operator was looking at is meaningless without the admin token it rides
+  // beside — and leaving it behind would point the NEXT person to sign in here at somebody
+  // else's workspace. Outside the try above so a throwing store cannot skip it.
+  setActingTenant(null);
 }
 
-/* Same-origin by default: nginx proxies /api/ to the FastAPI container, so the browser never
-   learns the backend's address and there is no CORS to configure.
+/* ---------------- where the API lives ----------------
 
-   The override exists for `next dev`. The legacy pages compute their base from the port
-   (`/api` on 80, `http://<host>:8000` otherwise), so they keep working on a dev server; a
-   hardcoded '/api' here 404s every call under `next dev -p 3000`. It is an env var rather
-   than the same port sniff because `output: 'export'` builds ONE artifact that nginx serves
-   at whatever address production has — sniffing would make the shipped bundle's behaviour
-   depend on how the operator reaches it. NEXT_PUBLIC_* is inlined at build time, so the
-   production bundle still contains the literal '/api' and no ':8000' host reaches a customer.
-   See .env.local.example. A rewrite in next.config.mjs is NOT an option: `output: 'export'`
-   ignores rewrites entirely. */
-export const API = (process.env.NEXT_PUBLIC_API_BASE || '/api').replace(/\/+$/, '');
+   Same-origin in production: nginx proxies /api/ to the FastAPI container, so the browser
+   never learns the backend's address and there is no CORS to configure.
+
+   Three ways to get there, in this order, and each rung exists because the one below it is
+   wrong somewhere:
+
+     1. `NEXT_PUBLIC_API_BASE`, when the operator set one. Inlined at build time, so it is the
+        only rung that can point a build at a fixed host on purpose. See .env.local.example.
+     2. The legacy port sniff, `brand.js` lines 3-4 verbatim: `/api` on the default port,
+        `<protocol>//<hostname>:8000` on any other. That is what makes `next dev -p 3000` work
+        without a .env.local — the hazard MIGRATION.md lists, where a hardcoded '/api' resolves
+        to http://localhost:3000/api and 404s every call, `/usage` and `/ai-config` included.
+     3. '/api' when there is no `location` at all — `next build` prerendering these pages in
+        Node. That fallback is the whole reason this is a FUNCTION and not the const it used to
+        be: `output: 'export'` evaluates every module once on the build machine, and a sniff at
+        module scope would either crash the export or bake the build machine's address into a
+        bundle that nginx then serves at a completely different address. Resolved per call, in
+        the browser, it cannot be baked.
+
+   443 is in the "default port" list even though `brand.js` checks only '' and '80', because it
+   is the same intent: browsers report `location.port` as '' for BOTH default ports, so the
+   legacy list is really "the default port, spelled two ways" and an explicit `:443` — which is
+   what a proxy or a port-forward produces — should not be read as "some dev server".
+
+   A rewrite in next.config.mjs is NOT an option: `output: 'export'` ignores rewrites entirely. */
+
+/** The API base for the page as it is being viewed RIGHT NOW. Prefer this over `API` in code
+ *  that may run during the static export; identical everywhere else. */
+export function apiBase(): string {
+  const override = process.env.NEXT_PUBLIC_API_BASE;
+  if (override) return override.replace(/\/+$/, '');
+  // Deliberately not memoised: it is two string comparisons, and a cached value would be the
+  // one computed during prerender (rung 3) rather than the browser's own.
+  if (typeof location === 'undefined') return '/api';
+  const port = location.port;
+  if (port === '' || port === '80' || port === '443') return '/api';
+  return `${location.protocol}//${location.hostname}:8000`;
+}
+
+/** The same value, read once at module load — which in the browser is the first thing that
+ *  happens on the page, so it is the runtime answer, not a build-time one. Kept because call
+ *  sites read `${apiBase()}${path}` and because `xhrStream.ts` callers own their own base. */
+export const API = apiBase();
+
+/* ---------------- acting as a workspace ----------------
+
+   ONE PAGE, TWO CONSOLES. `tenant.html` is the customer's portal and the superadmin's console
+   at the same URL, and the operator drives the CUSTOMER'S OWN routes: a verified superadmin
+   adds `X-Act-As-Tenant: <uuid|slug>` and the backend hands back a TENANT-shaped principal for
+   that one workspace (root CLAUDE.md, "Operator scope"). That is why there are no `/admin/`
+   twins of `/kb`, `/scoring`, `/recordings` to keep in step — the two modes issue literally
+   the same request, so the operator's view cannot answer differently from the customer's.
+
+   The selector is NOT a permission. It names which workspace an already-authorised operator is
+   looking at; every route re-verifies the admin token, and the header is inert for everyone
+   else — a tenant key asking to act as another workspace silently gets its own data back.
+
+   Which header a call must use, spelled out once so a phase-2 page does not have to rediscover
+   it (`tenant.html`'s `authH()` / `adminOnlyH()` split, and the reason it exists):
+
+     * A CUSTOMER route (`/kb/*`, `/scoring/*`, `/recordings`, `/v1/curation/*`, `/chat/config`)
+       → scope 'tenant' (or 'operator'). Carries the selector when an operator is acting.
+     * An `/admin/*` route — in practice just the workspace picker, `GET /admin/tenants` →
+       `adminOnlyHeaders()`. It must NOT carry the selector: act-as trades the superadmin
+       principal for a tenant-shaped one and `/admin/*` then refuses it. */
+
+/** sessionStorage key. `cq_console_tenant` is the name `tenant.html` already uses, so the two
+ *  stacks agree about which workspace is open while both pages exist.
+ *
+ *  ONE DIVERGENCE, deliberate: the legacy page keeps this in `localStorage`, this one in
+ *  `sessionStorage` with a localStorage MIRROR. The tokens are per-tab on purpose ("a QA
+ *  console signed into customer data should not silently follow into every new tab"), and a
+ *  selector that outlives the credential it is meaningless without is the same mistake one
+ *  level down: two console tabs on two workspaces currently fight over one localStorage key,
+ *  and whichever switched last decides what the other restores on reload. Reads prefer this
+ *  tab's own answer and fall back to the shared one; writes update both, so an operator moving
+ *  between the ported page and `tenant.html` stays in the workspace they picked. */
+const ACTING_KEY = 'cq_console_tenant';
+
+/* Cached rather than read per request: `scopedHeaders` runs on every call and storage access is
+   synchronous main-thread work. `hydrated` distinguishes "not read yet" from "read, and there
+   is none" — without it a null would re-read the store forever. Hydration is lazy because
+   module scope also runs in Node during `next build`, where there is no storage at all. */
+let actingTenant: string | null = null;
+let actingHydrated = false;
+
+function readStored(store: 'session' | 'local'): string | null {
+  try {
+    const s = store === 'session' ? sessionStorage : localStorage;
+    return s.getItem(ACTING_KEY) || null;
+  } catch { return null; }        // private mode, or no DOM at all
+}
+
+/** The workspace an operator is currently acting on, or `null` for "none picked".
+ *
+ *  `null` is a real state, not a failure: it is the operator's own pre-selection screen, where
+ *  `GET /admin/tenants` has no workspace to name yet. */
+export function getActingTenant(): string | null {
+  if (!actingHydrated) {
+    actingHydrated = true;
+    actingTenant = readStored('session') || readStored('local');
+  }
+  return actingTenant;
+}
+
+/** Pick the workspace an operator is acting on, or `null` to stop acting.
+ *
+ *  Empty string is `null`: '' is what an unselected `<select>` gives, and sending
+ *  `X-Act-As-Tenant: ` would be an unscoped superadmin request wearing a scoped request's
+ *  clothes. Callers should also abandon anything already in flight — the legacy page bumps a
+ *  generation counter, because whichever load lands last wins the DOM and an operator who
+ *  switches quickly can otherwise read workspace A's documents under workspace B's name. */
+export function setActingTenant(idOrSlug: string | null): void {
+  actingTenant = idOrSlug || null;
+  actingHydrated = true;
+  try {
+    if (actingTenant) sessionStorage.setItem(ACTING_KEY, actingTenant);
+    else sessionStorage.removeItem(ACTING_KEY);
+  } catch { /* private mode: the selection lives for this page view only */ }
+  try {
+    if (actingTenant) localStorage.setItem(ACTING_KEY, actingTenant);
+    else localStorage.removeItem(ACTING_KEY);
+  } catch { /* ditto — the mirror is a courtesy to the un-ported page, not a requirement */ }
+}
 
 /* ---------------- scope ---------------- */
 
 /** Which credential a request runs under. Named by the caller, never inferred.
 
-    | scope      | header sent                                             |
-    |------------|---------------------------------------------------------|
-    | `public`   | none — not even when a token is present                  |
-    | `user`     | `Authorization: Bearer <cq_user_token>`                  |
-    | `tenant`   | `Authorization: Bearer <cq_tenant_token>`                |
-    | `admin`    | `X-Admin-Token` — `/admin/*` only, never with act-as     |
-    | `operator` | `X-Admin-Token` + `X-Act-As-Tenant`, else tenant Bearer   | */
+    | scope      | header sent                                                          |
+    |------------|----------------------------------------------------------------------|
+    | `public`   | none — not even when a token is present                              |
+    | `user`     | `Authorization: Bearer <cq_user_token>`                              |
+    | `tenant`   | tenant Bearer; for an acting operator, `X-Admin-Token` + act-as      |
+    | `admin`    | `X-Admin-Token` — `/admin/*` only, NEVER with act-as                 |
+    | `operator` | as `tenant`, and a bare `X-Admin-Token` before a workspace is picked |
+
+    `tenant` and `operator` are the same rule with one difference, and it is the reason both
+    still exist rather than one being folded into the other:
+
+      * `tenant` is the SHARED name — it is what the component contract exposes
+        (`Workbench`'s `scope: 'user' | 'tenant'`), because a component mounted in the operator
+        console must not have to know it is in the operator console. A call at this scope is
+        always about ONE workspace, so a superadmin with no workspace picked sends nothing
+        rather than a bare admin token: an unscoped superadmin request whose owner predicate on
+        `/recordings` is literally `True` would list every tenant's calls, and a component
+        cannot tell that answer apart from its own workspace's.
+      * `operator` additionally allows that bare admin token, for the operator's own screens
+        that legitimately precede a selection. Where a page has both — the picker and the
+        panels under it — the picker is an `/admin/*` route and belongs to `adminOnlyHeaders`
+        anyway, so `operator` is rarely the answer. Prefer `tenant`. */
 export type Scope = 'public' | 'user' | 'tenant' | 'admin' | 'operator';
 
 /* Every header the backend treats as a credential (`resolve_principal` step 0). Lowercased
@@ -91,13 +226,18 @@ const DEV = process.env.NODE_ENV !== 'production';
       send `X-Admin-Token` to `/tts`, `/transcribe`, `/sentiment` and `/limits`, silently
       promoting an operator to superadmin scope on the public surface and filing every row
       under the wrong principal.
-    * OPERATOR is admin token PLUS the workspace selector. `tenant.html` is two consoles behind
-      one URL and drives the CUSTOMER's routes in both modes; without `X-Act-As-Tenant` the
-      operator runs unscoped, and the backend's owner predicate for a superadmin on
-      `/recordings` is literally `True` — one workspace's page would list every tenant's calls.
-      It falls back to the tenant Bearer so the same call site serves the customer unchanged.
+    * TENANT/OPERATOR is the tenant Bearer, or the admin token PLUS the workspace selector.
+      `tenant.html` is two consoles behind one URL and drives the CUSTOMER's routes in both
+      modes; without `X-Act-As-Tenant` the operator runs unscoped, and the backend's owner
+      predicate for a superadmin on `/recordings` is literally `True` — one workspace's page
+      would list every tenant's calls. The tenant Bearer branch is what lets the same call site
+      serve the customer unchanged.
     * ADMIN carries no selector: act-as trades the superadmin principal for a tenant-shaped
       one, and `/admin/*` then refuses it. See `adminOnlyHeaders`.
+
+    `actAsTenant` names the workspace for this ONE call; omitting it falls back to the module's
+    current selection (`setActingTenant`), which is where a page normally keeps it. Passing '' —
+    what an unselected `<select>` gives — means "none", and does NOT fall back.
 
     `extra` is merged last so a caller can add `Content-Type` and friends — never a credential,
     which `withoutCredentials` refuses before the merge can overwrite the scope's choice. */
@@ -108,6 +248,8 @@ export function scopedHeaders(
 ): Record<string, string> {
   const s = readSession();
   let h: Record<string, string> = {};
+  // `??`, not `||`: an explicit '' is a decision ("no workspace"), where undefined is silence.
+  const acting = actAsTenant ?? getActingTenant();
 
   switch (scope) {
     case 'public':
@@ -116,11 +258,6 @@ export function scopedHeaders(
       if (s.user) h = { Authorization: `Bearer ${s.user}` };
       break;
     case 'tenant':
-      if (s.tenant) h = { Authorization: `Bearer ${s.tenant}` };
-      break;
-    case 'admin':
-      if (s.admin) h = { 'X-Admin-Token': s.admin };
-      break;
     case 'operator':
       // THE TENANT TOKEN WINS WHEN BOTH ARE PRESENT, and the order here is the whole point.
       // `tenant.html` decides which console it is with `adminMode = () => !!ADMIN && !TOKEN`
@@ -132,29 +269,40 @@ export function scopedHeaders(
       // listing every tenant's calls: the repo's #1 invariant, broken by an `if` order.
       if (s.tenant) {
         h = { Authorization: `Bearer ${s.tenant}` };     // the customer's own session
-      } else if (s.admin) {
+      } else if (s.admin && acting) {
+        h = { 'X-Admin-Token': s.admin, 'X-Act-As-Tenant': acting };
+      } else if (s.admin && scope === 'operator') {
+        // No workspace picked yet — the operator's own pre-selection screen — which is a valid
+        // superadmin request, not a scoped one. Only `operator` may ask for it: see the note on
+        // `Scope` for why a `tenant`-scoped call sends nothing instead.
         h = { 'X-Admin-Token': s.admin };
-        // Empty means "no workspace picked yet" — the operator's own pre-selection screen —
-        // which is a valid superadmin request, not a scoped one.
-        if (actAsTenant) h['X-Act-As-Tenant'] = actAsTenant;
       }
+      break;
+    case 'admin':
+      if (s.admin) h = { 'X-Admin-Token': s.admin };
       break;
   }
 
   // `admin` silently ignores a selector above; say so out loud in dev rather than letting the
-  // caller believe a request is scoped to a workspace when it is running unscoped.
+  // caller believe a request is scoped to a workspace when it is running unscoped. The test is
+  // on the ARGUMENT, not on `acting`: an operator always has a workspace selected while the
+  // console is open, and throwing on that would make `adminOnlyHeaders()` — the one helper
+  // whose entire job is to omit the selector — unusable exactly when it is needed.
   if (DEV && scope === 'admin' && actAsTenant) {
-    throw new Error("session: scope 'admin' cannot act as a tenant — use 'operator'.");
+    throw new Error("session: scope 'admin' cannot act as a tenant — use 'tenant'.");
   }
   return { ...h, ...withoutCredentials(extra, `scope '${scope}'`) };
 }
 
-/** `X-Admin-Token` alone, for the routes an operator calls AS the superadmin.
+/** `X-Admin-Token` alone, for the routes an operator calls AS the superadmin: `/admin/*`.
 
-    Kept separate from `scopedHeaders('operator', ...)` rather than folded into it, because the
-    difference is invisible at the call site otherwise: `GET /admin/tenants` (the workspace
-    picker) must not carry `X-Act-As-Tenant`, or the principal becomes tenant-shaped and every
-    `/admin/*` route refuses it. Same split as `tenant.html`'s `authH()` / `adminOnlyH()`. */
+    THIS IS THE ONE THAT NEVER CARRIES THE SELECTOR, and it is a separate function rather than
+    an option because the difference is invisible at the call site otherwise. `GET /admin/tenants`
+    (the workspace picker) must not carry `X-Act-As-Tenant`: act-as trades the superadmin
+    principal for a tenant-shaped one, and every `/admin/*` route then refuses it — a 401 or 403
+    on the very request that populates the picker, which reads as an expired console session.
+    It ignores `setActingTenant` entirely, so a page can select a workspace and still call
+    `/admin/*`. Same split as `tenant.html`'s `authH()` / `adminOnlyH()`. */
 export function adminOnlyHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return scopedHeaders('admin', undefined, extra);
 }
@@ -337,7 +485,9 @@ export interface ApiOpts {
       because `/usage` and `/ai-config` shipped before this option existed; the dev warning in
       `headersFor` names the path, and this becomes required when those two call sites do. */
   scope?: Scope;
-  /** Workspace uuid or slug for `scope: 'operator'`. Ignored by every other scope. */
+  /** Workspace uuid or slug, for `scope: 'tenant'` and `'operator'` — overriding
+      `getActingTenant()` for this one call. Ignored by every other scope, and a dev-time error
+      on `'admin'`. Pages normally set it once with `setActingTenant` instead of per request. */
   actAs?: string;
   /** Extra headers. Never a credential — see `withoutCredentials`. */
   headers?: Record<string, string>;
@@ -392,20 +542,49 @@ async function request(url: string, init: RequestInit): Promise<Response> {
 }
 
 export async function apiGet<T>(path: string, opts: ApiOpts = {}): Promise<T> {
-  return readBody<T>(await request(`${API}${path}`, {
+  return readBody<T>(await request(`${apiBase()}${path}`, {
     headers: headersFor(opts, {}, path),
     signal: opts.signal,
   }));
 }
 
+/** `apiGet`, but a FAILURE IS `null` INSTEAD OF A THROW — the third value `kbJson()` has.
+ *
+ *  THIS WAS A SHIPPED QA BUG. The knowledge-base panels each read a list, and collapsing "the
+ *  request failed" into "the list is empty" renders an empty state: a customer whose backend
+ *  was merely down was told their knowledge base had no documents in it, on a page whose next
+ *  button re-imports them. `tenant.html` fixed it by making `kbJson` return three values —
+ *  STALE, `null`, or the body — and every caller distinguishes `null` from `[]`. MIGRATION.md
+ *  lists it under "deliberate decisions the port must preserve".
+ *
+ *  So: `null` means NOTHING IS KNOWN — say "could not load" and offer a retry, never "none".
+ *  `[]` came from the server and means the workspace genuinely has none. It is a separate
+ *  function rather than a flag on `apiGet` because the two callers want opposite things: a
+ *  mutation's handler needs the `ApiError` (its status, and the server's own words) to explain
+ *  what went wrong, and a list panel needs a value it can render.
+ *
+ *  What it does NOT swallow is an abort: the caller asked for that, and a panel that renders
+ *  "could not load" when the operator simply switched workspace mid-flight is the same lie in
+ *  the other direction. Same rule as `request()`. The generation counter that guards that
+ *  switch (`SCOPE_GEN`/`STALE` in the legacy page) belongs to the page, not here — in React it
+ *  is an `AbortController` in the effect's cleanup, which arrives here as that abort. */
+export async function apiGetOrNull<T>(path: string, opts: ApiOpts = {}): Promise<T | null> {
+  try {
+    return await apiGet<T>(path, opts);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e;
+    return null;
+  }
+}
+
 /** PUT/POST/DELETE JSON. */
 export async function apiSend<T>(
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
   opts: ApiOpts = {},
 ): Promise<T> {
-  return readBody<T>(await request(`${API}${path}`, {
+  return readBody<T>(await request(`${apiBase()}${path}`, {
     method,
     headers: headersFor(opts, body === undefined ? {} : { 'Content-Type': 'application/json' }, path),
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -424,7 +603,7 @@ export async function apiUpload<T>(path: string, fd: FormData, opts: ApiOpts = {
   if (DEV && Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
     throw new Error('session: apiUpload must not set Content-Type — the browser owns the multipart boundary.');
   }
-  return readBody<T>(await request(`${API}${path}`, {
+  return readBody<T>(await request(`${apiBase()}${path}`, {
     method: 'POST',
     headers,
     body: fd,
@@ -439,7 +618,7 @@ export async function apiUpload<T>(path: string, fd: FormData, opts: ApiOpts = {
     stranger's token. The bytes come back through `fetch` and the caller hands the browser an
     object URL. */
 export async function apiBlob(path: string, opts: ApiOpts = {}): Promise<Blob> {
-  const r = await request(`${API}${path}`, { headers: headersFor(opts, {}, path), signal: opts.signal });
+  const r = await request(`${apiBase()}${path}`, { headers: headersFor(opts, {}, path), signal: opts.signal });
   if (!r.ok) throw await errorFrom(r);
   return r.blob();
 }
@@ -461,7 +640,7 @@ export async function downloadAuthed(
   fallbackName?: string,
   opts: ApiOpts = {},
 ): Promise<void> {
-  const r = await request(`${API}${path}`, { headers: headersFor(opts, {}, path), signal: opts.signal });
+  const r = await request(`${apiBase()}${path}`, { headers: headersFor(opts, {}, path), signal: opts.signal });
   if (!r.ok) throw await errorFrom(r);
 
   const blob = await r.blob();

@@ -201,7 +201,13 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 ## 5. Deployment
 
 - **Where:** a single Linux server (Rocky 8), Docker Compose project `cqv3`, at
-  `/home/cqdeploy/cq-v3-ai`, running as the `cqdeploy` user. **Plain HTTP, no domain/TLS yet.**
+  `/home/cqdeploy/cq-v3-ai`, running as the `cqdeploy` user. **Live on HTTPS at
+  https://ai.communiq.ge** — Let's Encrypt, terminated by the `cq-web` nginx
+  (`deploy/tls-ssl.conf`, copied into place at container start only when certs exist, so a
+  fresh clone still boots on HTTP). Port 80 redirects to 443 for that host and keeps
+  serving the ACME challenge. **There are TWO nginx server blocks** — `deploy/nginx.conf`
+  (80) and `deploy/tls-ssl.conf` (443) — and a routing or header change made in only one
+  of them is not deployed.
 - **The server dir is a git checkout tracking `origin/main`.** Deploys are `git pull --ff-only` +
   `docker compose -p cqv3 up -d --build`. The server `.env` is **untracked and preserved** across
   deploys; volumes are never touched. Idempotent migrations apply on api startup.
@@ -289,9 +295,15 @@ curl localhost:8000/health      # {"status":"ok",...}
 
 **Dev conventions:**
 - Python 3.11, FastAPI, **asyncpg raw SQL** (`$1` params, uuid PKs, timestamptz), pydantic-settings.
-- Frontend is **vanilla JS** (no build step); shared helpers in `brand.js` (`CQ.*`), styles in
-  `brand.css`. Trilingual via a `DICT` in `brand.js` — every user-facing string needs `en/ka/ru`
-  keys (all three must stay in sync; the QA pass verified 222 keys × 3).
+- Frontend is **mid-migration to Next.js**. New work goes in `frontend/next` (App Router,
+  React 19, TypeScript, **static export** — no Node process in production; nginx serves the
+  exported files beside the legacy ones and `try_files $uri $uri.html` gives them clean URLs).
+  The not-yet-ported pages are still vanilla JS in `frontend/public` (`brand.js` = `CQ.*`,
+  `brand.css`). **Read `docs/MIGRATION.md` before touching either stack** — it is the port's
+  contract, and it lists the deliberate decisions a rewrite silently turns into regressions.
+  Trilingual either way: every user-facing string needs `en/ka/ru` keys and
+  `python3 scripts/check_i18n.py` must pass (it also reports keys still shared by both stacks,
+  a count that reaches zero when the last legacy page is deleted).
 - New AI features: **forced tool-use + strict schema + array normalization**.
 - New tenant-scoped queries: **always filter by `client_id`.**
 - New DB columns/tables: idempotent (`ADD COLUMN IF NOT EXISTS`) in a `db/*.sql` applied by

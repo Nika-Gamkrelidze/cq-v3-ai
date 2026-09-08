@@ -54,6 +54,20 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = 8             # admission control — 429 fast rather than queue
     embed_query_timeout_s: float = 10.0      # latency-critical query embeds fail fast, not hang
 
+    # --- Anonymous quota identity (services/auth.py::visitor_key) ---
+    # The anonymous daily allowance is keyed on the visitor's own address. Where the
+    # deployment's network masks it — a container reached through a published port on a host
+    # that masquerades the source address, which is unconditional on Docker Desktop and the
+    # default outcome on a firewalld host — EVERY visitor arrives as one private address (the
+    # bridge gateway) and would share ONE allowance: the first person to spend it locks out
+    # the world. The app refuses the anonymous tier in that state instead of pooling everyone.
+    #
+    # Set this true ONLY where private client addresses really are distinct visitors: a
+    # LAN-only deployment, or local development where the one developer IS the traffic.
+    # It must stay FALSE on a public deployment — there it can only mean the address was
+    # rewritten on the way in, and the fix for that is on the host (see docker-compose.yml).
+    anon_trust_private_client_ips: bool = False
+
     # --- Auth: signing secret for tenant-user session tokens (HMAC) ---
     jwt_secret: str = "change-me-jwt-secret"
     token_ttl_hours: int = 24
