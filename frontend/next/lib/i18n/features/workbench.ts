@@ -38,6 +38,14 @@ export const en: Dict = {
   'wb.upload.text': 'Use this transcript',
   'wb.upload.sum': 'Transcribe & summarise',
 
+  /* The transcription-override panel in the source card. Everything else it says comes from
+     the shared `tr.*` vocabulary (features/transcription.ts) — the same words the console and
+     the workspace use for the same four settings. These two are the workbench's own: one names
+     the consequence of diarisation being off in a one-line chip, the other is the only key-term
+     rule the shared set has no sentence for. */
+  'wb.tr.diarize.off': 'Speakers not separated',
+  'wb.tr.keyterms.toomany': 'Up to {max} key terms.',
+
   'wb.needsource': 'Add a recording or paste a transcript first.',
   'wb.needtext': 'Paste a transcript first.',
 
@@ -199,6 +207,9 @@ export const ka: Dict = {
   'wb.upload.text': 'ამ ტრანსკრიპტის გამოყენება',
   'wb.upload.sum': 'ტრანსკრიფცია და შეჯამება',
 
+  'wb.tr.diarize.off': 'მოსაუბრეები არ იმიჯნება',
+  'wb.tr.keyterms.toomany': 'მაქსიმუმ {max} საკვანძო სიტყვა.',
+
   'wb.needsource': 'ჯერ დაამატეთ ჩანაწერი ან ჩასვით ტრანსკრიპტი.',
   'wb.needtext': 'ჯერ ჩასვით ტრანსკრიპტი.',
 
@@ -359,6 +370,9 @@ export const ru: Dict = {
   'wb.upload': 'Расшифровать',
   'wb.upload.text': 'Использовать транскрипт',
   'wb.upload.sum': 'Расшифровать и обобщить',
+
+  'wb.tr.diarize.off': 'Говорящие не разделяются',
+  'wb.tr.keyterms.toomany': 'Не больше {max} ключевых терминов.',
 
   'wb.needsource': 'Сначала добавьте запись или вставьте транскрипт.',
   'wb.needtext': 'Сначала вставьте транскрипт.',

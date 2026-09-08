@@ -10,9 +10,11 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .routers import (admin, analyze, auth, calls, chat, chat_config, convert, curation, kb,
-                     kb_admin, partner, recordings, scoring, sentiment, tenants, tts)
+                     kb_admin, partner, recordings, scoring, sentiment, tenants,
+                     transcription as transcription_router, tts)
 from .services import analysis
 from .services import auth as auth_service
+from .services.transcription import TranscriptionSettingsError
 from .services.migrate import run_startup_migrations
 
 log = logging.getLogger("cq")
@@ -57,6 +59,18 @@ async def _data_error_handler(request: Request, exc: asyncpg.DataError):
     return JSONResponse(status_code=400, content={"detail": "Invalid identifier or value"})
 
 
+@app.exception_handler(TranscriptionSettingsError)
+async def _transcription_settings_handler(request: Request, exc: TranscriptionSettingsError):
+    """Transcription settings are validated in exactly ONE place (services/transcription.py),
+    and they are validated on four different surfaces: the admin default, the workspace
+    override, and the per-file `transcription` field on every upload route. One handler is what
+    keeps those four answering identically — FastAPI's own shape plus the machine `code` and
+    the offending `field`, so a UI can point at the input the operator has to fix."""
+    return JSONResponse(status_code=400, content={
+        "detail": str(exc), "code": "invalid_transcription_setting",
+        "field": getattr(exc, "field", "") or None})
+
+
 app.include_router(calls.router)
 app.include_router(analyze.router)
 app.include_router(tts.router)
@@ -74,6 +88,10 @@ app.include_router(tenants.router)
 # /admin/chat/{tenant_id}/config. Root only: the integration surface has its own read-only
 # /v1/chat/config in chat.router and must not gain a write path through a prefix.
 app.include_router(chat_config.router)
+# Transcription settings: /admin/transcription/defaults (superadmin) and /transcription/config
+# (the workspace). Root only — the per-file layer rides on the upload routes themselves, so the
+# partner surface needs no prefixed twin of these.
+app.include_router(transcription_router.router)
 # Call Workbench: /recordings + /summaries. Root only, never under /v1 — it admits registered
 # users and anonymous visitors, neither of which belongs on the partner surface.
 app.include_router(recordings.router)

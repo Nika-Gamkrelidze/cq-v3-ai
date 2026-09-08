@@ -17,7 +17,7 @@ import time
 
 from ..db import pool
 from . import (attribution, claude, elevenlabs, factcheck, media, retrieval, scoring,
-               scoring_store, segments, sentiment, settings_store)
+               scoring_store, segments, sentiment, settings_store, transcription)
 
 log = logging.getLogger("cq")
 
@@ -132,10 +132,20 @@ def _timeline(stt: dict, transcript: str) -> tuple[list[dict], float | None]:
 
 
 async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: str,
-                       client_id: str | None, is_tenant: bool) -> dict:
+                       client_id: str | None, is_tenant: bool,
+                       stt_settings: dict | None = None) -> dict:
     """Run the full pipeline for an already-created row, updating it in place. Returns the
-    final result dict (with status 'done' or 'error'). Never raises for business errors."""
+    final result dict (with status 'done' or 'error'). Never raises for business errors.
+
+    `stt_settings` is the ALREADY-RESOLVED transcription config for this request (the route
+    resolves it, because only the route has seen the per-file override). Left out, it is
+    resolved here from `client_id` — so a caller that has not been taught about the settings
+    still honours the operator default and the workspace override rather than silently
+    transcribing on the code defaults.
+    """
     cfg = await settings_store.get_effective()
+    if stt_settings is None:
+        stt_settings = await transcription.resolve(client_id)
     started = time.monotonic()
 
     async def fail(msg: str) -> dict:
@@ -146,7 +156,8 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
     await _update(job_id, status="transcribing")
     try:
         stt = await elevenlabs.transcribe(
-            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001
         return await fail(f"Transcription failed: {exc}")
     transcript = (stt.get("text") or "")
@@ -229,12 +240,18 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
 
 
 async def run_background(job_id: str, audio: bytes, filename: str, content_type: str,
-                         client_id: str | None, is_tenant: bool) -> None:
+                         client_id: str | None, is_tenant: bool,
+                         stt_settings: dict | None = None) -> None:
     """Background entrypoint: same pipeline, but bounded by the concurrency semaphore and
-    fully swallowing errors (they are already recorded on the row by run_pipeline)."""
+    fully swallowing errors (they are already recorded on the row by run_pipeline).
+
+    `stt_settings` is resolved by the route and carried in, not re-resolved when the task
+    finally runs: a submission is transcribed with the settings that were in force when the
+    caller submitted it, not with whatever an operator saved while it sat in the queue."""
     async with _SEM:
         try:
-            await run_pipeline(job_id, audio, filename, content_type, client_id, is_tenant)
+            await run_pipeline(job_id, audio, filename, content_type, client_id, is_tenant,
+                               stt_settings)
         except Exception as exc:  # noqa: BLE001 — last-resort guard for a background task
             log.exception("analysis job %s crashed", job_id)
             try:

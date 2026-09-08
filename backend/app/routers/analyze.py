@@ -5,10 +5,11 @@ configured limits; tenants get their knowledge base injected as RAG context.
 """
 import json
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from ..db import pool
 from ..services import analysis, elevenlabs, limits, media, sentiment, settings_store
+from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 
 router = APIRouter(tags=["analyze"])
@@ -36,9 +37,17 @@ async def get_limits(principal: Principal = Depends(resolve_principal)):
 
 @router.post("/analyze")
 async def analyze_audio(request: Request, file: UploadFile = File(...),
+                        transcription: str | None = Form(default=None),
                         principal: Principal = Depends(resolve_principal)):
     """Synchronous single-audio analysis. Runs the full pipeline inline and returns the
-    result. Partners with many files should use the async /v1/analyses[/batch] endpoints."""
+    result. Partners with many files should use the async /v1/analyses[/batch] endpoints.
+
+    `transcription` is an optional JSON object (a form field, because this route is multipart)
+    with any subset of language_code / diarize / keyterms / audio_format, applied over the
+    settings resolved for this workspace FOR THIS FILE ONLY. It is parsed before anything is
+    spent, so a typo costs a 400 rather than a quota unit."""
+    stt_settings = await transcription_svc.resolve(
+        principal.client_id, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -53,7 +62,8 @@ async def analyze_audio(request: Request, file: UploadFile = File(...),
         status="transcribing", client_ip=client_ip(request), audio=audio,
         user_id=_user_id(principal))
     result = await analysis.run_pipeline(
-        job_id, audio, file.filename, file.content_type, principal.client_id, principal.is_tenant)
+        job_id, audio, file.filename, file.content_type, principal.client_id,
+        principal.is_tenant, stt_settings)
     if result.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.get("error") or "Analysis failed")
     return result
@@ -61,6 +71,7 @@ async def analyze_audio(request: Request, file: UploadFile = File(...),
 
 @router.post("/transcribe")
 async def transcribe_audio(request: Request, file: UploadFile = File(...),
+                           transcription: str | None = Form(default=None),
                            principal: Principal = Depends(resolve_principal)):
     """Speech-to-text with sentiment, WITHOUT the Claude analysis pass.
 
@@ -72,6 +83,8 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
     Metered on the same `analyses` bucket so an operator keeps one daily dial for "audio a
     stranger may send us", and retained under the same rule as every other anonymous upload.
     """
+    stt_settings = await transcription_svc.resolve(
+        principal.client_id, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -89,7 +102,8 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
 
     try:
         stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription_svc.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")

@@ -40,6 +40,7 @@
      features/retrieval.ts  retr. pg.
      features/scoring.ts    sc.
      features/timeline.ts   tl.
+     features/transcription.ts  tr.
      features/tts.ts        tts. quota.
      features/workbench.ts  wb.
      pages/account.ts       ac.            (account.html  -> /account)
@@ -69,6 +70,7 @@ import * as kb from './features/kb';
 import * as retrieval from './features/retrieval';
 import * as scoring from './features/scoring';
 import * as timeline from './features/timeline';
+import * as transcription from './features/transcription';
 import * as tts from './features/tts';
 import * as workbench from './features/workbench';
 import * as account from './pages/account';
@@ -86,7 +88,8 @@ export type Dict = Record<string, string>;
 
 const MODULES: Record<Lang, Dict>[] = [
   chrome,
-  analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, tts, workbench,
+  analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, transcription,
+  tts, workbench,
   account, aicfg, consolePage, copilot, home, usage, workspace,
 ];
 

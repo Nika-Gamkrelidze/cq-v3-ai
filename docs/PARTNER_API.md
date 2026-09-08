@@ -56,6 +56,7 @@ are scored against. Body: `{dimensions:[{name, weight, guidance}], rubric}`. **W
 
 ### Speech
 - `POST /v1/transcriptions` — multipart `file=` → `{transcript, language, words[]}` (STT only).
+  Accepts the optional `transcription` field described under **Transcription settings** below.
 - `POST /v1/tts` — `{text, voice_id?, language_code?, model_id?, voice_settings?, enforce_language?}`
   → `audio/mpeg` bytes. Voices: `GET /v1/voices`, languages: `GET /v1/languages` (EN / RU /
   **Georgian**; each entry carries `model`, the model picked when `model_id` is omitted).
@@ -79,6 +80,49 @@ model that will actually run and sends only what survives:
 false` stops the language code being sent at all (the model then infers the language from
 the text); `true` is the default whenever the model accepts one. An unknown or hidden
 `model_id` → **400** `{"detail": "…", "code": "model_unavailable"}`.
+
+### Transcription settings
+
+How your audio is sent to the speech model is configurable, because it changes what the model
+hears — and the transcript is what fact-checking and scoring then run against. Four settings,
+resolved as **code defaults ← deployment default ← your workspace ← this one file**. Each layer
+sets only what it changes; anything unset is inherited.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `language_code` | ISO-639-1/3 string, or `null` | The language to expect. `null` = let the model detect it. A hint, not enforcement — but a strong one for low-resource languages such as **Georgian**. |
+| `diarize` | bool (default `true`) | Separate the speakers. **Turning it off loses per-speaker analysis** everywhere downstream. |
+| `keyterms` | list of strings (default `[]`) | Bias recognition toward these words — product names, policy terms, place names. ≤ 1000 terms, each under 50 characters and at most 5 words; `< > { } [ ] \` are rejected. **Costs +20 %**, so it is opt-in. Supported by Scribe v2 models. |
+| `audio_format` | `original` \| `flac_full` \| `flac_16k` \| `wav_16k` \| `mp3_16k` | What we encode your upload as before sending it: the original bytes untouched; lossless FLAC at the file's own rate; lossless FLAC at 16 kHz; WAV PCM s16le at 16 kHz; or lossy MP3 at 16 kHz. |
+
+Manage the stored layer:
+
+- `GET /transcription/config` — the **effective** settings for your workspace, plus `is_default`
+  (`true` = you have set nothing of your own and are inheriting) and `inherited` (the layer
+  underneath, so a UI can show the fallback), `override` (only the keys you set) and `formats`.
+- `PUT /transcription/config` — save your override. Send only the fields you want to change; a
+  field you omit goes back to being inherited. Requires owner authority (an owner login or the
+  workspace API key).
+- `DELETE /transcription/config` — drop the override entirely and inherit everything again.
+
+Override for **one file** by adding a `transcription` form field — a JSON object with any subset
+of the four keys — to any upload route (`/v1/transcriptions`, `/v1/analyze`, `/v1/analyses`,
+`/v1/analyses/batch`). The uploads are `multipart/form-data`, so the object travels as a JSON
+string in a form field:
+
+```bash
+curl -s -X POST $BASE/v1/transcriptions -H "X-API-Key: $KEY" \
+  -F "file=@call.m4a" \
+  -F 'transcription={"language_code":"ka","audio_format":"flac_16k","keyterms":["თვე","ლიმიტი"]}'
+```
+
+On `/v1/analyses/batch` the object applies to the whole batch. Settings are resolved when a
+submission is **accepted**, so an async job is transcribed with what was in force when you sent
+it, not with whatever changed while it queued.
+
+Invalid settings are refused with **400** before anything is spent:
+`{"detail": "keyterms: 'a<b>' contains < > …", "code": "invalid_transcription_setting",
+"field": "keyterms"}` — `detail` always names the offending field.
 
 ### Correctness checking (the core)
 Every check returns **analysis** (summary, sentiment, topics, key points, quality), **`kb_check`**
@@ -128,7 +172,8 @@ submits. A repeat with the same `external_ref` returns the **existing** job inst
 (and re-billing). A previously *failed* ref can be resubmitted to retry it.
 
 ## Errors
-JSON `{ "detail": "…" }` with standard codes: `400` bad input, `401` missing/invalid key,
+JSON `{ "detail": "…" }`, sometimes with a sibling machine `code` (and, for transcription
+settings, the offending `field`), with standard codes: `400` bad input, `401` missing/invalid key,
 `404` not found / not yours, `413` too large, `429` rate-limited, `502` upstream (STT/LLM) error.
 The analysis itself never partially fails silently — a failed job has `status:"error"` and an
 `error` message.

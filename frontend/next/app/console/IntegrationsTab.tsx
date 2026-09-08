@@ -9,6 +9,7 @@ import { useI18n } from '@/lib/useI18n';
 import { SessionExpired, adminGet, adminSend, errText } from './api';
 import type { PreviewCache, VoicesPayload } from './api';
 import { Msg, type Note } from './parts';
+import TranscriptionCard from './TranscriptionCard';
 
 /* Provider keys, models, the analysis prompt, and the capability test.
 
@@ -245,6 +246,10 @@ export default function IntegrationsTab({
           </div>
         </div>
       </div>
+
+      {/* Directly under Models & voice, and saved by its own route: `stt_model` above names
+          WHICH speech-to-text model runs, this names what that model is given to work with. */}
+      <TranscriptionCard />
 
       <div className="card">
         <h3>{t('adm.instructions')}</h3>

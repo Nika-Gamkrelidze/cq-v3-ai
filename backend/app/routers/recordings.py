@@ -37,7 +37,7 @@ import mimetypes
 import uuid
 from pathlib import Path
 
-from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request,
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query, Request,
                      UploadFile)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -46,6 +46,7 @@ from ..db import pool
 from ..services import (analysis, attribution, elevenlabs, factcheck, limits, llm, media,
                         scoring, scoring_store, segments, semantic, sentiment_config,
                         settings_store, summarise)
+from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 # One definition of "who owns this row", shared with the legacy upload routes rather than
 # copied: writing a tenant login's `user_id` into the registered-user column is the kind of
@@ -307,7 +308,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 
 async def _ingest(job_id: str, audio: bytes, filename: str | None, content_type: str | None,
-                  cfg: dict, *, emit=None) -> dict:
+                  cfg: dict, *, emit=None, stt_settings: dict | None = None) -> dict:
     """Transcribe an already-created row and park it `ready` with its timeline.
 
     Shared by the single-upload route (both transports) and the summaries batch. A failure is
@@ -318,7 +319,8 @@ async def _ingest(job_id: str, audio: bytes, filename: str | None, content_type:
         emit("stage", {"stage": "transcribing"})
     try:
         stt = await elevenlabs.transcribe(
-            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, filename, content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription_svc.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001 — every STT failure is the same answer to the caller
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise _Failed(502, f"Transcription failed: {exc}") from exc
@@ -390,6 +392,7 @@ async def _stream(request: Request, run):
 @router.post("/recordings")
 async def upload_recording(request: Request, file: UploadFile = File(...),
                            as_stream: int = Query(default=0, alias="stream", ge=0, le=1),
+                           transcription: str | None = Form(default=None),
                            principal: Principal = Depends(resolve_principal)):
     """tenant | user | anonymous. Store the bytes, transcribe, build the timeline, park the
     row `ready`. `?stream=1` narrates the same work over SSE (`stage`, `done` | `error`)."""
@@ -398,6 +401,8 @@ async def upload_recording(request: Request, file: UploadFile = File(...),
     # ran out hours ago is exactly the cost this meter exists to refuse, and `reserve()` can
     # only run once the size is known — i.e. after the read. Same order convert.py uses.
     await limits.check(principal, "analyses")
+    stt_settings = await transcription_svc.resolve(
+        principal.client_id, transcription_svc.parse_override(transcription))
     audio = await _read_upload(file)
     cfg = await _settings("stt")
     await limits.reserve(principal, "analyses", len(audio))
@@ -411,13 +416,14 @@ async def upload_recording(request: Request, file: UploadFile = File(...),
         async def run(emit):
             try:
                 return await _ingest(job_id, audio, file.filename, file.content_type, cfg,
-                                     emit=emit)
+                                     emit=emit, stt_settings=stt_settings)
             except asyncio.CancelledError:
                 await _abandon([job_id])
                 raise
         return _sse_response(_stream(request, run))
     try:
-        return await _ingest(job_id, audio, file.filename, file.content_type, cfg)
+        return await _ingest(job_id, audio, file.filename, file.content_type, cfg,
+                             stt_settings=stt_settings)
     except _Failed as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
@@ -832,7 +838,8 @@ def _summary_calls(recs: list[dict]) -> list[dict]:
 
 
 async def _run_summary(request: Request, principal: Principal, cfg: dict,
-                       uploads: list[tuple[str, str | None, bytes]], *, emit=None) -> dict:
+                       uploads: list[tuple[str, str | None, bytes]], *, emit=None,
+                       stt_settings: dict | None = None) -> dict:
     """Create + transcribe one recording per file IN UPLOAD ORDER (= chronological, which is
     what the digest's "call 1 … call n" means), then summarise the thread and record it.
 
@@ -854,7 +861,8 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
             status="transcribing", client_ip=ip, audio=audio,
             user_id=_user_id(principal), source="audio", created_by=actor)
         try:
-            recs.append(await _ingest(job_id, audio, filename, content_type, cfg))
+            recs.append(await _ingest(job_id, audio, filename, content_type, cfg,
+                                      stt_settings=stt_settings))
         except _Failed as exc:
             raise _Failed(exc.status, f"'{filename}': {exc.detail}") from exc
         except asyncio.CancelledError:
@@ -895,6 +903,7 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
 @router.post("/summaries")
 async def create_summary(request: Request, files: list[UploadFile] = File(...),
                          as_stream: int = Query(default=0, alias="stream", ge=0, le=1),
+                         transcription: str | None = Form(default=None),
                          principal: Principal = Depends(resolve_principal)):
     """tenant | user. One or several related recordings (same people, separate calls) →
     one digest. `?stream=1` narrates it: `stage` per file, `stage` summarising, `done` |
@@ -907,6 +916,10 @@ async def create_summary(request: Request, files: list[UploadFile] = File(...),
     # sizes, so a caller with nothing left would otherwise buffer the whole batch for free,
     # as often as they liked. convert.py guards its identical read the same way.
     await limits.check(principal, "analyses")
+    # One override for the whole thread: the calls in a digest are the same people in the same
+    # language, so a per-file knob per file would be a form nobody could fill in correctly.
+    stt_settings = await transcription_svc.resolve(
+        principal.client_id, transcription_svc.parse_override(transcription))
     uploads = await _read_uploads(files)
     # Both keys are checked before N quota units are taken and a minute of transcription
     # is paid for, not after.
@@ -915,9 +928,11 @@ async def create_summary(request: Request, files: list[UploadFile] = File(...),
 
     if as_stream:
         return _sse_response(_stream(
-            request, lambda emit: _run_summary(request, principal, cfg, uploads, emit=emit)))
+            request, lambda emit: _run_summary(request, principal, cfg, uploads, emit=emit,
+                                               stt_settings=stt_settings)))
     try:
-        return await _run_summary(request, principal, cfg, uploads)
+        return await _run_summary(request, principal, cfg, uploads,
+                                  stt_settings=stt_settings)
     except _Failed as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 

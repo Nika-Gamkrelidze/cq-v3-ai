@@ -54,6 +54,40 @@
 .wb :global(.wb-guide[open] summary::before) { transform:rotate(90deg); }
 .wb :global(.wb-guide[open] summary) { border-bottom:1px solid var(--hairline); }
 .wb :global(.wb-guide-body) { padding:4px 14px 14px; }
+
+/* The transcription-override panel, in the SOURCE card.
+   ----------------------------------------------------
+   Same shell as `.wb-guide` (a <details> on the card's own input surface) with one difference
+   that is the whole point of it: the summary row is a FLEX line carrying the current settings,
+   not just a title. Collapsed is the state this control spends its life in, and "what is my
+   file about to be transcribed with" has to be answerable from that state — the triangle is
+   for changing the answer, not for reading it. The chips ellipsize rather than wrap so the
+   resting card stays exactly one line taller than it was. */
+.wb :global(.wb-tr) { margin-top:14px; border:1px solid var(--hairline); border-radius:var(--r-md); background:var(--input-bg); }
+.wb :global(.wb-tr summary) { cursor:pointer; padding:10px 14px; font-size:13px; color:var(--mist);
+  list-style:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.wb :global(.wb-tr summary::-webkit-details-marker) { display:none; }
+.wb :global(.wb-tr summary::before) { content:'\25B8'; flex:none; transition:transform .16s var(--ease); }
+.wb :global(.wb-tr[open] summary::before) { transform:rotate(90deg); }
+.wb :global(.wb-tr[open] summary) { border-bottom:1px solid var(--hairline); }
+.wb :global(.wb-tr-title) { font-weight:600; flex:none; }
+.wb :global(.wb-tr-badge) { flex:none; background:color-mix(in oklab,var(--muted) 20%,transparent); color:var(--muted); }
+.wb :global(.wb-tr-chips) { flex:1 1 200px; min-width:0; font-size:12px; color:var(--muted);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wb :global(.wb-tr-body) { padding:4px 14px 14px; }
+.wb :global(.wb-tr-lead) { margin-top:8px; }
+.wb :global(.wb-tr-from) { margin-top:6px; color:var(--mist); }
+.wb :global(.wb-tr-switch) { display:inline-flex; align-items:center; gap:8px; margin:14px 0 0;
+  font-size:13px; font-weight:600; color:var(--paper); cursor:pointer; }
+.wb :global(.wb-tr-field label) { display:flex; align-items:center; gap:6px; }
+.wb :global(.wb-tr-inline) { margin-bottom:0; color:var(--paper); font-size:13px; cursor:pointer; }
+.wb :global(.wb-tr-terms) { min-height:88px; font-size:13px; }
+.wb :global(.wb-tr-terms-meta) { display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; }
+.wb :global(.wb-tr-err) { margin-top:6px; font-size:12.5px; }
+.wb :global(.wb-tr-err:empty) { display:none; }
+.wb :global(.wb-tr-warn) { color:var(--pending); }
+.wb :global(.wb-tr-actions) { margin-top:14px; align-items:center; }
+.wb :global(.wb-tr-noop) { margin-top:0; }
 .wb :global(.wb-res) { margin-top:14px; }
 .wb :global(.wb-res-head) { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
 .wb :global(.wb-res-head h3) { margin:0; }

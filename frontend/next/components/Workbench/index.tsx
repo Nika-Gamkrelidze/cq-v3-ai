@@ -51,6 +51,7 @@ import {
 import { Scorecard } from './Scorecard';
 import { Sentiment } from './Sentiment';
 import { DoneCard, Progress, SourceCard } from './Source';
+import { appendTranscription, TranscriptionPanel, useTranscriptionOverride } from './Transcription';
 import { langName, speakerLabels, turnsLabel, type T } from './strings';
 import { Summary, type SummaryCallSource } from './Summary';
 import type { SeekTarget } from './seek';
@@ -97,7 +98,7 @@ interface SourceState {
 }
 
 export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Workbench(props, ref) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { scope, onUnauthorized } = props;
   const featureKey = props.features.join('|');
   const order = useMemo(() => featureOrder(props.features), [featureKey]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -124,6 +125,14 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
 
   const [wantWords, setWantWords] = useState(true);
   const [voice, setVoice] = useState<{ touched: boolean; on: boolean }>({ touched: false, on: false });
+
+  /* The transcription settings THIS upload will run with. The hook loads what the surface
+     inherits and holds whatever the person overrode on top of it; `tr.patch` is the object
+     that rides along with the file, and is null whenever the inheritance is doing the work. */
+  const tr = useTranscriptionOverride(scope);
+  // Pulled out so the upload callbacks depend on the three values they actually use rather
+  // than on the whole hook value, which changes on every keystroke in the key-terms box.
+  const { clear: trClear, patch: trPatch, error: trError } = tr;
 
   const handles = useRef(new Map<number, TimelineHandle | null>());
   const panes = useRef<Partial<Record<Feature, HTMLDivElement | null>>>({});
@@ -184,8 +193,11 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     setSrcErr({ text: '', isError: true });
     setPaneErr({});
     setProgress(null);
+    // The override belongs to ONE recording. "Change" is a different file, so it starts from
+    // what the workspace says again rather than inheriting the last file's experiment.
+    trClear();
     return tk;
-  }, [clearSource]);
+  }, [clearSource, trClear]);
 
   // The panel owns an XHR that outlives a client-side navigation unless it is cancelled here.
   useEffect(() => () => { abortRef.current?.(); }, []);
@@ -384,6 +396,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     }
     const fd = new FormData();
     for (const f of batch) fd.append('files', f);
+    appendTranscription(fd, trPatch);
     await stream<SummaryResult>('/summaries?stream=1', fd, where, {
       onStage: d => {
         if (d.stage === 'summarising') { setProgress({ label: t('wb.stage.summarising'), value: null }); return; }
@@ -407,16 +420,17 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
       },
       onSettle: keep ? () => setRunning(prev => ({ ...prev, summarise: false })) : undefined,
     });
-  }, [stream, t, showError, adoptSummary]);
+  }, [stream, t, showError, adoptSummary, trPatch]);
 
   const uploadRecording = useCallback(async (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
+    appendTranscription(fd, trPatch);
     await stream<RecordingRow>('/recordings?stream=1', fd, 'src', {
       onStage: () => setProgress({ label: t('wb.stage.transcribing'), value: null }),
       onDone: rec => { adoptRecording(rec, file); toast(t('stt.done'), 'ok'); },
     });
-  }, [stream, t, adoptRecording]);
+  }, [stream, t, adoptRecording, trPatch]);
 
   const submitText = useCallback(async () => {
     const text = paste.trim();
@@ -441,9 +455,13 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     if (busy || posting) return;
     if (mode === 'text') { void submitText(); return; }
     if (!files.length) { showError('src', t('wb.needsource')); return; }
+    /* A key term the API would refuse stops the upload HERE, not after 40 MB have gone up and
+       a minute of model time has been paid for. The panel already shows the same sentence
+       beside the offending field; this is the half that keeps the button honest. */
+    if (trError) { showError('src', t(trError.key, trError.vars)); return; }
     if (files.length > 1 || tab === 'summarise') { void uploadSummary(files.slice(), 'src'); return; }
     void uploadRecording(files[0]);
-  }, [busy, posting, mode, files, tab, t, showError, submitText, uploadSummary, uploadRecording]);
+  }, [busy, posting, mode, files, tab, t, trError, showError, submitText, uploadSummary, uploadRecording]);
 
   /* ------------------------------------------------------------------ analysers */
 
@@ -648,6 +666,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
           onCancel={() => abortRef.current?.()}
           error={srcErr}
           progress={progressNode}
+          transcription={<TranscriptionPanel t={t} lang={lang} state={tr} busy={busy} />}
         />
       )}
 

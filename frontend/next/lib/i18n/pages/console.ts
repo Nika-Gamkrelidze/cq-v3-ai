@@ -34,6 +34,11 @@ export const en: Dict = {
   'adm.intkeys': 'Integration keys',
   'adm.models': 'Models & voice',
   'adm.instructions': 'Analysis instructions',
+  /* The transcription card's own words. Everything else on it is `tr.*`, shared with the
+     workspace and the upload form so the same setting reads the same way on all three — this
+     one line is the console's, because it is the only surface where these values are the
+     BOTTOM of the chain rather than an override of something above. */
+  'adm.transcription.desc': 'Every workspace inherits these settings unless it saves its own, and a single recording can override them at upload.',
   'adm.voices': 'Voices',
   'adm.voicevis': 'Customer-visible voices',
 
@@ -251,6 +256,7 @@ export const ka: Dict = {
   'adm.intkeys': 'ინტეგრაციის გასაღებები',
   'adm.models': 'მოდელები და ხმა',
   'adm.instructions': 'ანალიზის ინსტრუქციები',
+  'adm.transcription.desc': 'ამ პარამეტრებს მემკვიდრეობით იღებს ყველა სამუშაო სივრცე, რომელსაც საკუთარი არ შეუნახავს; ცალკეული ჩანაწერისთვის მათი შეცვლა ატვირთვისას შეიძლება.',
   'adm.voices': 'ხმები',
   'adm.voicevis': 'მომხმარებლისთვის ხილული ხმები',
 
@@ -468,6 +474,7 @@ export const ru: Dict = {
   'adm.intkeys': 'Ключи интеграций',
   'adm.models': 'Модели и голос',
   'adm.instructions': 'Инструкции анализа',
+  'adm.transcription.desc': 'Эти настройки наследует каждая организация, которая не сохранила свои, а для отдельной записи их можно переопределить при загрузке.',
   'adm.voices': 'Голоса',
   'adm.voicevis': 'Голоса, видимые клиентам',
 

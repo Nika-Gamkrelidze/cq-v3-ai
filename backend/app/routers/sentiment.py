@@ -17,11 +17,12 @@ POST /sentiment resolves WHICH config applies from the caller's own principal (t
 row; anonymous/superadmin -> the public row) rather than taking a scope parameter, so a caller
 can never read or spend someone else's configuration by passing the wrong flag.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from ..db import pool
 from ..services import analysis, elevenlabs, limits, sentiment, sentiment_config, settings_store
+from ..services import transcription as transcription_svc
 from ..services.auth import Principal, client_ip, resolve_principal
 # The one "who owns this row" rule (see its docstring): a registered user calling this public
 # route must get their own id on the job, not NULL.
@@ -132,12 +133,15 @@ async def _resolve_config(principal: Principal) -> dict:
 
 @router.post("/sentiment")
 async def standalone_sentiment(request: Request, file: UploadFile = File(...),
+                               transcription: str | None = Form(default=None),
                                principal: Principal = Depends(resolve_principal)):
     """Transcript + how it sounded. Nothing else — no full analysis, no KB, no rubric.
 
     Metered on the same `analyses` daily bucket as /transcribe and /analyze: it is a third
     way to spend the same underlying STT budget, not a separate allowance.
     """
+    stt_settings = await transcription_svc.resolve(
+        principal.client_id, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -162,7 +166,8 @@ async def standalone_sentiment(request: Request, file: UploadFile = File(...),
 
     try:
         stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription_svc.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001
         await analysis.mark_error(job_id, f"Transcription failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
@@ -182,7 +187,9 @@ async def standalone_sentiment(request: Request, file: UploadFile = File(...),
 
 
 @router.post("/admin/sentiment/{tenant_id}")
-async def admin_standalone_sentiment(file: UploadFile = File(...), tid: str = Depends(_admin_scope)):
+async def admin_standalone_sentiment(file: UploadFile = File(...),
+                                     transcription: str | None = Form(default=None),
+                                     tid: str = Depends(_admin_scope)):
     """KB-admin Playground: standalone sentiment for a chosen tenant, using that tenant's own
     guidance. Stateless like the scoring playground's score-text — a superadmin's probe of a
     tenant's config is not a customer interaction and is not persisted or metered."""
@@ -194,10 +201,15 @@ async def admin_standalone_sentiment(file: UploadFile = File(...), tid: str = De
 
     cfg_sent = await sentiment_config.get_tenant_config(tid)
     cfg = await settings_store.get_effective()
+    # The tenant's OWN transcription settings, not the operator's: the point of the playground
+    # is to reproduce what that workspace would get.
+    stt_settings = await transcription_svc.resolve(
+        tid, transcription_svc.parse_override(transcription))
 
     try:
         stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription_svc.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
 

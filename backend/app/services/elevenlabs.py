@@ -133,13 +133,40 @@ def silence_wav(seconds: float = 0.4, rate: int = 16000) -> bytes:
 
 
 async def transcribe(audio: bytes, filename: str, content_type: str, api_key: str,
-                     model_id: str = "scribe_v1", timeout: float = 300.0) -> dict:
-    """Transcribe an audio file with speaker diarization. Returns {text, language_code}.
-    Any input format (or a video) is first transcoded to mono 16 kHz MP3 for reliability."""
+                     model_id: str = "scribe_v1", timeout: float = 300.0, *,
+                     language_code: str | None = None, diarize: bool = True,
+                     keyterms: list[str] | None = None,
+                     audio_format: str | None = None) -> dict:
+    """Transcribe an audio file. Returns {text, language_code, words}.
+
+    The four tunables come from services/transcription.py (code defaults <- superadmin default
+    <- tenant override <- per-file); the signature's own defaults reproduce, byte for byte, the
+    request this function sent before they existed — no language_code, diarize on,
+    tag_audio_events on, mono 16 kHz MP3 — so a caller that passes none of them cannot have
+    changed what leaves the process.
+
+    `keyterms` rides as a REPEATED form field (`data={"keyterms": [...]}`, which httpx expands
+    into one part per term). That is exactly what the official elevenlabs-python SDK produces:
+    its generated client puts `keyterms` in `data` as a raw list and reserves JSON encoding for
+    `additional_formats`, the one list-of-OBJECTS field, which it sends as a separate
+    application/json part. Do not "fix" this into json.dumps.
+
+    `file_format` is sent only when the encoder we actually used guarantees the shape it
+    promises — `audio.to_stt_format` returns None for it whenever the conversion fell back to
+    the original bytes.
+    """
     from .audio import to_stt_format
-    audio, filename, content_type = await to_stt_format(audio, filename, content_type)
-    files = {"file": (filename or "audio", audio, content_type or "application/octet-stream")}
-    data = {"model_id": model_id, "diarize": "true", "tag_audio_events": "true"}
+    payload = await to_stt_format(audio, filename, content_type, audio_format)
+    files = {"file": (payload.filename or "audio", payload.data,
+                      payload.content_type or "application/octet-stream")}
+    data = {"model_id": model_id, "diarize": "true" if diarize else "false",
+            "tag_audio_events": "true"}
+    if language_code:
+        data["language_code"] = language_code
+    if keyterms:
+        data["keyterms"] = list(keyterms)
+    if payload.file_format:
+        data["file_format"] = payload.file_format
     resp = await _request("POST", "/speech-to-text", "Speech-to-text", SCOPE_STT,
                           timeout=timeout, headers=_headers(api_key), data=data, files=files)
     body = resp.json()

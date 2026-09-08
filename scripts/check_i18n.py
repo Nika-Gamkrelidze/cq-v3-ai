@@ -1,34 +1,42 @@
 #!/usr/bin/env python3
 """i18n parity lint for the frontend's dictionaries.
 
-WHY this exists: every user-facing string in the UIs comes from the `DICT` object in
-`frontend/public/brand.js` — plus, since the call workbench, the module-local blocks each
-feature file registers with `CQ.extendDict({...})` — and all of it carries `en` / `ka` / `ru`
-side by side, edited BY HAND. `CQ.t()` silently falls back to English when a key is missing,
-so a half-translated feature looks fine to the developer (who runs the UI in English) and
-ships English text into a Georgian tenant's console. There is no build step and no framework
-to catch it. This script is the lint.
+WHY this exists: every user-facing string in the UI carries `en` / `ka` / `ru` side by side,
+edited BY HAND. `t()` silently falls back to English when a key is missing, so a
+half-translated feature looks fine to the developer (who runs the UI in English) and ships
+English text into a Georgian tenant's console. `tsc` cannot see it — the dictionaries are
+`Record<string, string>` and a missing key is a valid object. This script is the lint.
 
-It scans `brand.js`'s `const DICT = {` literal and EVERY `CQ.extendDict({` literal in every
-`frontend/public/*.js` file, then fails (exit 1) on:
-  * a key present in one language and missing from another (across all sources);
-  * a key defined twice inside one language, in the same file or across files (the later
-    registration silently wins, so the first translation is dead code and the two drift apart).
+The subject is now the MIGRATED stack: `frontend/next/lib/i18n/**`, one module per owner
+(`chrome.ts`, `features/*.ts`, `pages/*.ts`), each declaring `const en|ka|ru: Dict = { … }`.
+It fails (exit 1) on:
+  * a key present in one language and missing from another, across every module;
+  * a key claimed by two modules — one owner per key. The page ports ran in parallel and this
+    is the only automatic check that two of them did not write the same string twice; which
+    wording survives the merge in `lib/i18n/index.ts` otherwise depends on import order.
+  * the two failures specific to the split, in `audit_migrated_modules`: a module whose
+    language blocks this script cannot parse, and a module not wired into `lib/i18n/index.ts`.
+    Both are ways for a module to be linted green while contributing nothing at runtime — see
+    that function for why each is fatal rather than a warning.
 
-The migrated stack's dictionaries (`frontend/next/lib/i18n/**`) are read too, both for parity
-across the two stacks and to enforce that exactly one migrated module owns each key — the page
-ports run in parallel and that is the only automatic check that two of them have not written
-the same string twice. Two further failures are specific to the split and are checked in
-`audit_migrated_modules`: a module whose language blocks this script cannot parse, and a module
-that is not wired into `lib/i18n/index.ts`. Both are ways for a module to be linted green while
-contributing nothing at runtime — see that function for why each is fatal rather than a warning.
+THE LEGACY STACK IS GONE. `frontend/public/brand.js`, its `const DICT = {` literal and the
+`CQ.extendDict({…})` blocks the feature files registered were deleted at cutover
+(docs/MIGRATION.md). The parsers for them are still here and still run, because that is what
+gives the "shared between the stacks" count below its meaning: it read 3258 while the port was
+in flight, it reads 0 now, and it would read non-zero again the moment a vanilla page came
+back — which is the regression this script is now positioned to catch. Their absence is the
+expected state and is REPORTED as such, never treated as an error and never passed over in
+silence.
 
 Values are compared too, but only for keys that exist in BOTH stacks, and only as a `DRIFT`
-report — never a failure. Divergent wording between `brand.js` and a migrated module is
-sometimes the point (the port is allowed to improve a string); silently divergent wording is
-not, because the user sees a different label depending on which stack served the page.
+report — never a failure. Divergent wording between a legacy copy and a migrated module was
+sometimes the point (the port was allowed to improve a string); silently divergent wording was
+not, because the user saw a different label depending on which stack served the page. With one
+stack left this is dormant, not dead — see the note above.
 
-Usage:  python3 scripts/check_i18n.py [path/to/frontend/public]     (a brand.js path also works)
+Usage:  python3 scripts/check_i18n.py [path/to/frontend/public]
+        (the argument names the LEGACY docroot, which need not exist any more; `frontend/next`
+        is located as its sibling, so the default finds the dictionaries either way.)
 
 Implementation note: the sources are not JSON — values contain apostrophes, braces and colons —
 so this walks each literal as a character stream tracking string state and brace depth, rather
@@ -177,34 +185,58 @@ def migrated_modules(nxt: Path) -> list[Path]:
                   if p.is_file())
 
 
-def collect(public_dir: Path) -> dict[str, list[tuple[str, str, str]]]:
-    """{lang: [(key, value, source label), ...]} across brand.js, the extension blocks and the
-    migrated modules."""
+def collect(public_dir: Path) -> tuple[dict[str, list[tuple[str, str, str]]], dict[str, int]]:
+    """`({lang: [(key, value, source label), ...]}, {"legacy": n, "migrated": m})`.
+
+    The counts are returned rather than recomputed by the caller: the legacy total is not
+    cosmetic, it is what tells `main()` whether a legacy stack exists at all — and therefore
+    whether a shared-key count of zero means "the cutover is done" or "there is nothing left to
+    compare, and this script has quietly stopped checking". Those two readings look identical
+    from the outside, which is exactly why the number is carried out of here instead of being
+    inferred from an empty result.
+
+    A MISSING `brand.js` IS NOT AN ERROR. It was deleted at cutover along with the .html pages
+    (docs/MIGRATION.md), so refusing to run without it would mean this lint died on the commit
+    that finished the migration it exists to police. It is still parsed when present, for the
+    reason in the module docstring: a legacy dictionary reappearing is a regression, and the
+    only way to notice is to keep looking.
+    """
     found: dict[str, list[tuple[str, str, str]]] = {}
+    sources = {"legacy": 0, "migrated": 0}
 
     def add(label: str, blocks: dict[str, list[tuple[str, str]]]) -> None:
         for lang, pairs in blocks.items():
             found.setdefault(lang, []).extend((k, v, label) for k, v in pairs)
 
     brand = public_dir / "brand.js"
-    if not brand.exists():
-        raise SystemExit(f"check_i18n: no brand.js in {public_dir}")
-    add("brand.js DICT", parse_dict(brand.read_text(encoding="utf-8")))
+    if brand.is_file():
+        add("brand.js DICT", parse_dict(brand.read_text(encoding="utf-8")))
+        sources["legacy"] += 1
+    # Independent of brand.js: a feature file could keep an extendDict block after the main
+    # DICT is gone, and it would still be merged into one runtime object with everything else.
+    # `glob` on a directory that no longer exists yields nothing, so the docroot itself being
+    # deleted is handled here too, not by a guard that would have to be kept in step.
     for js in sorted(public_dir.glob("*.js")):
         for n, block in enumerate(parse_extensions(js.read_text(encoding="utf-8"))):
             add(f"{js.name} extendDict#{n + 1}", block)
+            sources["legacy"] += 1
 
     # The migrated frontend keeps its strings in TypeScript as `const en: Dict = { ... }` per
     # language, split one module per OWNER — lib/i18n/chrome.ts, lib/i18n/features/*.ts,
     # lib/i18n/pages/*.ts — so that page ports running in parallel do not all edit one file.
     # Every one of them is read, because two things have to be checked across the whole set:
-    # parity (a key that moved to the new stack in English but not in Georgian is exactly the
+    # parity (a key that reached the new stack in English but not in Georgian is exactly the
     # half-translated feature this lint exists to catch) and ownership (below).
     nxt = public_dir.parent / "next"
     for ts in migrated_modules(nxt):
-        add("next:" + ts.relative_to(nxt).as_posix(),
-            parse_ts_dicts(ts.read_text(encoding="utf-8")))
-    return found
+        blocks = parse_ts_dicts(ts.read_text(encoding="utf-8"))
+        # index.ts and the i18n.ts shim hold no strings and parse to {}; not counting them
+        # keeps this a count of DICTIONARIES. `audit_migrated_modules` is what decides whether
+        # an empty parse is legitimate or a module that broke the required spelling.
+        if blocks:
+            sources["migrated"] += 1
+        add("next:" + ts.relative_to(nxt).as_posix(), blocks)
+    return found, sources
 
 
 def audit_migrated_modules(nxt: Path) -> list[str]:
@@ -430,17 +462,24 @@ def main(argv: list[str]) -> int:
 
     arg = Path(argv[1]) if len(argv) > 1 else DEFAULT_DIR
     public_dir = arg.parent if arg.is_file() else arg
-    if not public_dir.is_dir():
-        print(f"check_i18n: no such directory: {public_dir}", file=sys.stderr)
+    # The gate is the MIGRATED tree, not the legacy docroot. `frontend/public` may legitimately
+    # be gone (or be reduced to static assets, as it is now) — `frontend/next` may not, and it
+    # is where every string lives. Checking it here also catches a mistyped argument, since a
+    # bogus path has no `next` sibling either; checking `public_dir` as well would only trade
+    # that message for a worse one on the day someone deletes the empty docroot.
+    nxt = public_dir.parent / "next"
+    if not nxt.is_dir():
+        print(f"check_i18n: no migrated dictionaries at {nxt} — expected a `next` directory "
+              f"beside {public_dir.name}; is {public_dir} the frontend docroot?", file=sys.stderr)
         return 2
 
-    langs = collect(public_dir)
+    langs, sources = collect(public_dir)
     if len(langs) < 2:
         print(f"check_i18n: expected at least two language blocks, found {list(langs)}", file=sys.stderr)
         return 2
 
     failures = 0
-    for problem in audit_migrated_modules(public_dir.parent / "next"):
+    for problem in audit_migrated_modules(nxt):
         print(problem)
         failures += 1
 
@@ -452,11 +491,12 @@ def main(argv: list[str]) -> int:
     #   * both in the legacy stack — a real fault. brand.js's DICT and every extendDict block
     #     are merged into one object at runtime, so the later registration silently wins and
     #     the first translation is dead code that drifts.
-    #   * one legacy, one migrated — expected while the migration is in flight. The two
-    #     stacks never load together (a page is served by one or the other), so neither can
-    #     shadow the other; the shared chrome, the header above all, has to exist in both
-    #     until the last .html page is gone. Reported, not failed — but it IS drift bait, so
-    #     it stays visible and the list should shrink, never grow.
+    #   * one legacy, one migrated — the migration-in-flight case, and DORMANT since the
+    #     cutover: with no legacy source in the tree this branch cannot be reached. It was
+    #     never a failure, because the two stacks never loaded together (a page was served by
+    #     one or the other) so neither could shadow the other, and the shared chrome had to
+    #     exist in both until the last .html page went. It stays because reaching it again
+    #     means a vanilla page came back, and the count it feeds is what says so out loud.
     #   * both migrated — a real fault, and the reason the dictionary is split by owner. Two
     #     page modules claiming one key means two people wrote that string, only one wording
     #     survives the merge in lib/i18n/index.ts, and which one depends on import order.
@@ -511,17 +551,30 @@ def main(argv: list[str]) -> int:
             failures += 1
 
     counts = ", ".join(f"{lang}={len(ks)}" for lang, ks in sets.items())
-    sources = 1 + sum(1 for js in public_dir.glob("*.js")
-                      for _ in parse_extensions(js.read_text(encoding="utf-8")))
+    blocks = f"{sources['legacy']} legacy + {sources['migrated']} migrated source block(s)"
     if failures:
-        print(f"check_i18n: FAILED — {failures} problem(s) ({counts}; {sources} source block(s)).")
+        print(f"check_i18n: FAILED — {failures} problem(s) ({counts}; {blocks}).")
         return 1
-    if shared:
+
+    # The migration's own definition of done, printed in BOTH states on purpose.
+    #
+    # While the two stacks coexisted this counted the key definitions that had to be kept in
+    # step by hand — 3258 of them at the peak. Zero is the finish line, and it is worth a line
+    # of output precisely because a silent zero is ambiguous: "the legacy dictionary is gone"
+    # and "collect() stopped finding it" produce the same empty result, and the second is what
+    # a botched edit to this file looks like. So the message is chosen off the SOURCE COUNT,
+    # which distinguishes them, and never off `shared` being falsy.
+    if sources["legacy"]:
         drift_note = f", {drifted} of them worded differently (DRIFT above)" if drifted else ""
         print(f"check_i18n: {shared} key definition(s) shared between the legacy and migrated "
-              f"stacks{drift_note} (expected during the migration — keep them in step).")
+              f"stacks{drift_note} — {sources['legacy']} legacy source block(s) still in "
+              f"{public_dir}; keep the two copies in step.")
+    else:
+        print("check_i18n: 0 shared with the legacy stack — no legacy dictionary left in "
+              f"{public_dir} (cutover complete). A non-zero count here would mean one came back.")
+
     print(f"check_i18n: OK — {len(union)} keys × {len(sets)} languages in sync ({counts}; "
-          f"{sources} source block(s)).")
+          f"{blocks}).")
     return 0
 
 

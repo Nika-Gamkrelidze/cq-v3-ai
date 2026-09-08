@@ -1,12 +1,14 @@
 # Frontend migration: vanilla JS → Next.js
 
-Live working document for the port. It exists because the migration is large enough that the
-reasoning cannot live in commit messages alone: ~12,400 lines of legacy frontend across six
-pages and four shared modules, calling **155 backend routes**.
+The record of the port, kept after it finished. It exists because the migration was large
+enough that the reasoning could not live in commit messages alone: ~12,400 lines of legacy
+frontend across six pages and six shared modules, calling **155 backend routes**. The legacy
+stack is deleted; what survives here is why the new one is shaped the way it is, which is
+still the first thing to read before changing any of these pages.
 
 ## Status
 
-| Page | Legacy | New route | State |
+| Page | Legacy | Route | State |
 |---|---|---|---|
 | AI usage | *(new)* | `/usage` | ✅ ported |
 | AI setup | *(new)* | `/ai-config` | ✅ ported |
@@ -15,37 +17,65 @@ pages and four shared modules, calling **155 backend routes**.
 | Account | `account.html` | `/account` | ✅ ported |
 | Console | `admin.html` | `/console` | ✅ ported |
 | Workspace | `tenant.html` | `/workspace` | ✅ ported |
-| Copilot demo | `copilot-demo.html` | `/copilot` | ✅ ported (nothing links to it) |
+| Copilot demo | `copilot-demo.html` | `/copilot` | ✅ ported |
 
-**Every page is ported. The legacy files are still in the tree on purpose** — see "Cutover"
-below. Both navs now point at the clean routes, so the ported pages are what a user reaches;
-`tenant.html` and `admin.html` remain reachable by typing the URL, as a fallback until the
-ports have been used in anger.
+**The migration is finished.** Every page is ported, deployed, and the legacy stack has been
+deleted. What follows is the record of how it was done and why the result looks the way it
+does — the two lists below are the load-bearing part, and they are why this file is kept.
 
-## Cutover — the state we are in, and what is left
+## Cutover — done
 
-The image copies `frontend/public/` first and the Next export **on top**, so a ported route
-wins over a same-named legacy file. That means:
+The vanilla stack is gone from the tree. Three things happened, in one commit:
 
-| URL | Serves |
+**1. The files were deleted.** Six pages (`index`, `tenant`, `admin`, `account`, `editor`,
+`copilot-demo`, plus the `kb-admin` redirect stub) and the six shared modules — `brand.js`
+(2018 lines), `brand.css`, `workbench.js` (1235), `timeline.js` (1032), `audio-edit-core.js` +
+`audio-editor.js` (856). ~12,400 lines.
+
+`frontend/public/` still exists and is still copied into the image, because it is now
+**static assets only**: `favicon.png`, the two logos, `guides/` (the KB import templates the
+workspace links by absolute path, and the operator/tenant guide docs) and `guides.zip`. None
+of it is emitted by `next build`, and none of it can collide with the export any more — so
+the copy order in `frontend/Dockerfile`, which used to decide which stack won a filename,
+now decides nothing.
+
+**2. The retired URLs became 301s**, in BOTH `deploy/nginx.conf` and `deploy/tls-ssl.conf`:
+
+| Old URL | → |
 |---|---|
-| `/`, `/account`, `/editor` (and their `.html` twins) | the PORT — the legacy file is overwritten in the image |
-| `/workspace`, `/console`, `/copilot` | the PORT |
-| `/tenant.html`, `/admin.html`, `/copilot-demo.html`, `/kb-admin.html` | still the LEGACY page |
+| `/tenant.html` | `/workspace` |
+| `/admin.html` | `/console` |
+| `/kb-admin.html` | `/workspace` |
+| `/copilot-demo.html` | `/copilot` |
 
-Remaining, deliberately not done yet:
-1. Delete the legacy pages and the four shared modules (`brand.js`, `brand.css`,
-   `workbench.js`, `timeline.js`, `audio-edit-core.js`, `audio-editor.js`). One reversible
-   commit, once the ports have been exercised.
-2. Add `301`s for the old URLs (`tenant.html` → `/workspace`, `admin.html` → `/console`,
-   `copilot-demo.html` → `/copilot`, `kb-admin.html` → `/workspace`) in BOTH
-   `deploy/nginx.conf` and `deploy/tls-ssl.conf` — a redirect in only one of them is not
-   deployed. Holding these back is what keeps the fallback reachable.
-3. Delete the `DICT` from `brand.js`; `check_i18n.py`'s "shared between the stacks" count then
-   falls to zero, which is the migration's own definition of done.
+Three details in those blocks are deliberate and easy to undo by accident:
 
-Shared modules: `brand.js` (2018), `workbench.js` (1235), `timeline.js` (1032),
-`audio-edit-core.js` + `audio-editor.js` (856).
+- **Both files, always.** They are separate `server` blocks — 80 and 443 — and production
+  serves 443. A redirect added to `nginx.conf` alone is written, committed, deployed and
+  never executed.
+- **`location =`, not a prefix.** Exact matches are resolved before the
+  `~* \.(html|css|js)$` regex block, which ends in `try_files $uri =404`. A prefix location
+  would lose to the regex and the old URL would 404 instead of redirecting.
+- **`$is_args$args`.** Unlike `rewrite`, `return 301 <uri>` does **not** carry the query
+  string. The console's sign-in link is literally `/tenant.html?next=/console`
+  (`app/console/api.ts`), and `/workspace` reads `?next=` to decide where to send an operator
+  after login — so dropping it would sign them in and strand them in the workspace.
+
+`index.html`, `account.html` and `editor.html` need no redirect: the export owns those three
+filenames (`trailingSlash: false` emits one flat `.html` per route), so those URLs already
+serve the ported page.
+
+**3. `scripts/check_i18n.py` reports the finish line instead of dying at it.** Its
+"shared between the stacks" count was the migration's own definition of done: it counted the
+key definitions that had to be kept in step by hand, peaked at 3258, and reads **0** now.
+The script no longer requires `brand.js` to exist — but it still *looks* for it, and still
+parses a legacy dictionary if it finds one. That is the point: zero is only meaningful while
+something is still counting. A vanilla page reappearing puts the number back above zero and
+says so in the output. The migrated stack's own checks (parity, one-owner-per-key,
+unparseable module, unwired module) are untouched.
+
+Frontend routes today, all served from one docroot by `frontend/Dockerfile`:
+`/`, `/account`, `/workspace`, `/console`, `/editor`, `/copilot`, `/usage`, `/ai-config`.
 
 ## The rule the port runs on
 
@@ -59,9 +89,10 @@ resolved by a porter's judgement in the moment.
 
 ## Pre-existing defects found while surveying
 
-These are bugs in the code as it stands today, not port hazards. Each is fixed in the port
-and called out in its commit, so the fix is reviewable as a fix rather than hidden inside a
-2,000-line diff.
+These were bugs in the legacy code, not port hazards. Each is fixed in the port and was
+called out in its own commit, so the fix was reviewable as a fix rather than hidden inside a
+2,000-line diff. Kept because each one describes behaviour the new code deliberately does
+NOT reproduce — read before "restoring" anything to match how the old page behaved.
 
 1. **The editor's "Convert & download" is broken.** `editor.html` does
    `POST /api/convert` (non-stream) then `await r.blob()` and saves it as `<name>-edited.zip`.
@@ -126,6 +157,9 @@ is the kind of thing a rewrite silently "improves" into a regression.
 
 ## Migration-specific hazards
 
+Every one of these was hit and handled; they are listed because each names a trap that is
+still live for anyone touching this code, not a to-do.
+
 - **`authHeaders()` has no act-as-tenant support.** `tenant.html` is two consoles behind one
   URL; porting it onto the existing `apiGet`/`apiSend` would make every operator request run
   unscoped. `lib/session.ts` has to grow this before that page moves.
@@ -154,9 +188,15 @@ is the kind of thing a rewrite silently "improves" into a regression.
 
 ## i18n
 
-~1,000 keys live in one `DICT` in `brand.js`. Ownership is not clean: `cv.`, `tts.`, `sc.`,
-`quota.`, `lang.`, `login.`, `tab.` and `sn.` are each shared by two to four pages, so "a key
-travels with its page" needs a shared tier underneath it. Keys shared with a page that has
-**not** migrated yet must be COPIED, not moved — `scripts/check_i18n.py` reports those as
-shared (it already does this for the 18 nav keys) and the count returns to zero when the last
-page lands.
+~1,000 keys lived in one `DICT` in `brand.js`, and ownership was not clean: `cv.`, `tts.`,
+`sc.`, `quota.`, `lang.`, `login.`, `tab.` and `sn.` were each shared by two to four pages, so
+"a key travels with its page" needed a shared tier underneath it. That tier is
+`lib/i18n/chrome.ts`; the rest is one module per owner under `lib/i18n/features/` and
+`lib/i18n/pages/`, assembled in `lib/i18n/index.ts`.
+
+While both stacks were in the tree a key shared with an unmigrated page had to be COPIED, not
+moved, and `scripts/check_i18n.py` counted those copies — 3258 definitions at the peak. **It
+reads 0.** The script still runs on every change and still enforces the rules that outlived
+the migration: three-language parity, exactly one module owning each key, and the two ways a
+module can be linted green while contributing nothing at runtime (blocks it cannot parse, and
+a module missing from `MODULES`).

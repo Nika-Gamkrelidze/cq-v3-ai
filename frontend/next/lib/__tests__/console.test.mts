@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BOT_SOURCE, RUBRIC_SOURCE, formFromConfig, keyState, killListAfter, killRowState,
-  parseOverrides, payloadFromForm, sourcePill,
+  BOT_SOURCE, RUBRIC_SOURCE, checkKeyterms, defaultsPayload, formFromConfig, formFromDefaults,
+  formatIds, keyState, killListAfter, killRowState, languageCodes, parseKeyterms, parseOverrides,
+  payloadFromForm, sourcePill,
 } from '../../app/console/logic.ts';
 
 /* The operator console's decisions. Every one of these was an inline expression inside a render
@@ -136,6 +137,86 @@ test('payloadFromForm: canned snippets are carried through untouched', () => {
   const cfg = { canned: [{ q: 'hours', a: '9-5' }] };
   assert.deepEqual(payloadFromForm(formFromConfig(cfg), cfg).canned, [{ q: 'hours', a: '9-5' }]);
   assert.deepEqual(payloadFromForm(formFromConfig({}), {}).canned, []);
+});
+
+/* ------------------------------------------------------- the transcription defaults */
+
+test('formFromDefaults: speakers stay separated unless the server literally says otherwise', () => {
+  // Diarization is what splits a call into turns; a field that failed to arrive must not read
+  // as "off" and quietly cost the per-speaker analysis on every future upload.
+  assert.equal(formFromDefaults({}).diarize, true);
+  assert.equal(formFromDefaults(null).diarize, true);
+  assert.equal(formFromDefaults({ diarize: false }).diarize, false);
+  // Not truthiness: only an explicit false turns it off.
+  assert.equal(formFromDefaults({ diarize: 0 }).diarize, true);
+});
+
+test('formFromDefaults: an absent format reads as today\'s conversion, not as an opinion', () => {
+  assert.equal(formFromDefaults({}).format, 'mp3_16k');
+  assert.equal(formFromDefaults({ audio_format: '' }).format, 'mp3_16k');
+  assert.equal(formFromDefaults({ audio_format: 'flac_16k' }).format, 'flac_16k');
+});
+
+test('formFromDefaults: detect-automatically is an empty box, and key terms are one per line', () => {
+  const f = formFromDefaults({ language_code: null, keyterms: ['თვემდე', 'ფრანშიზა'] });
+  assert.equal(f.language, '');
+  assert.equal(f.keyterms, 'თვემდე\nფრანშიზა');
+  // A keyterms field that is not a list at all must not crash the card.
+  assert.equal(formFromDefaults({ keyterms: 'nope' }).keyterms, '');
+});
+
+test('parseKeyterms: lines only — a comma inside a term is part of the term', () => {
+  assert.deepEqual(parseKeyterms('  a \n\n b  \n'), ['a', 'b']);
+  assert.deepEqual(parseKeyterms(''), []);
+  assert.deepEqual(parseKeyterms('Smith, Jones'), ['Smith, Jones']);
+});
+
+test('checkKeyterms: the first offending term is named, and nothing else is', () => {
+  assert.equal(checkKeyterms(['fine', 'also fine']), null);
+  // Characters the API rejects outright.
+  assert.deepEqual(checkKeyterms(['ok', 'a<b', 'c{d']), { key: 'tr.keyterms.badchars', vars: { term: 'a<b' } });
+  assert.deepEqual(checkKeyterms(['a\\b']), { key: 'tr.keyterms.badchars', vars: { term: 'a\\b' } });
+  // Five words is allowed, six is not.
+  assert.equal(checkKeyterms(['one two three four five']), null);
+  assert.deepEqual(checkKeyterms(['one two three four five six']),
+    { key: 'tr.keyterms.toolong', vars: { term: 'one two three four five six' } });
+  // 50 characters is the documented ceiling, so it passes; 51 does not.
+  assert.equal(checkKeyterms(['x'.repeat(50)]), null);
+  assert.equal(checkKeyterms(['x'.repeat(51)])?.key, 'tr.keyterms.toolong');
+});
+
+test('checkKeyterms: too many terms is reported through the counter, with both numbers', () => {
+  assert.equal(checkKeyterms(Array(1000).fill('x')), null);
+  assert.deepEqual(checkKeyterms(Array(1001).fill('x')),
+    { key: 'tr.keyterms.count', vars: { n: 1001, max: 1000 } });
+});
+
+test('defaultsPayload: an empty language is null, never an empty string', () => {
+  // '' is not a language code; the field is absent-means-detect, and the two must not be
+  // conflated when the server layers this default under a workspace override.
+  assert.deepEqual(
+    defaultsPayload({ language: '  ', diarize: true, keyterms: ' ka \n\n', format: 'flac_16k' }),
+    { language_code: null, diarize: true, keyterms: ['ka'], audio_format: 'flac_16k' },
+  );
+  assert.equal(defaultsPayload({ language: 'ka', diarize: false, keyterms: '', format: 'original' }).language_code, 'ka');
+});
+
+test('languageCodes: detect first, and a stored code the catalogue does not list survives', () => {
+  const rows = [{ code: 'en' }, { code: 'ka' }, { code: 'ru' }];
+  assert.deepEqual(languageCodes(rows, ''), ['', 'en', 'ka', 'ru']);
+  assert.deepEqual(languageCodes(rows, 'ka'), ['', 'en', 'ka', 'ru']);
+  // Speech-to-text accepts far more languages than the TTS catalogue lists: an operator who set
+  // `pl` through the API must not open a picker that reads "detect" and save that over it.
+  assert.deepEqual(languageCodes(rows, 'pl'), ['', 'en', 'ka', 'ru', 'pl']);
+  assert.deepEqual(languageCodes([], 'pl'), ['', 'pl']);
+});
+
+test('formatIds: the five known ids, plus an unknown stored one shown first', () => {
+  assert.deepEqual(formatIds('flac_16k'),
+    ['original', 'flac_full', 'flac_16k', 'wav_16k', 'mp3_16k']);
+  assert.equal(formatIds('opus_48k')[0], 'opus_48k');
+  assert.equal(formatIds('opus_48k').length, 6);
+  assert.equal(formatIds('').length, 5);
 });
 
 test('sourcePill: demo and builtin both mean "nothing is saved here yet"', () => {

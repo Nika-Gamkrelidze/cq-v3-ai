@@ -107,3 +107,17 @@
 .curMeta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 11.5px; color: var(--muted); }
 .selbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; }
 .curReason { display: flex; align-items: center; gap: 8px; padding: 7px 2px; cursor: pointer; }
+
+/* ---- Transcription: inherited (or read-only) settings ----
+   The controls are rendered disabled rather than replaced by text, so the workspace sees the
+   real four values in the real four controls and taking the override changes nothing but
+   whether they answer. `input:disabled` has no styling in globals.css — these inputs carry a
+   custom background and colour, so a disabled one is pixel-identical to a live one — and a
+   card that looks typeable but silently swallows every keystroke is worse than a read-only
+   card that says so. (The <Select> disables itself properly; only the native controls need
+   this.) */
+.reading input:disabled,
+.reading textarea:disabled {
+  opacity: .62;
+  cursor: default;
+}

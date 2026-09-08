@@ -15,6 +15,7 @@ from ..config import settings
 from ..db import pool
 from ..services import (ai_config, chat_credentials, chat_store, claude, elevenlabs, limits,
                         settings_store, usage)
+from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -111,20 +112,30 @@ async def _probe_voices(cfg: dict) -> dict:
 async def _probe_stt(cfg: dict) -> dict:
     """Real POST /v1/speech-to-text on 0.4 s of generated silence. Costs a fraction of a
     second of Scribe and is the ONLY proof of the speech_to_text permission. It also
-    exercises ffmpeg, the multipart shape and the configured stt_model in one call."""
+    exercises ffmpeg, the multipart shape and the configured stt_model in one call.
+
+    It runs with the DEPLOYMENT'S transcription defaults (language, diarize, keyterms and —
+    the reason this matters — the audio format), so this one button also answers "does
+    ElevenLabs actually accept the encoding we are about to send every customer's call in".
+    That is the check that has to pass before the default is moved off lossy MP3.
+    """
+    stt = await transcription_svc.get_default(force=True)
     try:
         out = await elevenlabs.transcribe(
             elevenlabs.silence_wav(), "probe.wav", "audio/wav",
-            cfg["elevenlabs_api_key"], cfg["stt_model"], timeout=60.0)
+            cfg["elevenlabs_api_key"], cfg["stt_model"], timeout=60.0,
+            **transcription_svc.as_kwargs(stt))
     except elevenlabs.ElevenLabsError as exc:
         # A 400/422 that is NOT auth/permission/credit means the request was authorised and
-        # only the synthetic clip was rejected — don't cry wolf about a working capability.
+        # only the payload was rejected — don't cry wolf about a working capability, but DO
+        # name the format, because that is the most likely thing to have been refused.
         if exc.code == "http" and exc.status in (400, 422):
-            return {"level": "warn", "code": "probe_rejected", "detail": str(exc)}
+            return {"level": "warn", "code": "probe_rejected",
+                    "detail": f"audio_format={stt['audio_format']}: {exc}"}
         raise
     return {"level": "ok",
-            "detail": f"model {cfg['stt_model']} accepted a 0.4 s probe clip "
-                      f"(lang={out.get('language_code') or 'n/a'})"}
+            "detail": f"model {cfg['stt_model']} accepted a 0.4 s probe clip as "
+                      f"{stt['audio_format']} (lang={out.get('language_code') or 'n/a'})"}
 
 
 async def _probe_tts(cfg: dict) -> dict:

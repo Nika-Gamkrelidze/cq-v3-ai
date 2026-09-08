@@ -21,13 +21,14 @@ import logging
 import time
 import uuid
 
-from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request,
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query, Request,
                      UploadFile)
 from pydantic import BaseModel
 
 from ..db import pool
 from ..services import (analysis, factcheck, kb_ingest, scoring, scoring_import,
                         scoring_store, settings_store)
+from ..services import transcription as transcription_svc
 from ..services.auth import (Principal, client_ip, resolve_principal,
                              verify_password)
 from .chat import _sse, _sse_response
@@ -329,6 +330,7 @@ MAX_ANALYZE_BYTES = 100 * 1024 * 1024  # matches routers/analyze.py's own limit
 
 @router.post("/admin/analyze/{tenant_id}")
 async def admin_analyze_audio(request: Request, file: UploadFile = File(...),
+                              transcription: str | None = Form(default=None),
                               tid: str = Depends(_scope)):
     """KB-admin Playground's audio mode: the full pipeline (transcribe -> analysis -> KB
     fact-check -> rubric scoring), run against a tenant the superadmin chose, exactly as if
@@ -338,6 +340,10 @@ async def admin_analyze_audio(request: Request, file: UploadFile = File(...),
     principal, and a superadmin has no client_id — there is nothing for it to run against.
     This one takes the tenant explicitly, gated the same way every other /admin/*/{tenant_id}
     route in this file is."""
+    # The chosen tenant's own transcription settings — the playground reproduces what that
+    # workspace would get, not what the operator's default would give some other tenant.
+    stt_settings = await transcription_svc.resolve(
+        tid, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -349,7 +355,7 @@ async def admin_analyze_audio(request: Request, file: UploadFile = File(...),
         client_id=tid, principal_kind="tenant", anon_key=None,
         status="transcribing", client_ip=client_ip(request), audio=audio)
     result = await analysis.run_pipeline(
-        job_id, audio, file.filename, file.content_type, tid, True)
+        job_id, audio, file.filename, file.content_type, tid, True, stt_settings)
     if result.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.get("error") or "Analysis failed")
     return result

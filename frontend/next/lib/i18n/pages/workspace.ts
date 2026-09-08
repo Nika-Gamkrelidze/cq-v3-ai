@@ -5,6 +5,11 @@
    modules it shares with other surfaces — the KB (features/kb.ts), the bot (features/bot.ts),
    the review queue (features/curation.ts), scoring, the workbench and the timeline.
 
+   `tn.tr.*` is the exception that proves it: the transcription settings vocabulary is shared
+   (features/transcription.ts, `tr.*`, rendered identically by the console, this tab and the
+   upload panel), but the two sentences below are about THIS surface only — who may edit a
+   workspace's settings, and what dropping its override costs. Neither belongs on the other two.
+
    `con.*` is the act-as-tenant picker: one page, two consoles behind one URL, so the picker
    only appears for a superadmin scoping into a workspace. `con.tenant.pick` is what a
    customer never sees and an operator sees before choosing. */
@@ -56,6 +61,9 @@ export const en: Dict = {
   'tn.sc.reset.bad': 'That password does not match.',
   'tn.sc.reset.done': 'The rubric was reset to the default.',
   'tn.sc.isdefault': 'You are looking at the shared default rubric — this workspace has none of its own yet. Saving creates your own copy, which later changes to the default will not touch.',
+
+  'tn.tr.readonly': 'View only — only workspace owners can change the transcription settings.',
+  'tn.tr.reset.confirm': 'Drop this workspace’s own transcription settings and go back to the inherited ones? Its key terms are discarded.',
 };
 
 export const ka: Dict = {
@@ -103,6 +111,9 @@ export const ka: Dict = {
   'tn.sc.reset.bad': 'პაროლი არ ემთხვევა.',
   'tn.sc.reset.done': 'რუბრიკა დაბრუნდა ნაგულისხმევზე.',
   'tn.sc.isdefault': 'ხედავთ საერთო ნაგულისხმევ რუბრიკას — ამ სამუშაო სივრცეს ჯერ საკუთარი არ აქვს. შენახვისას შეიქმნება თქვენი ასლი, რომელსაც ნაგულისხმევის შემდგომი ცვლილებები აღარ შეეხება.',
+
+  'tn.tr.readonly': 'მხოლოდ სანახავად — ტრანსკრიფციის პარამეტრების შეცვლა მხოლოდ სამუშაო სივრცის მფლობელს შეუძლია.',
+  'tn.tr.reset.confirm': 'წაიშალოს ამ სამუშაო სივრცის საკუთარი ტრანსკრიფციის პარამეტრები და დაბრუნდეს მემკვიდრეობითზე? მისი საკვანძო სიტყვები დაიკარგება.',
 };
 
 export const ru: Dict = {
@@ -150,4 +161,7 @@ export const ru: Dict = {
   'tn.sc.reset.bad': 'Пароль не совпадает.',
   'tn.sc.reset.done': 'Рубрика сброшена к значению по умолчанию.',
   'tn.sc.isdefault': 'Перед вами общая рубрика по умолчанию — у этого рабочего пространства пока нет своей. При сохранении будет создана ваша копия, и дальнейшие изменения умолчания её не затронут.',
+
+  'tn.tr.readonly': 'Только просмотр — изменять настройки транскрипции может только владелец рабочего пространства.',
+  'tn.tr.reset.confirm': 'Удалить собственные настройки транскрипции этого рабочего пространства и вернуться к унаследованным? Его ключевые термины будут потеряны.',
 };

@@ -36,6 +36,7 @@ import { HealthTab } from './HealthTab';
 import { HistoryTab } from './HistoryTab';
 import { KbTab } from './KbTab';
 import { RubricTab } from './RubricTab';
+import { TranscriptionTab } from './TranscriptionTab';
 
 interface TenantRow { id: string; name: string }
 interface LoginReply {
@@ -66,6 +67,12 @@ const TABS: { key: TabName; icon: string; label: string }[] = [
   { key: 'kb', icon: '📚', label: 'tab.kb' },
   { key: 'analyze', icon: '🎧', label: 'tab.analyze' },
   { key: 'rubric', icon: '🎯', label: 'tab.scoring' },
+  /* Its own tab, beside the rubric and the bot, because it is the same KIND of thing: a
+     per-workspace AI setting with an inherited default. It sits before them deliberately —
+     transcription is upstream of everything else here, and a rubric scored off a misheard word
+     is a compliance verdict made of a typo. `tr.heading` is the shared feature string the
+     console and the upload panel also use, so the three surfaces are named alike. */
+  { key: 'transcription', icon: '🎙', label: 'tr.heading' },
   { key: 'health', icon: '🩺', label: 'cur.tab' },
   { key: 'bot', icon: '🤖', label: 'tab.bot' },
   { key: 'history', icon: '🗂', label: 'tab.history' },
@@ -365,6 +372,7 @@ export default function WorkspacePage() {
           <section className={`panel${tab === 'kb' ? ' active' : ''}`}><KbTab on={tab === 'kb'} gen={genState} /></section>
           <section className={`panel${tab === 'analyze' ? ' active' : ''}`}><AnalyseTab wbRef={wbRef} /></section>
           <section className={`panel${tab === 'rubric' ? ' active' : ''}`}><RubricTab on={tab === 'rubric'} gen={genState} /></section>
+          <section className={`panel${tab === 'transcription' ? ' active' : ''}`}><TranscriptionTab on={tab === 'transcription'} gen={genState} /></section>
           <section className={`panel${tab === 'health' ? ' active' : ''}`}><HealthTab on={tab === 'health'} gen={genState} /></section>
           <section className={`panel${tab === 'bot' ? ' active' : ''}`}><BotTab on={tab === 'bot'} gen={genState} /></section>
           <section className={`panel${tab === 'history' ? ' active' : ''}`}><HistoryTab on={tab === 'history'} gen={genState} /></section>

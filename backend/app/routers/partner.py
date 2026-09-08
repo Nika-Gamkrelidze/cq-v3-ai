@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from ..db import pool
 from ..services import analysis, elevenlabs, scoring, scoring_store, settings_store
+from ..services import transcription as transcription_svc
 from ..services.auth import Principal, resolve_principal
 
 router = APIRouter(prefix="/v1", tags=["partner"])
@@ -95,9 +96,16 @@ async def account(p: Principal = Depends(require_tenant)):
 # Standalone STT
 # --------------------------------------------------------------------------- #
 @router.post("/transcriptions")
-async def transcribe(file: UploadFile = File(...), p: Principal = Depends(require_tenant)):
-    """Transcribe audio (ElevenLabs Scribe, diarized) without running analysis/scoring.
-    Returns the transcript, detected language, and per-word timings."""
+async def transcribe(file: UploadFile = File(...),
+                     transcription: str | None = Form(default=None),
+                     p: Principal = Depends(require_tenant)):
+    """Transcribe audio (ElevenLabs Scribe) without running analysis/scoring.
+    Returns the transcript, detected language, and per-word timings.
+
+    `transcription` is an optional JSON object (form field) overriding this workspace's
+    transcription settings for this file only — see GET /transcription/config."""
+    stt_settings = await transcription_svc.resolve(
+        p.client_id, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -106,7 +114,8 @@ async def transcribe(file: UploadFile = File(...), p: Principal = Depends(requir
     cfg = await settings_store.get_effective()
     try:
         stt = await elevenlabs.transcribe(
-            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"])
+            audio, file.filename, file.content_type, cfg["elevenlabs_api_key"], cfg["stt_model"],
+            **transcription_svc.as_kwargs(stt_settings))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
     return {"filename": file.filename, "language": stt.get("language_code"),
@@ -126,9 +135,13 @@ async def _existing_by_ref(cid: str, external_ref: str | None):
 
 
 @router.post("/analyze")
-async def analyze_sync(file: UploadFile = File(...), p: Principal = Depends(require_tenant)):
+async def analyze_sync(file: UploadFile = File(...),
+                       transcription: str | None = Form(default=None),
+                       p: Principal = Depends(require_tenant)):
     """Synchronous single-audio correctness check (transcript + analysis + KB fact-check +
     rubric score). Blocks ~30s; use /v1/analyses for many files."""
+    stt_settings = await transcription_svc.resolve(
+        p.client_id, transcription_svc.parse_override(transcription))
     audio = await file.read()
     if not audio:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -141,7 +154,7 @@ async def analyze_sync(file: UploadFile = File(...), p: Principal = Depends(requ
         client_id=p.client_id, principal_kind=p.kind, anon_key=None, status="transcribing",
         audio=audio)
     result = await analysis.run_pipeline(
-        job_id, audio, file.filename, file.content_type, p.client_id, True)
+        job_id, audio, file.filename, file.content_type, p.client_id, True, stt_settings)
     if result.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.get("error") or "Analysis failed")
     return result
@@ -150,11 +163,17 @@ async def analyze_sync(file: UploadFile = File(...), p: Principal = Depends(requ
 @router.post("/analyses", status_code=202)
 async def analyze_async(bg: BackgroundTasks, file: UploadFile = File(...),
                         external_ref: str | None = Form(None),
+                        transcription: str | None = Form(default=None),
                         idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
                         p: Principal = Depends(require_tenant)):
     """Submit one audio for async analysis. Returns 202 immediately; poll GET /v1/jobs/{id}.
     An `external_ref` (or Idempotency-Key header) makes retries safe — a repeat returns the
     same job instead of re-running (and re-billing)."""
+    # Resolved at SUBMIT time and carried into the background task: a job is transcribed with
+    # the settings that were in force when it was accepted, not with whatever the operator
+    # saved while it waited in the queue.
+    stt_settings = await transcription_svc.resolve(
+        p.client_id, transcription_svc.parse_override(transcription))
     ref = (external_ref or idempotency_key or None)
     existing = await _existing_by_ref(p.client_id, ref)
     if existing and existing["status"] != "error":
@@ -174,13 +193,14 @@ async def analyze_async(bg: BackgroundTasks, file: UploadFile = File(...),
             client_id=p.client_id, principal_kind=p.kind, anon_key=None, external_ref=ref,
             audio=audio)
     bg.add_task(analysis.run_background, job_id, audio, file.filename, file.content_type,
-                p.client_id, True)
+                p.client_id, True, stt_settings)
     return {"id": job_id, "status": "queued", "external_ref": ref}
 
 
 @router.post("/analyses/batch", status_code=202)
 async def analyze_batch(bg: BackgroundTasks, files: list[UploadFile] = File(...),
                         external_refs: list[str] | None = Form(None),
+                        transcription: str | None = Form(default=None),
                         p: Principal = Depends(require_tenant)):
     """Submit up to 50 audios for async correctness checking. Returns 202 with a batch_id +
     one job per file; poll GET /v1/analyses/batch/{batch_id}. Optional `external_refs`
@@ -190,6 +210,11 @@ async def analyze_batch(bg: BackgroundTasks, files: list[UploadFile] = File(...)
     if len(files) > BATCH_MAX_FILES:
         raise HTTPException(status_code=413, detail=f"Batch exceeds {BATCH_MAX_FILES} files")
     refs = external_refs or []
+    # One override for the whole batch — a per-file object would need a second aligned list,
+    # and `external_refs` is already as much positional pairing as this route should ask of a
+    # caller.
+    stt_settings = await transcription_svc.resolve(
+        p.client_id, transcription_svc.parse_override(transcription))
     batch_id = str(uuid.uuid4())
     jobs, tasks = [], []
     for i, file in enumerate(files):
@@ -218,7 +243,8 @@ async def analyze_batch(bg: BackgroundTasks, files: list[UploadFile] = File(...)
         jobs.append({"id": job_id, "external_ref": ref, "status": "queued"})
         tasks.append((job_id, audio, file.filename, file.content_type))
     for job_id, audio, fname, ctype in tasks:
-        bg.add_task(analysis.run_background, job_id, audio, fname, ctype, p.client_id, True)
+        bg.add_task(analysis.run_background, job_id, audio, fname, ctype, p.client_id, True,
+                    stt_settings)
     return {"batch_id": batch_id, "count": len(jobs), "queued": len(tasks), "jobs": jobs}
 
 

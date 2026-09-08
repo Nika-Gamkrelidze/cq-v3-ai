@@ -311,3 +311,147 @@ export function sourcePill(
   const [key, cls] = table[source || ''] || table[fallback];
   return { key, cls };
 }
+
+/* ----------------------------------------------------- the transcription defaults
+
+   The four parameters handed to speech-to-text, as the console edits the DEPLOYMENT default —
+   the bottom layer of `code defaults <- superadmin default <- workspace <- one recording`.
+
+   Nothing here decides what the default IS. The server owns that (and the format default is an
+   evidence question the backend settled against the real API), so every rule below is about not
+   LOSING what the server said: an unknown language code or an unknown format is carried through
+   rather than snapped to something this build happens to know about, because a console one
+   deploy behind must not silently rewrite a newer server's setting on an unrelated save.
+
+   The keyterm rules are the provider's, restated here so the operator learns about a bad term
+   while typing it rather than after a failed save. The SERVER is still the authority — it
+   validates the same four fields in one place — so these checks are deliberately no stricter
+   than the documented limits: a UI that refuses something the API would accept is a bug the
+   operator cannot work around, while the other way round costs one round trip and a message
+   that names the field. */
+
+/** The five ids, in the order the picker offers them: most faithful first, today's behaviour
+    last. Each has `tr.format.<id>` for its name and `tr.format.<id>.desc` for the one-liner. */
+export const AUDIO_FORMATS = ['original', 'flac_full', 'flac_16k', 'wav_16k', 'mp3_16k'] as const;
+export type AudioFormat = (typeof AUDIO_FORMATS)[number];
+
+/** ElevenLabs' documented ceilings: at most 1000 terms, each under 50 characters and at most
+    five words. `<>{}[]` and a backslash are rejected by the API outright. */
+export const KEYTERM_MAX = 1000;
+export const KEYTERM_CHARS = 50;
+export const KEYTERM_WORDS = 5;
+const KEYTERM_BAD = /[<>{}[\]\\]/;
+
+/** The card, as the operator holds it. `language` is '' for "detect automatically" — the same
+    empty-means-absent convention the rest of this file uses — and `keyterms` is the raw
+    textarea, so a half-typed line survives a re-render. */
+export interface TrForm {
+  language: string;
+  diarize: boolean;
+  keyterms: string;
+  format: string;
+}
+
+/** What `GET /admin/transcription/defaults` returns. Every field is `unknown`: this console
+    also has to open against a server that predates the route's newest field. */
+export interface TrDefaults {
+  language_code?: unknown;
+  diarize?: unknown;
+  keyterms?: unknown;
+  audio_format?: unknown;
+}
+
+/** Fill the card from the route's answer.
+
+    Two safe-direction defaults, and they point in opposite directions on purpose:
+
+      * `diarize` is ON unless the server literally says `false`. It is what splits a call into
+        turns, so a field that failed to arrive must not read as "speakers are not separated".
+      * `audio_format` falls back to `mp3_16k` — TODAY'S actual behaviour — rather than to
+        whatever this build believes the better default to be. A blank or absent value means
+        the server did not tell us; showing the conversion that is really happening is the only
+        honest answer, and the Save button is gated on a successful load anyway. */
+export function formFromDefaults(d: TrDefaults | null | undefined): TrForm {
+  const c = obj(d);
+  return {
+    language: text(c.language_code),
+    diarize: c.diarize !== false,
+    keyterms: (Array.isArray(c.keyterms) ? c.keyterms.map(String) : []).join('\n'),
+    format: text(c.audio_format) || 'mp3_16k',
+  };
+}
+
+/** The textarea, read as a list: one term per line, trimmed, blank lines dropped.
+
+    Lines only — NOT commas. "One per line" is what the hint promises and what the placeholder
+    shows, and splitting on commas as well would quietly turn a term that legitimately contains
+    one into two terms the operator never wrote. */
+export function parseKeyterms(raw: string): string[] {
+  return raw.split('\n').map(s => s.trim()).filter(Boolean);
+}
+
+/** An i18n key plus its variables — never a sentence. The caller renders it with its own `t`,
+    the way `lib/session.ts` hands back `keyForStatus`. */
+export interface TrError {
+  key: string;
+  vars?: Record<string, string | number>;
+}
+
+/** The first thing wrong with the list, or null.
+
+    FIRST, not all of them: the operator fixes one line and asks again, and a wall of messages
+    about a paste that is wrong in twenty places is not more actionable than the first line of
+    it. The offending term is always named, because in a thousand-line textarea "a key term is
+    too long" without one is unactionable.
+
+    Too MANY terms is reported through `tr.keyterms.count` — the same "{n} of {max} terms" the
+    counter under the box already shows, rendered in the error colour. There is no dedicated
+    string for it and inventing one on this page alone would leave the workspace and upload
+    surfaces saying something different about the identical limit. */
+export function checkKeyterms(terms: readonly string[]): TrError | null {
+  if (terms.length > KEYTERM_MAX) {
+    return { key: 'tr.keyterms.count', vars: { n: terms.length, max: KEYTERM_MAX } };
+  }
+  for (const term of terms) {
+    if (KEYTERM_BAD.test(term)) return { key: 'tr.keyterms.badchars', vars: { term } };
+    if (term.length > KEYTERM_CHARS || term.split(/\s+/).length > KEYTERM_WORDS) {
+      return { key: 'tr.keyterms.toolong', vars: { term } };
+    }
+  }
+  return null;
+}
+
+/** The PUT body. `null` — not `''` — is how "detect automatically" is spelled: the field is a
+    hint the provider may be told to ignore, and an empty string is a language code nobody has. */
+export function defaultsPayload(form: TrForm) {
+  return {
+    language_code: form.language.trim() || null,
+    diarize: form.diarize,
+    keyterms: parseKeyterms(form.keyterms),
+    audio_format: form.format,
+  };
+}
+
+/** The codes the language picker offers, in order: detect-automatically ('') first, then the
+    catalogue, then — only when the saved code is not in it — the saved code itself.
+
+    That last rung is the whole reason this is a function. `GET /languages` is the TTS
+    catalogue (three entries today) while speech-to-text accepts far more, so an operator who
+    set `pl` through the API would otherwise open a picker showing "Detect automatically" and
+    save that over their setting without ever touching the control. Labels are resolved by the
+    caller, which has `t`; this is only the ordering. */
+export function languageCodes(rows: readonly { code?: unknown }[], current: string): string[] {
+  const codes = rows.map(r => text(r.code)).filter(Boolean);
+  const out = ['', ...codes];
+  const want = current.trim();
+  if (want && !out.includes(want)) out.push(want);
+  return out;
+}
+
+/** The format ids the picker offers: the five known ones, plus a stored id this build does not
+    know about, kept first so the box shows the truth instead of an empty trigger a Save would
+    then write back as a format the server never chose. */
+export function formatIds(current: string): string[] {
+  const known: string[] = [...AUDIO_FORMATS];
+  return current && !known.includes(current) ? [current, ...known] : known;
+}

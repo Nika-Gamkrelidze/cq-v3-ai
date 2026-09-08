@@ -37,6 +37,12 @@ export interface SourceCardProps {
   onCancel: () => void;
   error: { text: string; isError: boolean };
   progress: ReactNode;
+  /** The collapsed "Transcription" section — what the recording will be transcribed WITH.
+
+      A slot rather than a component of its own so it lives inside the audio block and
+      disappears with it: a pasted transcript never goes near speech-to-text, and a panel
+      offering to pick its audio format would be offering a setting with no effect. */
+  transcription?: ReactNode;
 }
 
 export function SourceCard(p: SourceCardProps) {
@@ -103,6 +109,8 @@ export function SourceCard(p: SourceCardProps) {
             ))}
           </ul>
         )}
+
+        {p.transcription}
       </div>
 
       <div className={p.mode === 'text' ? 'wb-mode-text' : 'wb-mode-text hidden'}>
