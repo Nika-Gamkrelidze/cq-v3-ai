@@ -116,7 +116,29 @@
           <div style="margin-top:14px">
             <label for="ttsText" data-i18n="f.text"></label>
             <textarea id="ttsText" data-i18n-ph="tts.text_ph"></textarea>
+            <div class="hint hidden" id="ttsV3Tip" data-i18n="tts.v3tip"></div>
           </div>
+          <!-- Advanced voice settings. A <details> so the resting form is one extra line and the
+               primary button stays put; the controls inside are rendered by advRender() below,
+               because WHICH ones exist depends on the model in play (v3 has a three-way stability
+               preset and no style/speed; only Flash enforces language_code). Nothing in here is
+               sent until "Customise" is ticked — the default request is the same as before. -->
+          <details class="tts-adv" id="ttsAdv">
+            <summary><span data-i18n="tts.adv"></span></summary>
+            <div class="tts-adv-body">
+              <div class="tts-row">
+                <label for="ttsModel" data-i18n="tts.model"></label>
+                <select id="ttsModel"><option value="" data-i18n="tts.model.auto"></option></select>
+                <div class="hint" id="ttsModelHint" data-i18n="tts.model.hint"></div>
+                <div class="hint hidden" id="ttsModelFail" data-i18n="tts.models.loadfail"></div>
+              </div>
+              <div class="tts-row tts-row-check">
+                <label class="tts-check" for="ttsCustom"><input type="checkbox" id="ttsCustom"><span data-i18n="tts.custom"></span></label>
+                <div class="hint" data-i18n="tts.custom.hint"></div>
+              </div>
+              <div id="ttsControls" class="tts-controls hidden"></div>
+            </div>
+          </details>
           <div class="actions"><button class="primary" id="ttsBtn" data-i18n="btn.synth"></button></div>
           <div class="err" id="ttsErr" aria-live="polite"></div>
           <div id="ttsPlayer"></div>
@@ -781,8 +803,175 @@
     /* ---------------- Text to speech (single reusable player) ---------------- */
     let ttsLoaded = false, ttsPlayer = null, curSrc = null, langNoteRefresh = null;
     const previewMap = {};
+
+    /* ---- Advanced voice settings ----------------------------------------------------
+       MIRRORED: this block is identical in index.html and account.html — change both.
+       It lives here and not in brand.js because these two forms are its only callers.
+
+       The Model dropdown is filled from GET /tts/models. The EFFECTIVE model is the explicit
+       pick or, on Auto, the one the server resolves to for the selected language (the `model`
+       field of GET /languages) — and only the controls that model honours are rendered:
+       Eleven v3 has a three-way stability preset and no style or speed at all, and only the
+       Flash family enforces language_code. Everything sits behind "Customise" because a
+       voice's own settings are the ones its creator tuned: until that is ticked the request
+       carries no voice_settings, so the default clip is exactly what it was before. The
+       panel's state is remembered per browser under cq_tts_adv. */
+    const ADV_KEY = 'cq_tts_adv';
+    const ADV_DEFAULTS = { open: false, model: '', custom: false, preset: 0.5, stability: 50, similarity: 75, style: 0, boost: true, speed: 1, forcelang: true };
+    const $a = id => document.getElementById(id);
+    const isV3 = id => /^eleven_v3/.test(id || '');
+    let ttsModels = [];            // GET /tts/models, in the server's order
+    let advModelsP = null;         // the one in-flight/finished models fetch (loadTts can run twice)
+    const langModel = {};          // language code -> the model Auto resolves to (GET /languages)
+    const advNum = (v, lo, hi, def) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? n : def; };
+    function advLoad() {
+      // Stored values are sanitised field by field: a stale or hand-edited blob must never
+      // put an out-of-range number into a request (the server would 422 every clip).
+      const d = Object.assign({}, ADV_DEFAULTS);
+      try {
+        const s = JSON.parse(localStorage.getItem(ADV_KEY) || 'null');
+        if (s && typeof s === 'object') {
+          d.open = !!s.open; d.custom = !!s.custom; d.model = typeof s.model === 'string' ? s.model : '';
+          const p = advNum(s.preset, 0, 1, 0.5); d.preset = p < 0.25 ? 0 : p > 0.75 ? 1 : 0.5;
+          d.stability = advNum(s.stability, 0, 100, 50); d.similarity = advNum(s.similarity, 0, 100, 75);
+          d.style = advNum(s.style, 0, 100, 0); d.speed = advNum(s.speed, 0.7, 1.2, 1);
+          d.boost = s.boost !== false; d.forcelang = s.forcelang !== false;
+        }
+      } catch {}
+      return d;
+    }
+    const adv = advLoad();
+    function advSave() { try { localStorage.setItem(ADV_KEY, JSON.stringify(adv)); } catch {} }
+    function advEffectiveModel() {
+      const pick = $a('ttsModel').value; if (pick) return pick;
+      const code = $a('langSelect').value;
+      // The API's answer first; the hardcoded pair only covers a /languages without the
+      // `model` field and mirrors what the server has always done for Auto.
+      return langModel[code] || (code === 'ka' ? 'eleven_v3' : 'eleven_multilingual_v2');
+    }
+    function advCaps(id) {
+      const hit = ttsModels.find(m => m && m.model_id === id);
+      if (hit && hit.supports) return hit.supports;
+      // The list failed or the id is not in it: assume the documented shape of the family.
+      return isV3(id) ? { presets: true, style: false, speaker_boost: true, speed: false, language_code: 'rejected' }
+                      : { presets: false, style: true, speaker_boost: true, speed: true, language_code: 'ignored' };
+    }
+    function advLoadModels() {
+      if (advModelsP) return advModelsP;
+      advModelsP = (async () => {
+        const sel = $a('ttsModel');
+        try {
+          const r = await fetch(`${API}/tts/models`);
+          const list = r.ok ? await r.json() : null;
+          if (!Array.isArray(list)) throw new Error('bad list');
+          ttsModels = list.filter(m => m && m.model_id);
+          ttsModels.forEach(m => { const o = document.createElement('option'); o.value = m.model_id; o.textContent = m.name || m.model_id; sel.appendChild(o); });
+        } catch {
+          // Auto alone, said once as a hint rather than a toast: the form still works, the
+          // visitor just cannot pick a model this session.
+          $a('ttsModelHint').classList.add('hidden'); $a('ttsModelFail').classList.remove('hidden');
+        }
+        // A remembered model that is no longer on offer (or a list that failed) falls back to
+        // Auto rather than to a value the dropdown cannot show.
+        sel.value = adv.model;
+        if (sel.value !== adv.model) { adv.model = ''; sel.value = ''; advSave(); }
+        CQ.syncSelect(sel);
+      })();
+      return advModelsP;
+    }
+    function advFmt(key, v) { return key === 'speed' ? Number(v).toFixed(2) + '×' : Math.round(v) + '%'; }
+    function advRangeRow(key, i18n, min, max, step, val, hintKey, ends) {
+      const id = 'adv_' + key;
+      return `<div class="tts-row">
+        <label for="${id}" data-i18n="${i18n}"></label>
+        <input type="range" id="${id}" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${val}">
+        <output class="tts-val" for="${id}">${advFmt(key, val)}</output>
+        ${ends ? '<div class="tts-ends"><span data-i18n="tts.stability.expressive"></span><span data-i18n="tts.stability.stable"></span></div>' : ''}
+        ${hintKey ? `<div class="hint" data-i18n="${hintKey}"></div>` : ''}
+      </div>`;
+    }
+    function advCheckRow(key, i18n, on, hintKey) {
+      const id = 'adv_' + key;
+      return `<div class="tts-row tts-row-check">
+        <label class="tts-check" for="${id}"><input type="checkbox" id="${id}" data-key="${key}"${on ? ' checked' : ''}><span data-i18n="${i18n}"></span></label>
+        <div class="hint" data-i18n="${hintKey}"></div>
+      </div>`;
+    }
+    function advRender() {
+      const eff = advEffectiveModel(), caps = advCaps(eff);
+      // The bracket-tag tip belongs to the MODEL, not to the Customise toggle: v3 reads
+      // [whispers] out of the text whether or not the sliders are in play.
+      $a('ttsV3Tip').classList.toggle('hidden', !isV3(eff));
+      const box = $a('ttsControls');
+      box.classList.toggle('hidden', !adv.custom);
+      let h = '';
+      if (caps.presets) {
+        h += `<div class="tts-row">
+          <span class="tts-lbl" id="adv_preset_lbl" data-i18n="tts.stability"></span>
+          <div class="seg" role="group" aria-labelledby="adv_preset_lbl" id="adv_preset">
+            <button type="button" data-v="0" data-i18n="tts.preset.creative"></button>
+            <button type="button" data-v="0.5" data-i18n="tts.preset.natural"></button>
+            <button type="button" data-v="1" data-i18n="tts.preset.robust"></button>
+          </div>
+          <div class="hint" data-i18n="tts.preset.hint"></div>
+        </div>`;
+      } else h += advRangeRow('stability', 'tts.stability', 0, 100, 1, adv.stability, 'tts.stability.hint', true);
+      h += advRangeRow('similarity', 'tts.similarity', 0, 100, 1, adv.similarity, 'tts.similarity.hint');
+      if (caps.style) h += advRangeRow('style', 'tts.style', 0, 100, 1, adv.style, 'tts.style.hint');
+      if (caps.speaker_boost) h += advCheckRow('boost', 'tts.speakerboost', adv.boost, 'tts.speakerboost.hint');
+      if (caps.speed) h += advRangeRow('speed', 'tts.speed', 0.7, 1.2, 0.05, adv.speed, '');
+      if (caps.language_code === 'enforced') h += advCheckRow('forcelang', 'tts.forcelang', adv.forcelang, 'tts.forcelang.hint');
+      h += `<div class="tts-row tts-row-reset"><button type="button" class="tts-link" id="adv_reset" data-i18n="tts.reset"></button></div>`;
+      box.innerHTML = h;
+      CQ.applyI18n(box);   // the rows carry data-i18n, so a later language switch repaints them for free
+      box.querySelectorAll('input[type=range]').forEach(el => el.addEventListener('input', () => {
+        const key = el.dataset.key; adv[key] = Number(el.value);
+        const out = box.querySelector(`output[for="${el.id}"]`); if (out) out.textContent = advFmt(key, adv[key]);
+        advSave();
+      }));
+      box.querySelectorAll('input[type=checkbox]').forEach(el => el.addEventListener('change', () => { adv[el.dataset.key] = el.checked; advSave(); }));
+      const seg = $a('adv_preset');
+      if (seg) {
+        const paint = () => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.v) === adv.preset)));
+        seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { adv.preset = Number(b.dataset.v); advSave(); paint(); }));
+        paint();
+      }
+      $a('adv_reset').addEventListener('click', () => {
+        // Only the voice values: the model pick and the Customise switch are choices, not settings.
+        ['preset', 'stability', 'similarity', 'style', 'boost', 'speed', 'forcelang'].forEach(k => { adv[k] = ADV_DEFAULTS[k]; });
+        advSave(); advRender();
+      });
+    }
+    /* The fields the panel contributes to a POST /tts body. Slider percentages become 0..1;
+       only the controls currently on screen are included, so a value remembered for another
+       model (say, speed while v3 is in play) is never sent to one that rejects it. */
+    function advBody() {
+      const eff = advEffectiveModel(), caps = advCaps(eff);
+      const out = { model_id: adv.model || undefined };
+      if (!adv.custom) return out;     // voice defaults: nothing the panel owns is sent
+      const vs = { stability: caps.presets ? adv.preset : adv.stability / 100, similarity_boost: adv.similarity / 100 };
+      if (caps.style) vs.style = adv.style / 100;
+      if (caps.speaker_boost) vs.use_speaker_boost = !!adv.boost;
+      if (caps.speed) vs.speed = Math.round(adv.speed * 100) / 100;
+      out.voice_settings = vs;
+      if (caps.language_code === 'enforced') out.enforce_language = !!adv.forcelang;
+      return out;
+    }
+    (function advInit() {
+      const det = $a('ttsAdv'); det.open = adv.open;
+      det.addEventListener('toggle', () => { adv.open = det.open; advSave(); });
+      const custom = $a('ttsCustom'); custom.checked = adv.custom;
+      custom.addEventListener('change', () => { adv.custom = custom.checked; advSave(); advRender(); });
+      $a('ttsModel').addEventListener('change', () => { adv.model = $a('ttsModel').value; advSave(); advRender(); });
+      $a('langSelect').addEventListener('change', advRender);   // Auto follows the language
+      // The Auto option carries data-i18n, so applyI18n has already retranslated it by the
+      // time this fires — the custom dropdown just has to repaint its trigger label.
+      document.addEventListener('cq:lang', () => CQ.syncSelect($a('ttsModel')));
+      advRender();
+    })();
     async function loadTts() {
       if (ttsLoaded) return;
+      const modelsReady = advLoadModels();   // independent of the two fetches below, so it runs alongside them
       try { const r = await fetch(`${API}/languages`); if (r.ok) {
         // The API is the source of truth for WHICH languages exist; the wording is ours. Its
         // name/note are English-only, so they are the fallback, not the display text.
@@ -790,6 +979,7 @@
         const fallback = {};
         (Array.isArray(langs) ? langs : []).forEach(l => {
           fallback[l.code] = l.note || '';
+          langModel[l.code] = l.model || '';   // what Auto resolves to, for the advanced panel
           const nameKey = 'lang.' + l.code, trName = t(nameKey);
           const o = document.createElement('option'); o.value = l.code;
           o.textContent = (trName === nameKey ? l.name : trName); sel.appendChild(o);
@@ -817,6 +1007,7 @@
           o.textContent = (v.name || v.voice_id || '') + (v.category ? ` (${v.category})` : '') + (v.is_default ? ` — ${t('f.voice.isdefault')}` : ''); sel.appendChild(o); });
         CQ.syncSelect(sel);
       } } catch {}
+      await modelsReady; advRender();   // language + model list are both in: paint the right control set
       ttsLoaded = true;
     }
     function playInto(url, name) {
@@ -834,7 +1025,7 @@
       try {
         const language_code = $('langSelect').value || undefined;
         const r = await apiFetch(`${API}/tts`, { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ text: 'Hello.', voice_id, language_code }) });
+          body: JSON.stringify({ text: 'Hello.', voice_id, language_code, ...advBody() }) });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error((d && d.detail) || t('tts.previewfail')); }
         playInto(URL.createObjectURL(await r.blob()), 'preview.mp3');
       } catch (e) { err.textContent = e.message; }
@@ -849,7 +1040,7 @@
         const voice_id = $('voiceSelect').value || undefined;
         const language_code = $('langSelect').value || undefined;
         const r = await apiFetch(`${API}/tts`, { method: 'POST', headers: authH({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ text, voice_id, language_code }) });
+          body: JSON.stringify({ text, voice_id, language_code, ...advBody() }) });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error((d && d.detail) || t('toast.error')); }
         playInto(URL.createObjectURL(await r.blob()), 'speech.mp3');
       } catch (e) { err.textContent = e.message; CQ.toast(e.message, 'err'); }

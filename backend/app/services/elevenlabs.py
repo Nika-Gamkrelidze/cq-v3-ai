@@ -20,6 +20,7 @@ BASE_URL = "https://api.elevenlabs.io/v1"
 # GET /v1/voices needs voices_read (or no permission at all), while the two operations the
 # product actually runs on need speech_to_text and text_to_speech.
 SCOPE_VOICES = "voices_read"
+SCOPE_MODELS = "models_read"
 SCOPE_STT = "speech_to_text"
 SCOPE_TTS = "text_to_speech"
 
@@ -153,19 +154,28 @@ async def text_to_speech(text: str, api_key: str, voice_id: str,
                          model_id: str = "eleven_multilingual_v2",
                          language_code: str | None = None,
                          output_format: str = "mp3_44100_128",
-                         timeout: float = 120.0) -> bytes:
+                         timeout: float = 120.0,
+                         voice_settings: dict | None = None) -> bytes:
     """Synthesize speech. Returns MP3 bytes.
 
     Mirrors the request shape proven to work for Georgian in the reference project:
     a minimal body (text + model_id, no forced voice_settings) plus an output_format
     query param. `language_code` is included only when the caller knows the model
     accepts it — some models/languages (e.g. Georgian) reject language_code with a 400.
+
+    `voice_settings` rides along only when non-empty: an absent key means "the voice's own
+    defaults", which is what every clip before the advanced controls existed was made with, and
+    sending an empty `{}` is not guaranteed to mean the same thing to ElevenLabs. The caller
+    (routers/tts.py::shape_voice_settings) is responsible for having removed anything the
+    model would reject — this function sends exactly what it is handed.
     """
     if not voice_id:
         raise ElevenLabsError("No TTS voice is configured (set one in the admin panel).")
     payload = {"text": (text or "").strip(), "model_id": model_id}
     if language_code:
         payload["language_code"] = language_code
+    if voice_settings:
+        payload["voice_settings"] = dict(voice_settings)
     resp = await _request(
         "POST", f"/text-to-speech/{voice_id}", "Text-to-speech", SCOPE_TTS, timeout=timeout,
         params={"output_format": output_format},
@@ -188,4 +198,32 @@ async def list_voices(api_key: str) -> list[dict]:
             "preview_url": v.get("preview_url"),
         }
         for v in voices
+    ]
+
+
+async def list_models(api_key: str) -> list[dict]:
+    """The models this account may synthesize with, reduced to the fields the TTS form needs.
+
+    Raw facts only — no ordering, no hiding, no "does this model take a style slider": that
+    judgement lives in one place, routers/tts.py::model_caps, so the customer form and the
+    request shaper can never disagree about a model. `languages` is flattened to ISO codes
+    because that is what /languages and the language selector already speak.
+    """
+    resp = await _request("GET", "/models", "Listing models", SCOPE_MODELS,
+                          timeout=30.0, headers=_headers(api_key))
+    models = resp.json() or []
+    return [
+        {
+            "model_id": m.get("model_id"),
+            "name": m.get("name"),
+            "description": m.get("description") or "",
+            "can_do_text_to_speech": m.get("can_do_text_to_speech"),
+            "can_use_style": m.get("can_use_style"),
+            "can_use_speaker_boost": m.get("can_use_speaker_boost"),
+            "languages": [lang.get("language_id") for lang in (m.get("languages") or [])
+                          if isinstance(lang, dict) and lang.get("language_id")],
+            "maximum_text_length_per_request": m.get("maximum_text_length_per_request"),
+        }
+        for m in models
+        if isinstance(m, dict) and m.get("model_id")
     ]

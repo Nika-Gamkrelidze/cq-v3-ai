@@ -56,8 +56,29 @@ are scored against. Body: `{dimensions:[{name, weight, guidance}], rubric}`. **W
 
 ### Speech
 - `POST /v1/transcriptions` — multipart `file=` → `{transcript, language, words[]}` (STT only).
-- `POST /v1/tts` — `{text, voice_id?, language_code?}` → `audio/mpeg` bytes. Voices: `GET /v1/voices`,
-  languages: `GET /v1/languages` (EN / RU / **Georgian**).
+- `POST /v1/tts` — `{text, voice_id?, language_code?, model_id?, voice_settings?, enforce_language?}`
+  → `audio/mpeg` bytes. Voices: `GET /v1/voices`, languages: `GET /v1/languages` (EN / RU /
+  **Georgian**; each entry carries `model`, the model picked when `model_id` is omitted).
+- `GET /v1/tts/models` — the models you may pass as `model_id`, in display order, each with
+  `max_chars`, `languages` (ISO codes) and a `supports` block:
+  `{presets, style, speaker_boost, speed, language_code: "enforced"|"ignored"|"rejected"}`.
+  Legacy and deprecated-alias ids are not listed and are refused.
+
+**Voice settings.** All optional; omit the object entirely to use the voice's own defaults.
+`stability` 0–1 · `similarity_boost` 0–1 · `style` 0–1 · `use_speaker_boost` bool ·
+`speed` 0.7–1.2. Out-of-range values → **422**. The server then shapes the object for the
+model that will actually run and sends only what survives:
+
+| Model | `stability` | `style` | `speed` | `language_code` |
+|---|---|---|---|---|
+| `eleven_multilingual_v2` (default for EN/RU) | as sent | as sent | as sent | sent, ignored by the model |
+| `eleven_v3` (default for KA) | snapped to a preset: 0 Creative · 0.5 Natural · 1 Robust | dropped | dropped | never sent (v3 rejects it); pace and emotion come from tags in the text — `[whispers]`, `[excited]`, ellipses for pauses, CAPITALS for emphasis |
+| `eleven_flash_v2_5` | as sent | as sent | as sent | sent and **enforced** |
+
+`similarity_boost` and `use_speaker_boost` pass through on every model. `enforce_language:
+false` stops the language code being sent at all (the model then infers the language from
+the text); `true` is the default whenever the model accepts one. An unknown or hidden
+`model_id` → **400** `{"detail": "…", "code": "model_unavailable"}`.
 
 ### Correctness checking (the core)
 Every check returns **analysis** (summary, sentiment, topics, key points, quality), **`kb_check`**

@@ -111,6 +111,9 @@ async def run_startup_migrations() -> list[str]:
         # overrides. After chat.sql, which created llm_usage, and after analyzer.sql, whose
         # audio_jobs the new job_id refers to (by value — deliberately not a FK).
         await _apply(conn, "ai_usage.sql")
+        # tts_settings.sql: the shaped voice_settings behind each synthesis. After media.sql,
+        # which created tts_requests.
+        await _apply(conn, "tts_settings.sql")
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))
         await _seed_demo_tenant(conn)
