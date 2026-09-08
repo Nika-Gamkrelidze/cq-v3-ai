@@ -88,13 +88,30 @@ async def voices():
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc))
 
+    system = system_voice_ids(cfg)
+
+    def _mark(items: list[dict]) -> list[dict]:
+        # `is_default` lets the customer dropdown label the voice the server would pick on
+        # its own, so "Default voice" and the named default read as the same thing.
+        return [dict(v, is_default=v.get("voice_id") in system) for v in items]
+
     if vcfg["mode"] != "allowlist" or not vcfg["voice_ids"]:
-        return live
+        return _mark(live)
     by_id = {v.get("voice_id"): v for v in live if v.get("voice_id")}
-    picked = [by_id[i] for i in vcfg["voice_ids"] if i in by_id]
+    # The admin panel shows system defaults as an always-on tick and deliberately leaves them
+    # OUT of voice_ids on save, and /tts accepts them regardless of the allowlist. So the
+    # customer list has to add them back here — otherwise the one voice the operator was told
+    # is "always on" is the one voice customers cannot see or choose by name. Defaults come
+    # first (the Georgian voice, then the configured default), then the admin's own order.
+    default_order = [LANGUAGES["ka"]["voice"], cfg.get("tts_voice_id")]
+    default_order += sorted(system - set(default_order))
+    ordered = [i for i in default_order if i and i in by_id]
+    ordered += [i for i in vcfg["voice_ids"] if i in by_id and i not in system]
+    seen: set[str] = set()
+    picked = [by_id[i] for i in ordered if not (i in seen or seen.add(i))]
     # An allowlist that matches nothing live (key rotated, voices deleted) must not empty
     # the customer dropdown.
-    return picked or live
+    return _mark(picked or live)
 
 
 # The principal kinds whose clip is always kept on disk. Anonymous: so abuse of a public, paid

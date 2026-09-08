@@ -814,7 +814,7 @@
         const voices = await r.json(); const sel = $('voiceSelect');
         if (Array.isArray(voices)) voices.forEach(v => { if (v.preview_url) previewMap[v.voice_id] = v.preview_url;
           const o = document.createElement('option'); o.value = v.voice_id;
-          o.textContent = (v.name || v.voice_id || '') + (v.category ? ` (${v.category})` : ''); sel.appendChild(o); });
+          o.textContent = (v.name || v.voice_id || '') + (v.category ? ` (${v.category})` : '') + (v.is_default ? ` — ${t('f.voice.isdefault')}` : ''); sel.appendChild(o); });
         CQ.syncSelect(sel);
       } } catch {}
       ttsLoaded = true;
