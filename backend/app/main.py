@@ -52,6 +52,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def _no_store(request: Request, call_next):
+    """API responses are per-principal, so a cache must not keep them.
+
+    Every route here answers differently for a superadmin, a tenant, a registered user and an
+    anonymous visitor — and the difference is carried in request HEADERS (`Authorization`,
+    `X-API-Key`, `X-Admin-Token`), not in the URL. A cache keyed on the URL alone, which is
+    what a browser and any shared proxy are, can therefore hand one principal the body built
+    for another.
+
+    That was not theoretical. `/limits` shipped with no cache directive at all, so a phone
+    answered the quota question from its own store instead of from the server: it reported an
+    allowance that had already been spent, and kept reporting it after the numbers moved.
+    Measuring the quota bug became impossible because the measurement was cached. nginx marks
+    the app shell `no-cache` but says nothing about `/api/`, and the fix belongs here anyway —
+    in the application, where it also covers the port the dev server talks to directly and
+    cannot be lost by editing only one of the two nginx files.
+
+    `no-store` rather than `no-cache`: the latter still permits a copy to be written to disk
+    and merely requires revalidation, and a stored copy of one tenant's knowledge base is the
+    thing being prevented, not a stale one.
+
+    Set only where the route has NOT already decided. The audio downloads, the converted-file
+    download and the SSE stream each choose their own directive on purpose, and overwriting
+    those would be this middleware breaking three deliberate decisions to enforce a default.
+    """
+    response = await call_next(request)
+    if "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.exception_handler(asyncpg.DataError)
 async def _data_error_handler(request: Request, exc: asyncpg.DataError):
     # A DataError always means the client sent a malformed query value (e.g. a
