@@ -139,6 +139,17 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - **Per-tenant weighted scoring rubric** (`services/scoring.py`, `scoring_store.py`, `routers/scoring.py`):
   superadmin or tenant defines dimensions+weights+guidance; Claude scores each with evidence; code
   computes weighted total + per-dimension contribution. Renders as a scorecard in the tenant portal.
+  Two dimensions are **SYSTEM** dimensions (`scoring.SYSTEM_DIMENSIONS`, marked `source`):
+  `kb_factcheck` is scored from the KB fact-check's `accuracy_score` and `agent_courtesy` from
+  the tone analyser's per-speaker `politeness` for `role == "agent"`. They are invisible to the
+  model (no tokens re-judging a measurement), scored by code, and the tenant owns **only the
+  weight** — the name and guidance are replaced on save, because provenance is the point. Both
+  are frequently NOT APPLICABLE; see §4.
+- **Sentiment settings** have their own workspace tab (`app/workspace/SentimentTab.tsx`,
+  `GET/PUT /sentiment/config`, table `sentiment_configs`): `enabled` + `guidance`, plus the
+  voice sidecar's live state. Note the coupling — that same `guidance` also steers the tone
+  analyser (`routers/recordings.py::_guidance`), which now scores the rubric's courtesy
+  dimension, so editing it moves a number on future scorecards.
 - **One brand-styled trilingual Next.js frontend** (EN/KA/RU, light/dark, custom dropdowns,
   toasts, confirm modals — no native browser dialogs; shared React components in
   `frontend/next/components/ui/*`, dictionaries in `lib/i18n/`). Pages: `/` (public
@@ -277,6 +288,16 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   prosody needs a start and an end per turn and otherwise reports `no_timestamps`, i.e. a
   recording that silently goes quiet. A recording that genuinely needs key terms belongs on
   ElevenLabs Scribe.
+- **An unscored rubric dimension is dropped from the weighting, not scored zero**
+  (`scoring.build_result`). The system dimensions are absent often and through nobody's fault
+  — no KB, no checkable claim in the call, no tone pass, a pasted transcript with no audio —
+  and leaving their weight in the denominator silently deducted points for a measurement that
+  was never taken (a workspace giving fact-check 30% would have capped every uncheckable call
+  at 70). The scorecard records `scored_weight` and `unscored` so a renormalised total stays
+  auditable: 82 out of the whole rubric and 82 out of the two thirds that could be measured are
+  different claims about an agent. `apply_manual_scores` renormalises the same way and
+  **refuses to let a reviewer edit a system dimension** — disagreeing with the knowledge base
+  is a reason to fix the knowledge base.
 - **Adapters verified against the live APIs, and adapters not.** Verified: Anthropic and
   ElevenLabs (the deployment has always run on them) and, since 2026-09-10, **Gemini
   speech-to-text** — a real `gemini-3.5-transcribe` connection passes *Test connection* on the
@@ -406,6 +427,23 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   Not done: Gemini **text-to-speech** (Google has a TTS model; no adapter yet), and no Georgian
   call has been transcribed through it end to end, so diarization quality, word timings and the
   *36 თვემდე / 36 წლამდე* class of error are still unmeasured against Scribe.
+- **2026-09-10 — the rubric stops re-judging what the product measures.** "Correctness of
+  information" and "Courtesy & empathy" left the default rubric and came back as system
+  dimensions fed by the fact-check and the tone analyser (§3, §4). The pipeline runs a
+  text-only tone pass when the rubric asks for it; the on-demand re-score reads the stored
+  `kb_check`/`semantic` rather than recomputing them, so one unit still buys one model call.
+  The editor shows a measured row as measured: weight editable, name read-only, no delete.
+  **Not done:** the raw-text scoring playgrounds (`/scoring/score-text`, the admin one) have no
+  job row, so both system dimensions are always "—" there; and no Georgian call has yet been
+  scored end to end with the new default, so the weights (30 fact-check / 15 courtesy) are a
+  starting point, not a tuned one.
+- **2026-09-10 — the voice-tone probe stopped lying.** The console reported a checkpoint that
+  failed to load as "loads on first use". `services/sentiment.py::status()` is now the one
+  answer (`disabled | unreachable | model_error | warming | ok`), the console shows
+  `model_error` as an error, `/api/health` carries the state word, and the new Sentiment tab
+  shows it to the workspace with who can fix it. Production currently reports **ok**, so a
+  recording with no voice tone is failing downstream of the model — most often
+  `no_timestamps`, i.e. a transcript with no per-turn timings.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.
