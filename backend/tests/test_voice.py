@@ -537,34 +537,38 @@ def test_gemini_transcribe_is_the_default_and_speaks_the_interactions_api(wire, 
     assert out["detail"].startswith("Gemini Transcribe") and "Key terms" not in out["detail"]
 
 
-def test_gemini_transcribe_drops_key_terms_under_diarization_and_says_so(wire, resolver):
-    """Google rejects custom_vocabulary alongside diarization or timestamps; speaker
-    separation wins and the detail names what was left out."""
+def test_gemini_transcribe_never_trades_word_timings_for_key_terms(wire, resolver):
+    """Google rejects custom_vocabulary alongside word timestamps. Timings win — the timeline,
+    per-speaker scoring and Voice tone are all built on them — and the detail says so."""
     resolver["stt"] = gemini_stt("gemini-3.5-transcribe")
     _first(wire, "/interactions", _interaction("hi", []))
     out = run(voice.transcribe("t-1", b"x", "a.mp3", "audio/mpeg", transcription={
         **ORIGINAL, "diarize": True, "keyterms": ["თვემდე", " ", "თვემდე"]}))
     tc = json.loads(wire["sent"][0]["body"])["generation_config"]["transcription_config"]
     assert "custom_vocabulary" not in tc and tc["mode"]["diarization_mode"] == "speaker"
+    assert tc["mode"]["timestamp_granularities"] == ["word"]
     assert "language_codes" not in tc                      # unset → automatic detection
     assert "Key terms were not sent" in out["detail"]
 
 
-def test_gemini_transcribe_sends_key_terms_when_speakers_are_off(wire, resolver):
-    """Diarization off + key terms → custom_vocabulary and no mode; the transcript comes
-    back as text only, so `words` is empty and the analysis falls back to the text."""
+def test_gemini_transcribe_keeps_timings_even_with_speakers_off(wire, resolver):
+    """THE REGRESSION THIS PINS. Key terms + speakers off used to send custom_vocabulary and
+    NO mode, so the transcript came back without a single timing — and Voice tone, which needs
+    a start and an end per turn, went quiet on that recording with no visible cause. Word
+    timestamps are now requested unconditionally."""
     resolver["stt"] = gemini_stt("gemini-3.5-transcribe")
-    _first(wire, "/interactions", _interaction("36 თვემდე. კარგი."))
+    _first(wire, "/interactions", _interaction("36 თვემდე", [
+        _word("36", "0.100s", "0.400s"), _word("თვემდე", "0.450s", "1.000s")]))
     out = run(voice.transcribe("t-1", b"x", "a.m4a", "audio/mp4", transcription={
-        **ORIGINAL, "diarize": False, "keyterms": ["თვემდე", "თვემდე", "ფრანშიზა"]}))
+        **ORIGINAL, "diarize": False, "keyterms": ["თვემდე", "ფრანშიზა"]}))
     body = json.loads(wire["sent"][0]["body"])
     assert body["input"][0]["mime_type"] == "audio/m4a"      # Google's enum, not audio/mp4
     assert body["generation_config"]["transcription_config"] == {
-        "custom_vocabulary": ["თვემდე", "ფრანშიზა"]}
-    assert out["words"] == [] and out["text"] == "36 თვემდე. კარგი."
-    assert segments.build_segments(out["words"]) == []
-    assert [s["text"] for s in segments.segments_from_text(out["text"])] == ["36 თვემდე. კარგი."]
-    assert "no word timings" in out["detail"]
+        "mode": {"type": "verbatim", "timestamp_granularities": ["word"]}}
+    assert [w["start"] for w in out["words"]] == [0.1, 0.45]
+    # Timed words -> real segments -> the per-turn ranges Voice tone needs.
+    assert [(s["start"], s["end"]) for s in segments.build_segments(out["words"])] == [(0.1, 1.0)]
+    assert "Key terms were not sent" in out["detail"]
 
 
 def test_gemini_transcribe_without_speakers_or_terms_still_asks_for_word_times(wire, resolver):
@@ -633,7 +637,7 @@ def test_gemini_transcribe_probe_names_the_model_and_the_key_terms_rule(wire, re
     _first(wire, "/interactions", _interaction("", []))
     out = run(voice.probe(gemini_stt(None)))
     assert out["ok"] is True and "gemini-3.5-transcribe" in out["detail"]
-    assert "Key terms apply only when speaker separation is off" in out["detail"]
+    assert "Key terms are not sent on this model" in out["detail"]
     tc = json.loads(wire["sent"][0]["body"])["generation_config"]["transcription_config"]
     assert tc == {"mode": {"type": "verbatim", "timestamp_granularities": ["word"]}}
     # A chat-model id Google does not know is what "Test connection" once showed as a bare

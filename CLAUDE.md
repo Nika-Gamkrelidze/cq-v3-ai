@@ -153,7 +153,7 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   key** (`tenant_ai_overrides`, the portal's *Your own AI subscription* tab; owners only, never
   a base URL). Text providers: Anthropic, OpenAI, Gemini; speech-to-text: ElevenLabs, OpenAI, Gemini
   (`gemini-3.5-transcribe`, the default, on Google's Interactions API — native diarization +
-  word timestamps, BCP-47 language hints, key terms only when diarization is off; any other
+  word timestamps, BCP-47 language hints, key terms never sent (timings win — §4); any other
   Gemini id is a chat model asked for a transcript through `generateContent` — segment-level
   timings, speakers by ear); text-to-speech: ElevenLabs, OpenAI — STT and TTS are resolved independently. Console: *AI providers* tab (Test connection / Make default /
   Deactivate). Provider keys are **encrypted at rest** (`services/secrets.py`, `SECRETS_KEY`).
@@ -269,10 +269,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   diarization, word timestamps, BCP-47 hints (our `ka` → `ka-GE`), `store:false`. Any other id
   is a chat model on `generateContent` with a transcript schema — segment-level timings,
   speakers by ear. `-live` is WebSocket-only and is refused before any request.
-  **Google rejects `custom_vocabulary` combined with diarization or word timestamps**, so with
-  both set the adapter keeps speaker separation, drops the key terms and says so in the result
-  `detail` (the workspace's key-terms hint carries the same rule). Diarization off + key terms
-  ⇒ no `words` at all, and the analysis falls back to `segments_from_text`.
+  **Google rejects `custom_vocabulary` combined with diarization or word timestamps**, so on
+  this model key terms and timings are mutually exclusive and **timings always win**: key terms
+  are never sent, and the result `detail` (plus the workspace's key-terms hint) says why. Do not
+  "restore" them — three features are built on word timings and none of them fails loudly:
+  the player timeline, per-speaker scoring/attribution, and **Voice tone**, whose per-segment
+  prosody needs a start and an end per turn and otherwise reports `no_timestamps`, i.e. a
+  recording that silently goes quiet. A recording that genuinely needs key terms belongs on
+  ElevenLabs Scribe.
 - **Adapters verified against the live APIs, and adapters not.** Verified: Anthropic and
   ElevenLabs (the deployment has always run on them) and, since 2026-09-10, **Gemini
   speech-to-text** — a real `gemini-3.5-transcribe` connection passes *Test connection* on the

@@ -65,7 +65,6 @@ INLINE_MAX_BYTES = 14 * 1024 * 1024
 # Transcribe: Google says to upload "files longer than a few seconds". 1 MB of the default
 # mono 16 kHz MP3 is a few minutes — the probe clip stays inline, a real call is uploaded.
 TRANSCRIBE_INLINE_MAX_BYTES = 1024 * 1024
-MAX_CUSTOM_VOCABULARY = 1000    # Google's cap; best results "with up to 100 terms"
 MAX_OUTPUT_TOKENS = 32768       # a dense hour of Georgian is well inside this
 FILE_ACTIVE_POLL_S = 2.0
 FILE_ACTIVE_TIMEOUT_S = 180.0
@@ -75,11 +74,11 @@ DETAIL_GENERATE = ("Gemini transcribes as a language model: speaker labels are b
 DETAIL = DETAIL_GENERATE        # the name the first version exported
 DETAIL_TRANSCRIBE = "Gemini Transcribe labels speakers and times every word natively."
 NOTE_TERMS_DROPPED = (" Key terms were not sent: Gemini Transcribe cannot combine custom "
-                      "vocabulary with speaker separation — turn speaker separation off for "
-                      "a file to use them.")
-NOTE_TERMS_NO_TIMES = (" Key terms were sent as custom vocabulary, which on Gemini Transcribe "
-                       "means no word timings: the analysis works from the text alone.")
-NOTE_TERMS_RULE = " Key terms apply only when speaker separation is off."
+                      "vocabulary with word timings, and the timings are kept — they are what "
+                      "the timeline, per-speaker scoring and Voice tone are built on. The "
+                      "language hint does the accuracy work here.")
+NOTE_TERMS_RULE = (" Key terms are not sent on this model; word timings are kept instead. "
+                   "Use ElevenLabs Scribe for a recording that needs key terms.")
 
 _LANG_NAMES = {
     "ka": "Georgian", "en": "English", "ru": "Russian", "de": "German", "fr": "French",
@@ -157,30 +156,38 @@ def bcp47(code: str | None) -> str | None:
 def transcription_config(*, language_code: str | None, diarize: bool,
                          keyterms: list[str] | None) -> tuple[dict, str]:
     """The Transcribe model's ``transcription_config`` for our settings, plus the sentence
-    that says what could not be honoured (empty when everything was). Pure."""
+    that says what could not be honoured (empty when everything was). Pure.
+
+    WORD TIMINGS ALWAYS WIN. Google rejects ``custom_vocabulary`` in the same request as
+    diarization or word timestamps, so on this model key terms and timings are exclusive —
+    and timings are worth more than a spelling hint, because THREE downstream features are
+    built on them and none of them fails loudly:
+
+      * the player timeline (evidence spans are placed by segment index → seconds),
+      * per-speaker rubric scoring and fact-check attribution,
+      * Voice tone, whose per-segment prosody needs a start and an end for every turn and
+        otherwise reports `no_timestamps` — a recording that simply goes quiet.
+
+    An earlier version sent the key terms whenever speaker separation happened to be off.
+    That traded all three for a vocabulary hint, silently, on a per-file switch nobody
+    associated with the timeline. So key terms are never sent on this model; the language hint
+    (``ka-GE``) does the Georgian work, and the caller is told in words.
+    """
     tc: dict = {}
     lang = bcp47(language_code)
     if lang:
         tc["language_codes"] = [lang]
-    terms: list[str] = []
-    for k in keyterms or []:
-        k = (k or "").strip()
-        if k and k not in terms:
-            terms.append(k)
-    note = ""
+    mode = {"type": "verbatim", "timestamp_granularities": ["word"]}
     if diarize:
-        tc["mode"] = {"type": "verbatim", "diarization_mode": "speaker",
-                      "timestamp_granularities": ["word"]}
-        if terms:
-            log.warning("gemini transcribe: %d key terms dropped — Google rejects custom "
-                        "vocabulary combined with speaker diarization", len(terms))
-            note = NOTE_TERMS_DROPPED
-    elif terms:
-        tc["custom_vocabulary"] = terms[:MAX_CUSTOM_VOCABULARY]
-        note = NOTE_TERMS_NO_TIMES
-    else:
-        tc["mode"] = {"type": "verbatim", "timestamp_granularities": ["word"]}
-    return tc, note
+        mode["diarization_mode"] = "speaker"
+    tc["mode"] = mode
+    terms = {(k or "").strip() for k in (keyterms or [])}
+    terms.discard("")
+    if terms:
+        log.warning("gemini transcribe: %d key terms not sent — Google rejects custom "
+                    "vocabulary alongside word timestamps, and the timings win", len(terms))
+        return tc, NOTE_TERMS_DROPPED
+    return tc, ""
 
 
 def instruction(*, language_code: str | None, diarize: bool, keyterms: list[str] | None) -> str:
