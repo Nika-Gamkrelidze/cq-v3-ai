@@ -682,6 +682,30 @@ async def deactivate_integration(integration_id: str):
     return {"integration_id": integration_id, "is_active": False}
 
 
+class DiagnoseRequest(BaseModel):
+    key: str          # a bare key_id, `cqi_<key_id>`, or the full `cqi_<key_id>.<secret>`
+    tenant: str       # the selector the caller sends as X-CQ-Tenant: uuid or clients.slug
+
+
+@router.post("/integrations/diagnose", dependencies=[Depends(require_admin)])
+async def diagnose_integration(body: DiagnoseRequest):
+    """Why does this key + workspace pair 401?
+
+    The 401 the chat site gets is deliberately opaque — nine independent conditions, one
+    indistinguishable refusal, so a caller cannot enumerate key_ids or probe which workspaces
+    exist. That property is untouched. This route serves the OTHER principal: the operator
+    already holds the superadmin token, so nothing here is a disclosure to them, and the
+    alternative (2026-09-10, the Swift Chat pilot) is an afternoon of guessing between "wrong
+    key" and "workspace not granted" with psql.
+
+    Never 401s for a bad key — it always answers 200 with a verdict, because a refusal here
+    would be answering the operator's question with the very silence they came to break. The
+    secret half of a pasted key is split off in chat_credentials.split_diagnosed_key, used only
+    for an in-memory hash comparison, and is neither logged nor echoed.
+    """
+    return await chat_credentials.diagnose(body.key, body.tenant)
+
+
 class GrantCreate(BaseModel):
     tenant: str                        # selector: uuid or clients.slug
     scopes: list[str] | None = None    # None => the integration's own scopes; may only narrow

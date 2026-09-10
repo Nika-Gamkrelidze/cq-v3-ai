@@ -24,6 +24,15 @@ type Translate = (key: string, vars?: Record<string, string | number>) => string
 
 const CRED_URL = '/admin/integrations';
 
+/* The verdicts the diagnosis can return. Each one owns a sentence naming its fix, so an
+   unrecognised literal (an api newer than this console) falls back to generic copy rather
+   than rendering a raw enum at the operator. */
+const CRED_VERDICTS = new Set([
+  'ok', 'ok_structurally', 'bad_key_shape', 'missing_tenant_selector', 'unknown_key_id',
+  'secret_revoked', 'secret_expired', 'integration_inactive', 'tenant_not_found',
+  'tenant_inactive', 'no_grant', 'grant_inactive', 'secret_mismatch',
+]);
+
 const CRED_SCOPES: readonly (readonly [string, string])[] = [
   ['chat:turn', 'cred.scope.turn'],
   ['chat:suggest', 'cred.scope.suggest'],
@@ -185,6 +194,7 @@ export default function ChatConnections() {
   };
 
   return (
+    <>
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
@@ -293,6 +303,152 @@ export default function ChatConnections() {
         )}
       </div>
       <Msg note={note} />
+    </div>
+    <CredCheck t={t} />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------- check a workspace */
+
+/** What `/admin/integrations/diagnose` reports. Read defensively: this console can be newer
+    or older than the api it talks to, and an unknown verdict or an extra step must degrade to
+    generic copy rather than to a crash. */
+interface DiagCheck {
+  step?: string;
+  ok: boolean | null;
+  detail?: string | null;
+}
+
+interface Diagnosis {
+  verdict?: string;
+  checks?: DiagCheck[];
+  granted_tenants?: { client_id?: string; slug?: string | null; name?: string | null }[];
+}
+
+const wsText = (w: { client_id?: string; slug?: string | null; name?: string | null }) =>
+  [w.slug || w.client_id || '', w.name || ''].filter(Boolean).join(' — ');
+
+/** THE ANSWER TO A 401 FROM A CHAT SERVICE.
+
+    `/v1/chat/*` returns ONE opaque 401 for nine independent conditions, and that opacity is a
+    security property toward the caller: a chat service must not be able to probe which
+    workspaces exist or whether a key id is real. The operator holds the superadmin token and is
+    a different principal entirely, so the same question is answered here in full — paste what
+    the chat service holds, name the workspace it names, and the server says which condition
+    failed.
+
+    The key field is a password field and is CLEARED after a successful check: an operator will
+    paste a live secret into it, and this panel never renders one back. */
+function CredCheck({ t }: { t: Translate }) {
+  const [key, setKey] = useState('');
+  const [tenant, setTenant] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<Diagnosis | null>(null);
+  // The selector as it was WHEN CHECKED, so the "not granted" line keeps naming what produced
+  // the verdict on screen while the operator retypes the field.
+  const [asked, setAsked] = useState('');
+
+  const run = async () => {
+    const k = key.trim();
+    const ws = tenant.trim();
+    if (!k || !ws) { setError(t('cred.check.required')); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const d = await adminSend<Diagnosis>('POST', `${CRED_URL}/diagnose`, { key: k, tenant: ws });
+      setResult(d && typeof d === 'object' ? d : {});
+      setAsked(ws);
+      setKey('');
+    } catch (e) {
+      if (e instanceof SessionExpired) return;
+      setResult(null);
+      setError(errText(e, t, 'cred.check.failed', { 404: 'cred.unavailable' }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verdict = result?.verdict || '';
+  const good = verdict === 'ok' || verdict === 'ok_structurally';
+  const granted = (result?.granted_tenants || []).filter(w => w && (w.slug || w.client_id));
+  const needle = asked.toLowerCase();
+  const hit = granted.some(w =>
+    String(w.client_id || '').toLowerCase() === needle || String(w.slug || '').toLowerCase() === needle);
+
+  return (
+    <div className="card">
+      <h3 style={{ margin: 0 }}>{t('cred.check.heading')}</h3>
+      <p className="hint">{t('cred.check.lead')}</p>
+
+      <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
+        <div style={{ flex: '2 1 260px' }}>
+          <label htmlFor="ccdKey">{t('cred.check.key')}</label>
+          <input
+            id="ccdKey"
+            type="password"
+            autoComplete="off"
+            placeholder="cqi_…"
+            value={key}
+            onChange={e => setKey(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void run(); } }}
+          />
+        </div>
+        <div style={{ flex: '1 1 200px' }}>
+          <label htmlFor="ccdWs">{t('cred.check.tenant')}</label>
+          <input
+            id="ccdWs"
+            placeholder={t('cred.check.tenant.ph')}
+            value={tenant}
+            onChange={e => setTenant(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void run(); } }}
+          />
+        </div>
+        <div className="actions" style={{ flex: '0 0 auto', margin: 0 }}>
+          <button className="primary" type="button" onClick={() => void run()} disabled={busy}>
+            {t('cred.check.run')}
+          </button>
+        </div>
+      </div>
+      <p className="hint">{t('cred.check.privacy')}</p>
+
+      {error ? <div className="msg err">{error}</div> : null}
+
+      {result ? (
+        <div style={{ marginTop: 10 }}>
+          <div className={`msg ${good ? 'ok' : 'err'}`}>
+            {t(CRED_VERDICTS.has(verdict) ? `cred.verdict.${verdict}` : 'cred.check.unknown')}
+          </div>
+
+          {(result.checks || []).length ? (
+            <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0 }}>
+              {(result.checks || []).map((c, i) => (
+                <li key={c.step || i} style={{ margin: '4px 0' }}>
+                  {/* A dash, not a cross: a step the server never reached is not a step that
+                      failed, and reading it as a failure sends the operator after the wrong
+                      condition. */}
+                  <span aria-hidden style={{ display: 'inline-block', width: 18 }}>
+                    {c.ok === true ? '✓' : c.ok === false ? '✗' : '–'}
+                  </span>
+                  <code>{c.step || '?'}</code>
+                  {c.detail ? <span className="hint"> — {c.detail}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {granted.length ? (
+            <div style={{ marginTop: 10 }}>
+              <div className="hint">{t('cred.check.granted')}</div>
+              <div>{granted.map(w => <span className="chip" key={w.client_id || w.slug}>{wsText(w)}</span>)}</div>
+              {/* The common case in an incident: the key is fine and the workspace simply is
+                  not on its list. Saying so beats leaving the operator to compare uuids. */}
+              {hit ? null : <p className="msg err">{t('cred.check.notgranted', { tenant: asked })}</p>}
+            </div>
+          ) : <p className="hint" style={{ marginTop: 10 }}>{t('cred.check.nogrants')}</p>}
+        </div>
+      ) : null}
     </div>
   );
 }

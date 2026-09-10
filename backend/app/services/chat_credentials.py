@@ -54,6 +54,31 @@ SCOPES = ("chat:turn", "chat:suggest", "chat:answer", "chat:sync")
 # Never issuable, asserted at issuance time so a typo in an admin call cannot widen the grant.
 FORBIDDEN_SCOPE_PREFIXES = ("kb:write", "kb:delete", "scoring:write", "admin:")
 
+# The nine conditions above collapse into ONE 401 for the caller — that opacity is the security
+# property and does not move. But the operator holding the superadmin token is a different
+# principal entirely, and "401" alone has cost this project whole afternoons of guessing between
+# "wrong key" and "workspace not granted". These are the names that failure gets in the server
+# log and in POST /admin/integrations/diagnose; they never reach an integration-authenticated
+# response. Order matters: it is the order the conditions are evaluated in, so the FIRST failure
+# is the one reported.
+REASONS = (
+    "bad_key_shape",            # not cqi_<key_id>.<secret>
+    "missing_tenant_selector",  # no X-CQ-Tenant — there is no default tenant, by design
+    "unknown_key_id",           # no integration_secrets row with that key_id
+    "secret_revoked",
+    "secret_expired",
+    "integration_inactive",
+    "tenant_not_found",         # selector matches no clients.id / clients.slug
+    "tenant_inactive",
+    "no_grant",                 # the key exists and the tenant exists, but not together
+    "grant_inactive",           # the grant row was revoked per-tenant
+    "secret_mismatch",          # everything structural holds; the sha256 does not match
+)
+
+# Not a REASON: what the log says when the diagnosis query itself failed. Naming a refusal must
+# never be able to turn a 401 into a 500.
+_REASON_UNKNOWN = "unknown"
+
 # A syntactically valid but non-existent key_id must cost the same as a real one, so the sha256
 # comparison runs even when the lookup found nothing. This is the value it is compared against.
 _DUMMY_HASH = hashlib.sha256(b"cq-credential-miss").hexdigest()
@@ -133,6 +158,10 @@ async def resolve(raw_key: str, tenant_sel: str):
     tenant_sel = (tenant_sel or "").strip()
     if parts is None or not tenant_sel:
         # Mandatory selector. There is no default tenant, by design — see the module docstring.
+        # No key_id to log: a malformed key must not be echoed even in part, since the half we
+        # would be guessing at may be the secret.
+        _log_refusal("-", "bad_key_shape" if parts is None else "missing_tenant_selector",
+                     tenant_sel)
         return None
     key_id, secret = parts
 
@@ -143,6 +172,11 @@ async def resolve(raw_key: str, tenant_sel: str):
         stored = row["secret_hash"] if row else _DUMMY_HASH
         ok = hmac.compare_digest(_sha256(secret), stored)
         if not row or not ok:
+            # The request is already lost, so the widened queries below are free: they run ONLY
+            # here, never on the success path, and only AFTER the constant-time compare has
+            # already happened. Nothing about what the caller sees changes — same None, same
+            # 401, same body — this only writes the operator a sentence they can act on.
+            _log_refusal(key_id, await _diagnose(conn, key_id, tenant_sel), tenant_sel)
             return None
         await _touch(conn, row["secret_id"], row["last_used_at"])
 
@@ -173,6 +207,243 @@ async def _touch(conn, secret_id, last_used_at) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must never fail authentication
         log.warning("integration last_used_at update failed: %s", exc)
+
+
+# --------------------------------------------------------------------------- #
+# Why the 401 happened (operator-facing only)
+#
+# Everything below runs off the warm path: from resolve()'s failure branch, where the request is
+# already refused, and from POST /admin/integrations/diagnose, where the caller is the superadmin.
+# It must never be reachable with an integration credential and must never influence the 401.
+#
+# The queries here are deliberately the SAME predicates as _RESOLVE_SQL, one join at a time, so
+# that "which join dropped the row" is answerable. Keep them in step with it: a new condition
+# added to _RESOLVE_SQL without a matching step here reappears as an unexplained secret_mismatch.
+# --------------------------------------------------------------------------- #
+def _log_refusal(key_id: str, reason: str, tenant_sel: str) -> None:
+    """One line per refused request. The secret half and its hash are never arguments here.
+
+    The tenant selector is operator-supplied configuration (a uuid or a slug), not a credential,
+    so it is safe to log — truncated because it arrives from the network.
+    """
+    log.warning("[cq] integration auth refused | key_id=%s reason=%s tenant_sel=%s",
+                key_id or "-", reason, (tenant_sel or "-")[:64] or "-")
+
+
+# One secret per key_id (unique index); the join is LEFT so a secret orphaned by a hand-run
+# DELETE still reports the key as known rather than vanishing into unknown_key_id.
+_DIAG_SECRET_SQL = """
+    SELECT s.secret_hash,
+           s.revoked_at IS NOT NULL                                   AS is_revoked,
+           s.expires_at IS NOT NULL AND s.expires_at <= now()         AS is_expired,
+           i.id       AS integration_id,
+           i.name     AS integration_name,
+           i.is_active AS integration_active,
+           i.scopes   AS integration_scopes
+      FROM integration_secrets s
+      LEFT JOIN integrations i ON i.id = s.integration_id
+     WHERE s.key_id = $1
+     LIMIT 1
+"""
+
+# Matched as TEXT against both columns for the same reason as _RESOLVE_SQL: casting an arbitrary
+# string to uuid raises asyncpg.DataError, and here that would turn a diagnosis into a 400.
+_DIAG_TENANT_SQL = """
+    SELECT id, slug, name, is_active FROM clients
+     WHERE id::text = $1 OR slug = $1 LIMIT 1
+"""
+
+_DIAG_GRANT_SQL = """
+    SELECT is_active, scopes FROM integration_grants
+     WHERE integration_id = $1 AND client_id = $2 LIMIT 1
+"""
+
+# Only live grants: this answers "which workspaces may this key act for", which is the single
+# question an operator staring at a 401 actually has.
+_DIAG_GRANTS_SQL = """
+    SELECT c.id AS client_id, c.slug, c.name, c.is_active
+      FROM integration_grants g
+      JOIN clients c ON c.id = g.client_id
+     WHERE g.integration_id = $1 AND g.is_active
+     ORDER BY c.slug
+"""
+
+
+async def _facts(conn, key_id: str, tenant_sel: str) -> dict:
+    """Read every row _RESOLVE_SQL's joins would have needed, without joining them."""
+    sec = await conn.fetchrow(_DIAG_SECRET_SQL, key_id)
+    ten = await conn.fetchrow(_DIAG_TENANT_SQL, tenant_sel)
+    grant = granted = None
+    if sec and sec["integration_id"]:
+        granted = await conn.fetch(_DIAG_GRANTS_SQL, sec["integration_id"])
+        if ten:
+            grant = await conn.fetchrow(_DIAG_GRANT_SQL, sec["integration_id"], ten["id"])
+    return {
+        "secret": dict(sec) if sec else None,
+        "tenant": dict(ten) if ten else None,
+        "grant": dict(grant) if grant else None,
+        "granted_tenants": [dict(r) for r in (granted or [])],
+    }
+
+
+def _tenant_view(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    return {"client_id": str(row.get("client_id") or row.get("id")),
+            "slug": row.get("slug"), "name": row.get("name"),
+            "is_active": bool(row.get("is_active"))}
+
+
+def _report(key_id: str, tenant_sel: str, secret_ok: bool | None, facts: dict) -> dict:
+    """Pure: rows in, operator report out. Takes the ALREADY-COMPARED verdict, not the secret,
+    so no code path here can put a secret (or its hash) into something that gets serialized."""
+    sec = facts.get("secret") or None
+    ten = facts.get("tenant") or None
+    grant = facts.get("grant") or None
+
+    checks: list[dict] = []
+
+    def add(step: str, ok: bool | None, detail: str) -> None:
+        checks.append({"step": step, "ok": ok, "detail": detail})
+
+    add("key_id_known", bool(sec),
+        f"key_id {key_id} found" if sec else f"no credential with key_id {key_id} — "
+        "the key was never issued here, or this is a different CQ deployment")
+
+    if sec:
+        live = not sec.get("is_revoked") and not sec.get("is_expired")
+        add("secret_live", live,
+            "revoked" if sec.get("is_revoked") else
+            "expired (a rotation overlap has run out)" if sec.get("is_expired") else "live")
+        add("integration_active", bool(sec.get("integration_active")),
+            "active" if sec.get("integration_active") else "the integration was deactivated")
+    else:
+        add("secret_live", None, "not evaluated — no such key_id")
+        add("integration_active", None, "not evaluated — no such key_id")
+
+    add("tenant_found", bool(ten),
+        f"selector matches {ten['slug']}" if ten else
+        f"no workspace has id or slug {tenant_sel[:64]!r}")
+    add("tenant_active", bool(ten and ten.get("is_active")) if ten else None,
+        ("active" if ten and ten.get("is_active") else "the workspace is deactivated")
+        if ten else "not evaluated — no such workspace")
+
+    if sec and ten:
+        add("grant_exists", bool(grant),
+            "granted" if grant else
+            "this credential has no grant for that workspace — the fix is one grant row, "
+            "not a new key")
+        add("grant_active", bool(grant and grant.get("is_active")) if grant else None,
+            ("active" if grant and grant.get("is_active") else "the grant was revoked")
+            if grant else "not evaluated — no grant row")
+    else:
+        add("grant_exists", None, "not evaluated — key_id or workspace unknown")
+        add("grant_active", None, "not evaluated — key_id or workspace unknown")
+
+    add("secret_matches", secret_ok,
+        "not evaluated — only a key_id was supplied, no secret to check" if secret_ok is None
+        else "the secret matches the stored hash" if secret_ok
+        else "the secret does not match the stored hash — truncated paste, or a rotated key")
+
+    # Effective scopes exactly as _RESOLVE_SQL computes them: the grant narrows the integration,
+    # and an empty grant scope array means "everything the integration holds".
+    held = list((sec or {}).get("integration_scopes") or [])
+    gs = list((grant or {}).get("scopes") or [])
+    effective = [s for s in held if s in gs] if gs else held
+    add("scopes", bool(effective) if (sec and grant) else None,
+        ", ".join(effective) if effective else
+        "not evaluated" if not (sec and grant) else "no scopes in the intersection")
+
+    failed = {c["step"]: c for c in checks if c["ok"] is False}
+    if "key_id_known" in failed:
+        verdict = "unknown_key_id"
+    elif "secret_live" in failed:
+        verdict = "secret_revoked" if sec.get("is_revoked") else "secret_expired"
+    elif "integration_active" in failed:
+        verdict = "integration_inactive"
+    elif "tenant_found" in failed:
+        verdict = "tenant_not_found"
+    elif "tenant_active" in failed:
+        verdict = "tenant_inactive"
+    elif "grant_exists" in failed:
+        verdict = "no_grant"
+    elif "grant_active" in failed:
+        verdict = "grant_inactive"
+    elif secret_ok is False:
+        verdict = "secret_mismatch"
+    else:
+        # Everything a request would have needed holds. With no secret supplied that is as far
+        # as the operator's check can go, and saying so is more honest than "ok".
+        verdict = "ok" if secret_ok else "ok_structurally"
+
+    return {
+        "key_id": key_id,
+        "tenant": tenant_sel,
+        "secret_checked": secret_ok is not None,
+        "verdict": verdict,
+        "checks": checks,
+        "integration": None if not sec else {
+            "id": str(sec.get("integration_id") or ""),
+            "name": sec.get("integration_name"),
+            "is_active": bool(sec.get("integration_active")),
+            "scopes": held,
+        },
+        "tenant_match": _tenant_view(ten),
+        "granted_tenants": [_tenant_view(t) for t in facts.get("granted_tenants") or []],
+        "effective_scopes": effective,
+    }
+
+
+async def _diagnose(conn, key_id: str, tenant_sel: str) -> str:
+    """The reason a resolve() failed, as one REASONS literal. Never raises."""
+    try:
+        facts = await _facts(conn, key_id, tenant_sel)
+    except Exception as exc:  # noqa: BLE001 — a diagnosis must never become the failure
+        log.warning("integration diagnosis failed: %s", exc)
+        return _REASON_UNKNOWN
+    # Reaching resolve()'s failure branch with everything structural intact means the compare
+    # is what failed, so the verdict is computed with secret_ok=False rather than "unknown".
+    return _report(key_id, tenant_sel, False, facts)["verdict"]
+
+
+def split_diagnosed_key(raw: str) -> tuple[str, str | None]:
+    """Operator input -> (key_id, secret or None). Accepts a bare key_id, `cqi_<key_id>`, or a
+    full `cqi_<key_id>.<secret>` — an operator pastes whichever of those they have to hand.
+
+    Split at the FIRST dot immediately: the secret half leaves this function only as the input to
+    a hash comparison, and everything downstream is built from `key_id` alone.
+    """
+    raw = (raw or "").strip()
+    if raw.startswith(KEY_PREFIX):
+        raw = raw[len(KEY_PREFIX):]
+    key_id, sep, secret = raw.partition(".")
+    return key_id.strip(), (secret if sep and secret else None)
+
+
+async def diagnose(raw: str, tenant_sel: str) -> dict:
+    """Superadmin-only: why does this key + workspace pair 401? See routers/admin.py."""
+    key_id, secret = split_diagnosed_key(raw)
+    tenant_sel = (tenant_sel or "").strip()
+    if not key_id or not tenant_sel:
+        reason = "bad_key_shape" if not key_id else "missing_tenant_selector"
+        return {"key_id": key_id, "tenant": tenant_sel, "secret_checked": False,
+                "verdict": reason, "checks": [{"step": "key_id_known", "ok": False,
+                                               "detail": "a key_id and a workspace selector "
+                                                         "are both required"}],
+                "integration": None, "tenant_match": None, "granted_tenants": [],
+                "effective_scopes": []}
+
+    async with pool().acquire() as conn:
+        facts = await _facts(conn, key_id, tenant_sel)
+
+    secret_ok = None
+    if secret is not None:
+        stored = (facts["secret"] or {}).get("secret_hash") or _DUMMY_HASH
+        secret_ok = hmac.compare_digest(_sha256(secret), stored) and facts["secret"] is not None
+    report = _report(key_id, tenant_sel, secret_ok, facts)
+    log.info("[cq] integration diagnosed | key_id=%s tenant_sel=%s verdict=%s",
+             key_id, tenant_sel[:64], report["verdict"])
+    return report
 
 
 def has_scope(principal, scope: str) -> bool:
