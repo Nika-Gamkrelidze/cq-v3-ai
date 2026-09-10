@@ -76,11 +76,15 @@ def test_records_in_the_same_minute_merge_into_one_row():
 
 
 def test_bucket_is_the_calendar_minute_floored_in_utc():
-    acc, _ = _acc(1_700_000_030.0)                   # :30 into a minute
+    # 1_700_000_010 is 2023-11-14 22:13:30 UTC — thirty seconds into the 22:13 minute. The
+    # expectation is written as a literal datetime rather than another epoch integer on
+    # purpose: 1_700_000_000 LOOKS round and is actually 22:13:20, which is how this test
+    # first shipped asserting that a floored minute equals :20 past one.
+    acc, _ = _acc(1_700_000_010.0)
     acc.record(principal_kind="tenant", client_id=CLIENT_A, ms=1, status=200,
                bytes_in=0, bytes_out=0)
     bucket = acc.drain()[0]["bucket"]
-    assert bucket == datetime.fromtimestamp(1_700_000_000, tz=timezone.utc)
+    assert bucket == datetime(2023, 11, 14, 22, 13, tzinfo=timezone.utc)
     assert bucket.tzinfo is not None and bucket.second == 0
 
 

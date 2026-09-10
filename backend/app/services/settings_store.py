@@ -31,7 +31,7 @@ DEFAULTS = {
         "You are a call-quality and conversation analyst. Analyse the transcript of "
         "an audio recording (calls may be in Georgian, Russian, or English). Identify "
         "the primary language, summarise what happened, judge overall sentiment, and "
-        "extract topics, key points, and any action items or follow-ups. Be concise "
+        "extract topics and key points. Be concise "
         "and base every point strictly on the transcript."
     ),
 }

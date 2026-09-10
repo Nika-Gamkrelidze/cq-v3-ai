@@ -45,11 +45,12 @@ ANALYSIS_TOOL = {
                 "items": {"type": "string"},
                 "description": "The most important points or statements.",
             },
-            "action_items": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Concrete follow-ups or action items, if any.",
-            },
+            # NO action_items here, deliberately. This tool once returned them and no page
+            # ever displayed them — the per-call card was not carried into the React port —
+            # so every upload paid output tokens for a list nobody read. Follow-ups live in
+            # ONE place now: the Summarise digest (`services/summarise.py`), which sees a
+            # whole thread and can tell that call 3 closed what call 1 opened. Adding the
+            # field back here would resurrect the duplicate, not fill a gap.
             "quality_score": {
                 "type": "integer",
                 "description": "Overall quality/clarity of the interaction, 0-100.",
@@ -57,7 +58,7 @@ ANALYSIS_TOOL = {
         },
         "required": [
             "language", "summary", "sentiment", "topics",
-            "key_points", "action_items", "quality_score",
+            "key_points", "quality_score",
         ],
         "additionalProperties": False,
     },
@@ -82,7 +83,7 @@ async def analyze(transcript: str, api_key: str, model: str, instructions: str,
     # Respond in the caller's language: the summary, topics, key points and action items must
     # be written in the SAME language as the transcript (e.g. Georgian in, Georgian out).
     user_content += (
-        "\n\nWrite the summary, topics, key_points and action_items in the SAME language as the "
+        "\n\nWrite the summary, topics and key_points in the SAME language as the "
         "transcript above. Keep 'sentiment' as one of the allowed enum values."
     )
 
@@ -127,8 +128,11 @@ def _as_str_list(value) -> list[str]:
 
 def _normalize(analysis: dict) -> dict:
     """Guarantee a stable analysis shape regardless of model quirks."""
-    for field in ("topics", "key_points", "action_items"):
+    for field in ("topics", "key_points"):
         analysis[field] = _as_str_list(analysis.get(field))
+    # A job analysed before action items were dropped keeps whatever it stored; this shape is
+    # for what the model returns NOW, so nothing re-creates the key on a fresh analysis.
+    analysis.pop("action_items", None)
     analysis["summary"] = "" if analysis.get("summary") is None else str(analysis.get("summary"))
     analysis["language"] = "" if analysis.get("language") is None else str(analysis.get("language"))
     sentiment = analysis.get("sentiment")

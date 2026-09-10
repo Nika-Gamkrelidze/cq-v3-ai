@@ -116,7 +116,9 @@ export interface Analysis {
   topics?: unknown;
   summary?: string | null;
   key_points?: unknown;
-  action_items?: unknown;
+  // `action_items` is gone on purpose. Jobs analysed before 2026-09-10 still carry the key in
+  // their stored blob and the history route still hands it over; leaving it typed here is an
+  // invitation to render a list that new analyses do not have. Follow-ups: the Summarise tab.
 }
 
 export interface AnalyzeResult {
@@ -132,7 +134,11 @@ export interface AnalyzeResult {
 /** The analysis card's fields, with the list-shaped ones already normalised.
 
     `language` falls back to the job's own detected language: the analysis tool may omit it,
-    and the STT layer always knows. */
+    and the STT layer always knows.
+
+    NO `actionItems`. The tool stopped returning them (`services/claude.py` says why); the one
+    place follow-ups belong is the Summarise digest, which reads a whole thread. Reading the
+    key off an OLD job row would show a list the current pipeline no longer produces. */
 export interface AnalysisView {
   language: string;
   sentiment: string;
@@ -140,7 +146,6 @@ export interface AnalysisView {
   topics: string[];
   summary: string;
   keyPoints: string[];
-  actionItems: string[];
   kbUsed: KbHit[];
 }
 
@@ -153,7 +158,6 @@ export function analysisView(result: AnalyzeResult | null | undefined): Analysis
     topics: toStringList(a.topics),
     summary: str(a.summary),
     keyPoints: toStringList(a.key_points),
-    actionItems: toStringList(a.action_items),
     kbUsed: result && Array.isArray(result.kb_used) ? result.kb_used.filter(Boolean) : [],
   };
 }
