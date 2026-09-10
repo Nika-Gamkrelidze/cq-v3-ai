@@ -51,7 +51,8 @@ import time
 
 from . import db
 from .config import settings
-from .services import audio_convert, chat_store, kb_reembed, retention
+from .services import (audio_convert, chat_store, health_metrics, kb_reembed, retention,
+                       settings_store)
 from .services.curation import apply as curation_apply
 from .services.curation import runner as curation_runner
 
@@ -121,6 +122,13 @@ KB_REEMBED_TICK_S = 15.0
 # public page. The tick is one `iterdir` over a directory that is empty almost always.
 CONVERT_SWEEP_TICK_S = 600.0
 
+# ---- Server health: metric retention --------------------------------------------------------
+# The sampler and the load flusher live in the api (they measure THAT process); only the deletion
+# is out-of-band. Hourly for the same reason as the retention purge above: the deadline is days,
+# and `system_metrics` at a 10 s cadence is ~8.6k rows/day — a DELETE by primary-key range that
+# there is no reason to run every minute.
+HEALTH_PURGE_INTERVAL_S = 3600.0
+
 # Shutdown budget. Must stay BELOW the compose `stop_grace_period`, or the "graceful" path is
 # never actually taken.
 SHUTDOWN_TIMEOUT_S = 45.0
@@ -135,7 +143,9 @@ REQUIRED_TABLES = ("copilot_suggestions", "curation_runs", "curation_proposals",
                    # it creates this table, so seeing the table means the columns are there
                    # too. Without it the first purge on a fresh database raced the migration
                    # and logged UndefinedColumnError.
-                   "tts_requests")
+                   "tts_requests",
+                   # health.sql — read by health_purge.
+                   "system_metrics", "tenant_load")
 # Bounded wait for those tables. Backs off 1 -> 2 -> 4 -> 8 s, capped, and gives up after this
 # long: if the api is genuinely broken the worker should start anyway and let each duty fail
 # loudly on its own interval, rather than sit silent forever pretending to be healthy.
@@ -356,6 +366,21 @@ async def _convert_sweep() -> None:
     await audio_convert.sweep_expired()
 
 
+async def _health_purge() -> None:
+    """Delete server-health rows older than the operator's retention. The retention is re-read
+    every tick, so a change in the console's Health tab takes effect on the next hour without
+    a restart; there is no cap on the number of rows — a purge that leaves a backlog behind
+    would make the retention setting a lie."""
+    days = (await settings_store.get_health_config())["retention_days"]
+    result = await health_metrics.purge(days)
+    deleted = result.get("metrics_deleted", 0) + result.get("load_deleted", 0)
+    if deleted:
+        # Quiet when nothing was due — an hourly "0 deleted" line is the kind of noise that
+        # hides a real error in this log.
+        log.info("health purge: %s metric row(s) + %s load row(s) older than %s day(s)",
+                 result.get("metrics_deleted", 0), result.get("load_deleted", 0), days)
+
+
 async def _run_duty(name: str, interval_s: float, fn) -> None:
     """Run one duty forever on a fixed interval until the stop flag is set.
 
@@ -396,14 +421,15 @@ async def main() -> None:
     log.info(
         "cq-worker started | duties=%s | reap_interval=%ss stale_after=%ss | "
         "curation_window=%02d:00-%02d:00 UTC tick=%ss apply_poll=%ss auto_apply=never | "
-        "kb_reembed_poll=%ss doc_pause=%ss reclaim_after=%ss | "
+        "kb_reembed_poll=%ss doc_pause=%ss reclaim_after=%ss | health_purge=%ss | "
         "db_pool=%s-%s | migrations=api-only sweep_stuck_jobs=api-only",
         "reap_stale_suggestions,curation_pass,apply_accepted_proposals,kb_reembed_pass,"
-        "retention_purge,convert_sweep",
+        "retention_purge,convert_sweep,health_purge",
         REAP_INTERVAL_S, REAP_STALE_AFTER_S,
         CURATION_WINDOW_START_S // 3600, (CURATION_WINDOW_START_S + CURATION_WINDOW_S) // 3600,
         CURATION_TICK_S, CURATION_APPLY_INTERVAL_S,
         KB_REEMBED_TICK_S, kb_reembed.DOC_PAUSE_S, kb_reembed.CLAIM_STALE_AFTER_S,
+        HEALTH_PURGE_INTERVAL_S,
         settings.db_pool_min, settings.db_pool_max,
     )
 
@@ -430,6 +456,8 @@ async def main() -> None:
                             name="retention_purge"),
         asyncio.create_task(_run_duty("convert_sweep", CONVERT_SWEEP_TICK_S, _convert_sweep),
                             name="convert_sweep"),
+        asyncio.create_task(_run_duty("health_purge", HEALTH_PURGE_INTERVAL_S, _health_purge),
+                            name="health_purge"),
     ]
     try:
         await _stop.wait()

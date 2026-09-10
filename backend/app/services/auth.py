@@ -33,6 +33,7 @@ import ipaddress
 import json
 import logging
 import secrets
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from fastapi import Header, HTTPException, Request
@@ -225,15 +226,40 @@ async def _superadmin(via: str, act_as: str) -> Principal:
                      via=via, tenant_sel=act_as)
 
 
+# The Principal of the request in flight, for readers that sit OUTSIDE the dependency graph —
+# today the load-metering middleware in main.py, which wants "who was this" after the route
+# has answered and has no way to receive it as a parameter. Same mechanism and the same safety
+# argument as `attribution`: a ContextVar set inside a request's task is visible only to that
+# task tree, and every request runs in a fresh task whose context was copied from the server
+# protocol (where this was never set), so no per-request reset is needed — a request that
+# resolved no principal (a 404, `/health`, a preflight, a 401 raised before `_remember`) reads
+# the default None, never the previous request's value.
+#
+# Verified against how the value is consumed: the reader must share the request's task. That
+# holds for a pure ASGI middleware, which awaits the app directly; it does NOT hold for a
+# `BaseHTTPMiddleware` (`@app.middleware("http")`), whose `call_next` runs the app in a child
+# task — mutations made there never reach the parent. Read it through a pure ASGI middleware,
+# or from `request.state`, and never from `call_next`'s caller.
+_principal: ContextVar[Principal | None] = ContextVar("cq_principal", default=None)
+
+
+def current_principal() -> Principal | None:
+    """The Principal `resolve_principal` produced for the request in flight, or None when the
+    request never got that far (or never asked)."""
+    return _principal.get()
+
+
 def _remember(principal: Principal) -> Principal:
     """Publish who this request is, so AI usage can be attributed without being passed down.
 
     EVERY return path of `resolve_principal` goes through here — a test enforces that — because
     a path that forgot would record its Claude calls as unattributed, which looks identical to
     a call that genuinely had no actor. See `attribution` for why this is ambient rather than a
-    parameter.
+    parameter. The Principal itself is published too (see `_principal` above), so the health
+    load meter can attribute the request's wall time to a tenant without the dependency graph.
     """
     attribution.set_actor(principal.audit_actor)
+    _principal.set(principal)
     return principal
 
 

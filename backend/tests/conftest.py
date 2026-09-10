@@ -26,6 +26,7 @@ refuse with no LLM call, and B's chunk (the perfect match) must still never surf
 choice makes the isolation assertions strict and the LLM-free requirement automatic.
 """
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -39,6 +40,14 @@ import pytest
 _BACKEND = Path(__file__).resolve().parent.parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
+
+# The server-health sampler is an api lifespan task that writes a `system_metrics` row every few
+# seconds and flushes per-request load rows — into whatever database the suite is pointed at.
+# Off for the TestClient app: the tests are not measuring a server, and a timer writing into a
+# developer's volume while a test runs is noise at best and a flaky assertion at worst. Set
+# BEFORE `app.config` is imported (Settings reads the environment at construction), and with
+# setdefault so an explicit HEALTH_SAMPLER_ENABLED=true from the shell still wins.
+os.environ.setdefault("HEALTH_SAMPLER_ENABLED", "false")
 
 from app.config import settings  # noqa: E402 — must follow the sys.path bootstrap above
 

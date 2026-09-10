@@ -8,13 +8,14 @@ import asyncio
 import json
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
-from ..services import (ai_config, chat_credentials, chat_store, claude, limits, settings_store,
-                        usage, voice)
+from ..services import (ai_config, chat_credentials, chat_store, claude, health_metrics, limits,
+                        settings_store, usage, voice)
 from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
@@ -369,6 +370,55 @@ async def put_storage(patch: StoragePatch):
         return await settings_store.set_storage_config(patch.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---- Server health (the console's Health tab) ----------------------------------------------
+# Reads over `system_metrics` / `tenant_load`, written by the api's sampler + load flusher
+# (main.py) and trimmed by the worker's `health_purge`. All of it lives in
+# services/health_metrics; these routes only choose the window.
+class HealthSettingsPatch(BaseModel):
+    # No Field bounds on purpose: the store validates (retention 1..365 days, interval
+    # 5..300 s) and raises ValueError, which this router turns into the same 400 + `code` +
+    # `field` shape the transcription settings use. Pydantic bounds here would answer the
+    # out-of-range case with a 422 instead, and the console branches on the 400.
+    retention_days: int | None = None
+    sample_interval_s: int | None = None
+
+
+@router.get("/health/overview", dependencies=[Depends(require_admin)])
+async def health_overview():
+    return await health_metrics.overview()
+
+
+@router.get("/health/series", dependencies=[Depends(require_admin)])
+async def health_series(range_: str = Query("24h", alias="range")):
+    return await health_metrics.series(range_)
+
+
+@router.get("/health/tenants", dependencies=[Depends(require_admin)])
+async def health_tenants(range_: str = Query("24h", alias="range")):
+    return await health_metrics.tenant_table(range_)
+
+
+@router.get("/health/settings", dependencies=[Depends(require_admin)])
+async def get_health_settings():
+    return await settings_store.get_health_config()
+
+
+@router.put("/health/settings", dependencies=[Depends(require_admin)])
+async def put_health_settings(patch: HealthSettingsPatch):
+    try:
+        return await settings_store.set_health_config(patch.model_dump(exclude_none=True))
+    except ValueError as exc:
+        # The store raises HealthSettingError with the offending `field`; the message-scan is
+        # only the fallback for a plain ValueError, so the tab can point at the input rather
+        # than at the form either way.
+        field = getattr(exc, "field", None) or next(
+            (f for f in ("retention_days", "sample_interval_s") if f in str(exc)), None)
+        # A JSONResponse, not HTTPException(detail={...}): the latter nests the dict under
+        # `detail`, and the console reads `code` and `field` at the top level.
+        return JSONResponse(status_code=400, content={
+            "detail": str(exc), "code": "invalid_health_setting", "field": field})
 
 
 # ---- Registered-user tier: daily limits + feature switches ---------------------------

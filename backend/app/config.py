@@ -79,5 +79,12 @@ class Settings(BaseSettings):
     # stored provider key is unreadable without the key it was sealed with.
     secrets_key: str = ""
 
+    # --- Server health sampling (services/health_metrics.py, /admin/health/*) ---
+    # The host sampler and the per-request load flusher run INSIDE the api process — that is the
+    # process whose RSS, pool and requests are being measured — as lifespan tasks. Off in the
+    # test suite (conftest sets it), where a TestClient app has no business writing metric rows
+    # into a developer's database on a timer; on everywhere else. env: HEALTH_SAMPLER_ENABLED
+    health_sampler_enabled: bool = True
+
 
 settings = Settings()

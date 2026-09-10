@@ -1,5 +1,11 @@
 # Prompt for Claude Code in the chat-service repository
 
+> **Historical — consumed by swiftchat-server `ca1a3aa` / swiftchat-suite `47f2539` on 2026-09-08.**
+> The chat side was built from this prompt; the file is kept for the record and is **not**
+> maintained (the 429 codes, channel names and check order below are already behind
+> `CHAT_INTEGRATION.md`). Edit `CHAT_INTEGRATION.md` and the consumer's `src/services/cq/`
+> instead — never this file.
+
 Paste everything below the line into Claude Code, opened at the root of the **chat-service**
 repository. Replace every `<ANGLE_BRACKET>` placeholder first. The full contract lives in the CQ
 repository as `docs/CHAT_INTEGRATION.md`; this prompt inlines what the chat side needs and does

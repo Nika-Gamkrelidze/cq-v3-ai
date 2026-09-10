@@ -383,6 +383,9 @@ function CreateBody({
           <span><code>{s}</code> — {t(key)}</span>
         </label>
       ))}
+      {/* A key short a scope fails with the SAME 401 as a bad key (chat.py refuses to say which),
+          so the one place to prevent that diagnosis is here, before the key is minted. */}
+      <p className="hint">{t('cred.scopes.hint')}</p>
       <label>{t('cred.workspaces')}</label>
       <div style={{ maxHeight: 220, overflow: 'auto' }}>
         {tenants.length ? tenants.map(x => (

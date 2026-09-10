@@ -151,6 +151,8 @@ async def run_startup_migrations() -> list[str]:
         # capability overrides) + provider/connection columns on llm_usage. After
         # ai_usage.sql, whose tenant_ai_configs it supersedes and copies from below.
         await _apply(conn, "ai_connections.sql")
+        # health.sql: host samples + per-tenant request load behind the console's Health tab.
+        await _apply(conn, "health.sql")
         log.append(await _migrate_tenant_ai_configs(conn))
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))

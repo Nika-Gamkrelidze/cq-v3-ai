@@ -13,3 +13,4 @@ pytest
 pytest-asyncio
 openpyxl
 cryptography>=43
+psutil

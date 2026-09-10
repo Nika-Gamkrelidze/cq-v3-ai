@@ -37,6 +37,21 @@ the operator is shown `handoff.summary` / `handoff.reason`, and **the bot stops 
 conversation for good**. From then on the chat backend keeps calling `POST /v1/chat/turns` for
 every message so the operator gets copilot drafts.
 
+**Consumer.** The chat backend on the other side of this contract is **Swift Chat ("CQ Chat")**,
+owned by the same person, in production at `cq-chat-v1.communiq.ge`. Two repositories (local
+workspace `~/Development/Swift Chat/`):
+
+- **`swiftchat-server`** (Express + TypeScript + Prisma + Socket.IO) — `src/services/cq/cqClient.ts`
+  is the **only** HTTP client for `/v1/chat/*`; `src/services/cq/botFlow.ts` is the
+  `bot → handed_off` state machine; `docs/CQ_INTEGRATION_RUNBOOK.md` is their runbook and
+  `scripts/validate-cq.ts` a mock harness that replays this document's status codes.
+- **`swiftchat-suite`** (React + Vite + Ant Design) — `CqAiManager.tsx` (tenant ↔ CQ mapping and
+  *Test connection*) and `CopilotPanel.tsx` (drafts and citations for operators).
+
+Their push to `main` auto-deploys within ~5 min, like this repo's. **A change to this contract is
+not shipped until a matching commit lands there** — edit this file and their `src/services/cq/`
+in the same working session, never one without the other.
+
 ---
 
 ## 2. Flows
@@ -210,9 +225,12 @@ suppress the disclosure on the bot's first real answer.
 ## 5. Endpoints, in flow order
 
 All request bodies are JSON. All error bodies are `{"detail": "<string>"}`; the chat router's own
-errors add a **sibling** `"code"` (never nested in `detail`). Errors raised by the shared auth and
-rate-limit layers (400/401/403/429 in §7) carry **no** `code`. Pydantic validation errors are
-FastAPI's default **422** with a *list*-shaped `detail`.
+errors add a **sibling** `"code"` (never nested in `detail`). Errors raised by the shared auth
+layer (400/401/403 in §7) carry **no** `code`. The rate caps (**429**) do, since 2026-09-09:
+`rate_limited_tenant` / `rate_limited_enduser` (§7) — tell the two caps apart by the key, never
+by matching the English `detail`. The 429 `detail` strings (`… per minute …` / `… per hour …`)
+are **frozen**: the consumer's fallback matches `per minute` when `code` is absent.
+Pydantic validation errors are FastAPI's default **422** with a *list*-shaped `detail`.
 
 ### 5.0 `GET /v1/chat/health` — transport probe
 
@@ -267,16 +285,19 @@ Blocking by default; `?stream=1` returns SSE (§5.2.2).
 | `conversation_ref` | **required**, 1–200 chars. Your thread id. Unique per tenant on your side. |
 | `content` | **required**. Trimmed; empty → **400** `empty_content`; > **8000** chars → **413** `content_too_large`. |
 | `turn_ref` | ≤ 200 chars. **Your message id** — the idempotency key (§8). Strongly recommended. |
-| `channel` | opaque string, default `"web"` (`whatsapp`, `messenger`, … are fine). Used for per-channel disclosure copy. |
+| `channel` | string, default `"web"`. Accepted — and what the consumer sends: `web` \| `messenger` \| `instagram` \| `whatsapp`. **Not validated**: it is the key into the tenant's `disclosure_channels` (per-channel AI-disclosure copy), so a value CQ has never seen is stored as-is and silently gets the *default* disclosure. Spell it exactly (`facebook` is not `messenger`). |
 | `locale` | `ka` \| `ru` \| `en`. Default: the tenant's `languages[0]`. |
 | `customer_ref` | opaque end-user id; the `X-CQ-End-User` header wins when both are present. |
 | `display_name`, `subject`, `attachment` | ≤ 200 chars each. Optional context from social channels; CQ quarantines them as untrusted input. Do **not** concatenate them into `content`. |
 
 There is no `role` (an answer is always a reply to the **customer**) and no `mode`.
 
-**Order of checks** (why the status codes come in this order): kill switch (**503**) → tenant
-`autopilot_enabled` (**409**) → content (**400/413**) → mirror write → rate caps (**429**, only for
-a message CQ has not seen before) → replay check (§8) → the engine.
+**Order of checks** (why the status codes come in this order): credential + `X-CQ-Expect-Tenant`
+(**401/400/403**) → content (**400/413**) → kill switch (**503**) → tenant `autopilot_enabled`
+(**409**) → mirror write → rate caps (**429** `rate_limited_tenant` / `rate_limited_enduser`, only
+for a message CQ has not seen before) → replay check (§8) → the engine. Two consequences: a blank
+or oversized message is refused *before* the kill switch is consulted, and a 429 means the
+customer's message **was** mirrored.
 
 **Blocking response — 200**
 
@@ -341,8 +362,9 @@ a message CQ has not seen before) → replay check (§8) → the engine.
 | 409 | `answer_in_flight` | A concurrent delivery of the **same `turn_ref`** is still being answered. |
 | 502 | `generation_failed` | Replay of a `turn_ref` whose first attempt failed. Permanent for that `turn_ref`. |
 | 502 | `answer_failed` | This attempt failed. The same `turn_ref` will now replay as `generation_failed`. |
-| 429 | `llm_busy` | CQ's model admission control refused the call. |
-| 429 | *(none)* | Rate cap: `Rate limit reached for chat_answer (60 per minute).` or `(60 per hour)`. |
+| 429 | `rate_limited_tenant` | Tenant cap: `Rate limit reached for chat_answer (60 per minute).` **Pause the bot for this tenant** for the rest of the window; copilot mirrors continue. |
+| 429 | `rate_limited_enduser` | End-user cap (`X-CQ-End-User` / `customer_ref`): `… (60 per hour)`. **Hand off this conversation only**; the tenant's bot keeps answering everyone else. |
+| 429 | `llm_busy` | CQ's model admission control refused the call. Hand off this conversation. |
 
 #### 5.2.2 `?stream=1` — SSE
 
@@ -435,6 +457,16 @@ mirror **operator** messages (`role: "operator"`) so drafts know what the operat
 and in bot mode mirror **each bot reply you sent** (`role: "bot"`, `turn_ref` = that message's id)
 so follow-up questions ("and how much is it?") keep their referent and the disclosure-`first`
 mode fires once instead of on every reply. Do not mirror the greeting (§4).
+
+**Retries and replays of a turn.** The chat backend retries `POST /turns` up to **3×** on 5xx /
+timeout with backoff, and a turn that was dropped with a **429** is replayed after the
+conversation's next accepted turn — in both cases with the **same `turn_ref`**. CQ must keep
+treating those as replays: in `post_turn` the mirror write runs first, the rate cap is reserved
+only when that write created a new row, and the replay check therefore precedes metering (§8). So
+a 429'd turn is already stored; its replay returns `idempotent_replay: true`, is **not metered
+again**, and starts the generation the first attempt never reached (`suggest_ref` is filled in,
+`precompute: true`). Do not reorder these steps — reserving before the write is what once let a
+retry loop 429 a tenant on turns it had already stored.
 
 ### 5.4 `GET /v1/chat/suggestions/{suggest_ref}` — scope `chat:suggest` — the warm read
 
@@ -620,12 +652,19 @@ mirrored history; see §5.3), or `always` / `off` as the tenant configured. **Ne
 | 413 | `content_too_large` | turns, answer | > 8000 chars | bot mode → operator (a paste that long is not a question); copilot: mirror a truncated copy. |
 | 413 | `batch_too_large` / `conversation_too_large` | sync | > 100 conversations / > 200 turns | split the batch. |
 | 422 | *(FastAPI list `detail`)* | any | body validation (e.g. `mode` ≠ `assist`, missing `conversation_ref`, `stream` not 0/1) | **bug** — alert; do not retry. |
-| 429 | *(none)* `Rate limit reached for chat_answer (60 per minute).` | answer | tenant cap **60 answers/min**, or **60/hour per `X-CQ-End-User`** | → operator for this conversation; do not retry the same message; back off the tenant for the rest of the window. |
-| 429 | *(none)* `… for chat_turns (120 per minute).` | turns, regenerate | copilot caps **120/min per tenant**, **120/hour per end user** | back off; retry the mirror later (idempotent). |
-| 429 | `llm_busy` | answer | model admission control | → operator. |
+| 429 | `rate_limited_tenant` `Rate limit reached for chat_answer (60 per minute).` | answer | tenant cap **60 answers/min** | → operator for this conversation; do not retry the same message; **pause the bot for the whole tenant** for the rest of the window (≈ 60 s). `/turns` is a separate counter — keep mirroring, the copilot must not go dark. |
+| 429 | `rate_limited_enduser` `… for chat_answer (60 per hour).` | answer | **60/hour per `X-CQ-End-User`** — one customer | → operator for **this conversation only**; do not retry the same message; the tenant's bot keeps answering everyone else. Nothing tenant-wide. |
+| 429 | `rate_limited_tenant` / `rate_limited_enduser` `… for chat_turns (120 per minute)` / `(120 per hour)` | turns, regenerate | copilot caps **120/min per tenant**, **120/hour per end user** | back off; retry the mirror later (idempotent). Never open the tenant's circuit on these. |
+| 429 | `llm_busy` | answer | model admission control | → operator for this conversation. |
 | 502 | `answer_failed` / `generation_failed` | answer | generation failed / a failed `turn_ref` replayed | → operator. **Never loop on the same `turn_ref`.** |
 | 503 | `autopilot_disabled` | answer | **kill switch** | → operator; open the tenant's circuit; re-probe `GET /config` every 30–60 s; resume the bot for **new** conversations only when `/answer` succeeds again. |
 | any 5xx / timeout / connection error | | any | | bot mode → operator (after one safe retry, §8); copilot → retry the mirror later. |
+
+Only **401/403**, **503** `autopilot_disabled`, and 5xx/timeouts justify a tenant-wide circuit.
+A **429** is never one: the tenant cap pauses the *bot* only (mirrors keep flowing), the end-user
+cap is one conversation, and **409** `autopilot_not_enabled` is a config state to re-read, not a
+failure. The 429 `detail` strings above are frozen — a consumer built before the codes shipped
+matches `per minute` in them, and must keep working until it is redeployed.
 
 All caps are per tenant and adjustable by the CQ operator in the tenant's chat config (`limits`:
 `answer_tenant_per_minute`, `answer_enduser_per_hour`, `tenant_per_minute`, `enduser_per_hour`).
@@ -651,7 +690,8 @@ All caps are per tenant and adjustable by the CQ operator in the tenant's chat c
 - **Recommended policy.** `/answer`: client timeout ~45 s (retrieval + streamed answer + an
   optional handoff summary); on timeout / connection error retry **once** with the same `turn_ref`
   after 1 s (safe — you get the finished answer if CQ completed), then hand off. Never retry a 4xx
-  other than `answer_in_flight`; never retry a 429 or a 502 on the same conversation — hand off.
+  other than `answer_in_flight`; never retry a 429 or a 502 on the same conversation — hand off
+  (and on `rate_limited_tenant`, pause the bot for the tenant — §7).
   `/turns`: timeout 5 s; retry up to 3× with backoff (safe replay). `/feedback`, `:sync`, `DELETE`:
   idempotent — retry freely with backoff.
 - **Metering happens after the replay check**, so a retry storm never burns the tenant's cap.
@@ -686,7 +726,7 @@ All caps are per tenant and adjustable by the CQ operator in the tenant's chat c
 | Scope | Fields |
 |---|---|
 | **Tenant** | `cq_client_id`, `ai_bot_enabled`, cached config (`version`, `autopilot_enabled`, `greeting`, `refusal_copy`, `languages`, `fetched_at`), circuit-breaker state. |
-| **Conversation** | CQ state `bot` \| `handed_off` \| `closed`; CQ's `conversation_id` (from any 200/202); `handoff` record — when, `reason`, `summary`, `goal`, and the source (`envelope` or `http_<status>:<code>`); `locale`, `channel`. |
+| **Conversation** | AI state `bot` \| `handed_off` \| `copilot` (mapped to CQ, but the bot was never offered — human flow with drafts) \| `closed`; CQ's `conversation_id` (from any 200/202); `handoff` record — when, `reason`, `summary`, `goal`, and the source (`envelope` or `http_<status>:<code>`); `locale`, `channel`. |
 | **Customer message** | `turn_ref` (= message id), CQ `turn_id`, `suggest_ref`, mode (`an_`/`sg_`), HTTP status + `code`, latency, `idempotent_replay`, and the **whole envelope JSON** (at minimum `grounding`, `citations`, `handoff`, `usage`). |
 | **Bot reply sent** | its message id (used as the `role: "bot"` mirror `turn_ref`), the `suggest_ref` it came from, whether it was a refusal (`grounding.grounded == false`). |
 | **Operator action** | what you sent to `/feedback` (`suggest_ref`, `action`, `variant_index`, `final_text`, `at`). |

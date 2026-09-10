@@ -122,6 +122,30 @@ def _err(status: int, detail: str, code: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"detail": detail, "code": code})
 
 
+class RateLimited(Exception):
+    """A cap refusal that has to travel out of a helper and become an `_err` body.
+
+    `limits.reserve_counter` raises a bare HTTPException(429) whose only content is prose, and
+    FastAPI would ship that prose without a `code`. The chat site cannot react to prose: the
+    tenant-per-minute cap means "pause the bot for this whole tenant", the end-user-per-hour cap
+    means "hand off THIS conversation only", and telling the two apart by matching 'per minute'
+    in English text is the bug this class retires. `_reserve` knows which counter refused, so it
+    is the one place the code is chosen; the route turns it into `_err` the way it already does
+    `llm.LLMBusyError`. The `detail` text is carried verbatim — the consumer's pre-code build
+    still matches on it.
+    """
+    def __init__(self, detail: str, code: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.code = code
+
+
+# The two `code` values a cap 429 carries. `llm_busy` is the third 429 (admission control) and
+# is raised further down by the engine. Contract: docs/CHAT_INTEGRATION.md §5.2.1 and §7.
+RATE_LIMITED_TENANT = "rate_limited_tenant"
+RATE_LIMITED_ENDUSER = "rate_limited_enduser"
+
+
 def _json(value):
     """asyncpg hands jsonb back as `str` unless a codec is registered — normalize both."""
     if isinstance(value, str):
@@ -158,18 +182,30 @@ async def _reserve(p: Principal, cfg: dict, end_user: str | None, *, kind: str,
     """The two metering dimensions ADR-001 §Security-bar item 4 requires on ingest.
 
     `reserve_counter` counts even when uncapped, so cost is visible from the first turn rather
-    than from whenever somebody remembers to configure a limit. It raises 429 itself.
+    than from whenever somebody remembers to configure a limit. Its 429 is re-raised here as
+    `RateLimited` with the code naming WHICH cap refused; the route returns it through `_err`.
 
     Tenant-per-minute catches a runaway integration; end-user-per-hour catches one abusive
     customer without taking the tenant's whole bot down with them. Both dimensions are needed:
-    either one alone has an obvious bypass.
+    either one alone has an obvious bypass — and they need different reactions on the chat
+    side, which is why the code matters (CHAT_INTEGRATION.md §7).
     """
-    await limits.reserve_counter(f"tenant:{p.client_id}", kind,
-                                 _limit(cfg, minute_key, minute_default), bucket="minute")
+    try:
+        await limits.reserve_counter(f"tenant:{p.client_id}", kind,
+                                     _limit(cfg, minute_key, minute_default), bucket="minute")
+    except HTTPException as exc:
+        if exc.status_code != 429:      # only a cap is ours to relabel
+            raise
+        raise RateLimited(str(exc.detail), RATE_LIMITED_TENANT) from exc
     scope = _enduser_scope(p, end_user)
     if scope:
-        await limits.reserve_counter(scope, kind,
-                                     _limit(cfg, hour_key, hour_default), bucket="hour")
+        try:
+            await limits.reserve_counter(scope, kind,
+                                         _limit(cfg, hour_key, hour_default), bucket="hour")
+        except HTTPException as exc:
+            if exc.status_code != 429:
+                raise
+            raise RateLimited(str(exc.detail), RATE_LIMITED_ENDUSER) from exc
 
 
 async def _reserve_turn(p: Principal, cfg: dict, end_user: str | None) -> None:
@@ -261,7 +297,9 @@ class AnswerIn(BaseModel):
     conversation_ref: str = Field(min_length=1, max_length=200)
     content: str
     turn_ref: str | None = Field(default=None, max_length=200)
-    channel: str = "web"                   # web | whatsapp | messenger | …
+    channel: str = "web"                   # web | messenger | instagram | whatsapp (contract §5.2)
+    # Deliberately a plain str, not a Literal: it only keys `disclosure_channels` in chat_prompts,
+    # so a channel CQ has never heard of costs nothing and falls back to the default disclosure.
     locale: str | None = None
     customer_ref: str | None = None
     # Envelope fields that are attacker-controlled on social channels exactly as much as the
@@ -367,7 +405,10 @@ async def post_turn(
     # outage. The mirror write that precedes it is idempotent and does not spend money; the
     # generation below, which does, is still gated.
     if turn_is_new:
-        await _reserve_turn(p, cfg, x_cq_end_user or body.customer_ref)
+        try:
+            await _reserve_turn(p, cfg, x_cq_end_user or body.customer_ref)
+        except RateLimited as exc:
+            return _err(429, exc.detail, exc.code)
 
     # Only a customer message is worth suggesting a reply to; an operator's own message is
     # mirrored for curation and history only.
@@ -821,7 +862,10 @@ async def regenerate(body: RegenerateIn, bg: BackgroundTasks,
                     "no_conversation")
 
     cfg = await chat_store.get_chat_config(p.client_id)
-    await _reserve_turn(p, cfg, src.get("end_user_ref") or src.get("customer_ref"))
+    try:
+        await _reserve_turn(p, cfg, src.get("end_user_ref") or src.get("customer_ref"))
+    except RateLimited as exc:
+        return _err(429, exc.detail, exc.code)
     if body.transform:
         # Carried on the config copy rather than on ChatContext: the engine already reads its
         # behaviour out of `cfg`, and widening the dataclass for a per-request knob would make
@@ -1024,7 +1068,10 @@ async def answer(
     # Metered after idempotency is resolved, for the reason spelled out in `post_turn`: one
     # logical message costs one unit however many times the channel redelivers it.
     if turn_is_new:
-        await _reserve_answer(p, cfg, x_cq_end_user or body.customer_ref)
+        try:
+            await _reserve_answer(p, cfg, x_cq_end_user or body.customer_ref)
+        except RateLimited as exc:
+            return _err(429, exc.detail, exc.code)
 
     suggest_ref = f"an_{turn_id}"
     _, claim_is_new = await chat_store.claim_suggestion(

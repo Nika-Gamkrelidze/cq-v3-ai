@@ -10,6 +10,7 @@ import BotControlTab from './BotControlTab';
 import DefaultBotTab from './DefaultBotTab';
 import DefaultRubricTab from './DefaultRubricTab';
 import EmbeddingsTab from './EmbeddingsTab';
+import HealthTab from './HealthTab';
 import IntegrationsTab from './IntegrationsTab';
 import StorageTab from './StorageTab';
 import TenantsTab from './TenantsTab';
@@ -48,13 +49,15 @@ import VoicesTab from './VoicesTab';
    change re-renders all ten panels for free. */
 
 type TabKey =
-  | 'tenants' | 'users' | 'embeddings' | 'anon' | 'storage'
+  | 'tenants' | 'health' | 'users' | 'embeddings' | 'anon' | 'storage'
   | 'defrubric' | 'defbot' | 'ai' | 'integrations' | 'voices' | 'bot';
 
 /* Tab strip order, from the legacy DOM. It is not alphabetical and not grouped by subject: it
-   is roughly how often an operator reaches for each one. */
+   is roughly how often an operator reaches for each one. Health sits second because on a bad
+   day it is the first thing an operator checks. */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'tenants', label: 'adm.tenants' },
+  { key: 'health', label: 'adm.health' },
   { key: 'users', label: 'pb.users' },
   { key: 'embeddings', label: 'adm.embeddings' },
   { key: 'anon', label: 'adm.anon' },
@@ -140,6 +143,9 @@ export default function ConsolePage() {
         </div>
 
         <Panel id="tenants" tab={tab}><TenantsTab /></Panel>
+        {/* Mounted on activation, like the bot tabs, for a second reason on top of theirs: the
+            health tab POLLS, and its timers must stop when nobody is looking at them. */}
+        <Panel id="health" tab={tab}>{tab === 'health' ? <HealthTab /> : null}</Panel>
         <Panel id="users" tab={tab}><UsersTab /></Panel>
         <Panel id="embeddings" tab={tab}><EmbeddingsTab /></Panel>
         <Panel id="anon" tab={tab}><AnonymousTab /></Panel>

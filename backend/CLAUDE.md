@@ -1,6 +1,7 @@
 # backend/ — Claude context
 
-FastAPI service + (later) AI workers. See the root CLAUDE.md for the big picture.
+FastAPI service (`cq-api`) + one periodic worker process (`cq-worker`, same image, different
+CMD). See the root CLAUDE.md for the big picture.
 
 ## Layout
 - `app/main.py` — FastAPI app + `/health`.
@@ -8,15 +9,44 @@ FastAPI service + (later) AI workers. See the root CLAUDE.md for the big picture
 - `app/db.py` — asyncpg pool (connect on lifespan startup).
 - `app/models.py` — pydantic request/response models.
 - `app/routers/calls.py` — `POST /calls` (ingest, idempotent, X-API-Key), `GET /calls/{id}`.
-- `app/services/` — (to build) elevenlabs transcription, claude scoring, pgvector retrieval.
-- `app/workers/` — (to build) transcribe + score background processes.
+- `app/services/` — the AI seams (`llm.py`, `voice.py`), retrieval, KB ingest/re-embed, fact-check,
+  scoring, chat (`chat.py`, `chat_store.py`), `curation/` (miner → cluster → propose → apply),
+  `retention.py`, `audio_convert.py`, `health_metrics.py` (server-health sampler, per-request
+  load accumulator, `/admin/health/*` queries over `system_metrics` / `tenant_load`). Routers beyond `calls.py` are listed in the root CLAUDE.md.
+- `app/worker.py` — the `cq-worker` container (`python -m app.worker`); see below.
 - `db/schema.sql`, `db/seed.sql` — schema (8 tables) + dev seed (demo client).
 
-## Transcription worker (the next build)
-New file `app/workers/transcribe.py`: query `calls WHERE status='pending'`, fetch audio from
-object storage (S3/Spaces — TBD), call Scribe (diarize on, language auto), insert into
-`transcripts`, update `calls.status`. Run as a separate compose service using the SAME image
-with a different command, triggered on a schedule / simple queue.
+## The worker (`app/worker.py`, container `cq-worker`)
+Runs as `python -m app.worker` — a compose service on the SAME image as the api so a push to
+`main` redeploys it too. Why a second process: the api serves one uvicorn worker and everything
+in it sits in front of an operator waiting on a spinner, so anything periodic or minutes-long on
+the shared TEI encoder must not share that event loop or pool (the worker has its own small pool,
+`DB_POOL_MAX=5`). Duties, each a `_run_duty` loop on its own interval:
+- `reap_stale_suggestions` — fails `copilot_suggestions` rows stuck in `running` (a deploy kills
+  the api mid-precompute; without this the operator's poll says "pending" forever).
+- `curation_pass` — nightly KB curation mining (`services/curation`: harvest → cluster → propose),
+  one run per tenant staggered across 02:00–05:00 UTC; plus manual `POST /admin/curation/run`
+  requests picked up per tick.
+- `apply_accepted_proposals` — applies curation proposals a **human accepted**. Nothing
+  auto-applies at any confidence.
+- `kb_reembed_pass` — queued full-KB re-embeds (`kb_reembed_jobs`; the console gets a 202, the
+  worker runs it — claim/throttle/resume live in `services/kb_reembed`).
+- `retention_purge` — deletes anonymous submissions past their retention deadline (files, then
+  rows), hence the shared `media` volume.
+- `convert_sweep` — removes expired converted-audio ZIPs (`audio_convert`).
+- `health_purge` — hourly `health_metrics.purge(retention_days)` over `system_metrics` /
+  `tenant_load`. The **sampler and load flusher themselves run in the api** (lifespan tasks,
+  `HEALTH_SAMPLER_ENABLED`), because that is the process whose requests and RSS are being
+  measured; only the deletion is out-of-band.
+
+Deliberately NOT done here: **no migrations** (`run_startup_migrations()` is api-only — two
+processes racing CREATE/ALTER and the embedding-dim reconciliation on boot is not safe) and no
+`analysis.sweep_stuck_jobs()` (api startup-only). The worker polls until the api's migrations
+have created its tables (`_await_schema`) before the first sweep, and shuts down cooperatively on
+SIGTERM (finishes the current sweep, bails at 45 s; compose grants 60 s).
+
+The original spec's `app/workers/transcribe.py` (batch `calls` → Scribe → `transcripts`) was
+never built; transcription runs synchronously inside `POST /analyze`.
 
 ## Conventions
 - Raw SQL via asyncpg ($1 placeholders). uuid PKs (gen_random_uuid). timestamptz everywhere.

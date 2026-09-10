@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,7 +14,8 @@ from . import db
 from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, chat_config,
                      convert, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
                      tenants, transcription as transcription_router, tts)
-from .services import ai_registry, ai_resolve, analysis
+from .config import settings
+from .services import ai_registry, ai_resolve, analysis, settings_store
 from .services import auth as auth_service
 from .services.ai_registry import RegistryError
 from .services.transcription import TranscriptionSettingsError
@@ -20,9 +23,143 @@ from .services.migrate import run_startup_migrations
 
 log = logging.getLogger("cq")
 
+# ---- Server health: per-request load metering + the host sampler -----------------------------
+# The accumulator the middleware records into. None until the lifespan has started the flusher
+# that drains it, and None again once that flusher is gone — so the middleware records ONLY
+# while something is emptying the accumulator. Without that coupling a deployment with the
+# sampler switched off (the test suite, a developer box) would grow one row per minute-bucket
+# per principal, forever, in a dict nothing reads.
+_load = None
+# How often accumulated load rows are written out. 15 s keeps the write small (one upsert per
+# minute-bucket per principal) while the Health tab's freshest minute is never more than a few
+# seconds stale.
+HEALTH_FLUSH_INTERVAL_S = 15.0
+# What the sampler loop falls back to when the settings read itself fails: the same value as
+# settings_store.HEALTH_DEFAULTS, so a broken settings row degrades to the default cadence
+# rather than to a tight loop.
+_HEALTH_SAMPLE_FALLBACK_S = 10.0
+
+
+def _record_load(scope, started: float, status: int, declared_out, body_out: int) -> None:
+    """Hand one finished request to the accumulator. Never raises: metering is not allowed to
+    turn a served request into a 500, and it runs in the request's own task, so it must cost
+    microseconds — one header scan, one dict update, no await."""
+    acc = _load
+    if acc is None:
+        return
+    try:
+        principal = auth_service.current_principal()
+        bytes_in = 0
+        for name, value in scope.get("headers") or ():
+            if name == b"content-length":
+                bytes_in = int(value)
+                break
+        acc.record(
+            principal_kind=principal.kind if principal is not None else "unknown",
+            client_id=principal.client_id if principal is not None else None,
+            ms=(time.perf_counter() - started) * 1000.0,
+            status=status,
+            bytes_in=bytes_in,
+            # The declared length when the response has one; the bytes actually streamed
+            # otherwise (SSE, chunked downloads), which a header cannot know up front.
+            bytes_out=int(declared_out) if declared_out is not None else body_out,
+        )
+    except Exception:  # noqa: BLE001 — see the docstring
+        pass
+
+
+class _HealthLoadMiddleware:
+    """Wall time, status and byte counts for every request, attributed to its principal.
+
+    A PURE ASGI middleware rather than `@app.middleware("http")`, and that is load-bearing:
+    `BaseHTTPMiddleware` runs `call_next` in a child task, so a ContextVar that the auth
+    dependency sets inside the route is invisible to the caller of `call_next` — the principal
+    would always read as None. Awaiting the downstream app directly keeps the whole request in
+    ONE task, and `auth_service.current_principal()` answers after the await (the argument is
+    written out above `auth._principal`). It also sees the real response start, which is where
+    the status and the declared content-length live, and every body chunk, which is the only
+    honest size for a stream.
+
+    Everything is recorded except `/health` — the container healthcheck hits it every few
+    seconds and would drown the table in a principal-less hum. The Health tab's OWN polling is
+    deliberately kept: it shows up under `superadmin`, which is what it is.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or _load is None or scope.get("path") == "/health":
+            await self.app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        # A handler that never starts a response died before answering; the error middleware
+        # outside us turns that into a 500, so that is what it counts as here too.
+        status = 500
+        declared_out = None
+        body_out = 0
+
+        async def send_wrapped(message):
+            nonlocal status, declared_out, body_out
+            kind = message["type"]
+            if kind == "http.response.start":
+                status = message["status"]
+                for name, value in message.get("headers") or ():
+                    if name == b"content-length":
+                        declared_out = value
+                        break
+            elif kind == "http.response.body":
+                body_out += len(message.get("body") or b"")
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapped)
+        finally:
+            _record_load(scope, started, status, declared_out, body_out)
+
+
+async def _health_sampler_loop(health_metrics) -> None:
+    """One host sample per interval, the interval re-read from settings every loop so a change
+    made in the console takes effect without a restart. A failing iteration is logged and the
+    loop continues — a sampler that dies on one transient database blip is a Health tab that
+    quietly goes flat."""
+    sampler = health_metrics.HostSampler()
+    while True:
+        try:
+            interval = float((await settings_store.get_health_config())["sample_interval_s"])
+        except Exception:  # noqa: BLE001
+            log.exception("health sampler: could not read settings; using %ss",
+                          _HEALTH_SAMPLE_FALLBACK_S)
+            interval = _HEALTH_SAMPLE_FALLBACK_S
+        try:
+            await health_metrics.insert_sample(await sampler.sample())
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("health sampler: iteration failed; continuing")
+        await asyncio.sleep(interval)
+
+
+async def _health_flush_loop(health_metrics, acc) -> None:
+    """Drain the accumulator into `tenant_load` every HEALTH_FLUSH_INTERVAL_S. Drained BEFORE
+    the write, so rows that fail to flush are lost rather than double-counted on the retry —
+    a gap in a load chart is honest, an inflated minute is not."""
+    while True:
+        await asyncio.sleep(HEALTH_FLUSH_INTERVAL_S)
+        rows = acc.drain()
+        if not rows:
+            continue
+        try:
+            await health_metrics.flush_load(rows)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("health load flush: %s row(s) lost; continuing", len(rows))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _load
     await db.connect()
     for line in await run_startup_migrations():
         log.info("startup migration: %s", line)
@@ -45,9 +182,45 @@ async def lifespan(app: FastAPI):
     swept = await analysis.sweep_stuck_jobs()
     if swept:
         log.info("startup: failed %s stuck analysis job(s)", swept)
+    # Server health: the host sampler + the load flusher, api-side because the api is the
+    # process being measured. Imported here rather than at the top so a problem in that module
+    # (psutil missing on some image, say) costs the Health tab and not the whole API; the same
+    # reasoning makes it non-fatal. The worker owns the retention purge.
+    health_tasks: list[asyncio.Task] = []
+    health_metrics = None
+    if settings.health_sampler_enabled:
+        try:
+            from .services import health_metrics
+            cfg = await settings_store.get_health_config()
+            _load = health_metrics.LoadAccumulator()
+            health_tasks = [
+                asyncio.create_task(_health_sampler_loop(health_metrics), name="health_sampler"),
+                asyncio.create_task(_health_flush_loop(health_metrics, _load),
+                                    name="health_flush"),
+            ]
+            log.info("startup health: sampler every %ss, load flush every %.0fs, "
+                     "retention %s day(s)", cfg["sample_interval_s"], HEALTH_FLUSH_INTERVAL_S,
+                     cfg["retention_days"])
+        except Exception:  # noqa: BLE001
+            log.exception("startup health: sampler not started")
+            _load = None
     try:
         yield
     finally:
+        for task in health_tasks:
+            task.cancel()
+        if health_tasks:
+            await asyncio.gather(*health_tasks, return_exceptions=True)
+        # Last drain while the pool is still open, so the final seconds before a deploy are
+        # not the seconds that go missing from every chart. Best effort, like the loop.
+        acc, _load = _load, None
+        if acc is not None and health_metrics is not None:
+            try:
+                rows = acc.drain()
+                if rows:
+                    await health_metrics.flush_load(rows)
+            except Exception:  # noqa: BLE001
+                log.exception("shutdown health: final load flush failed")
         await db.disconnect()
 
 
@@ -64,6 +237,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registered BEFORE `_no_store` below, which makes it the INNER of the two (Starlette stacks the
+# last-added middleware outermost). That placement is the point: the load meter must share the
+# route's task to read the principal (see the class docstring), and `_no_store` — a
+# BaseHTTPMiddleware that spawns a child task — has to stay outside it, untouched.
+app.add_middleware(_HealthLoadMiddleware)
 
 @app.middleware("http")
 async def _no_store(request: Request, call_next):

@@ -1,6 +1,11 @@
 # ADR-001: Conversational AI — KB-grounded chat bot, operator copilot, and the KB curation loop
 
-**Status:** Proposed
+**Status:** Accepted — implemented. Layers 1–2 (autopilot bot + operator copilot) live on both
+sides 2026-09-08 (CQ `dbf3d1e`; Swift Chat `ca1a3aa` / `47f2539`); layer 3 (KB curation loop)
+shipped in CQ `05ac4fb` and runs in `cq-worker`. The chat side does not call endpoint 11
+(curation review — a human's action, closed to the integration credential). Where
+this ADR and the code differ, `CHAT_INTEGRATION.md` follows the code — this document records the
+decision and its reasoning, not the current contract.
 **Date:** 2026-07-21
 **Deciders:** Product owner (CommuniQ), backend lead (CQ v3 AI), chat-product lead
 **Supersedes:** nothing. Extends the architecture described in `CLAUDE.md` §2–§4.

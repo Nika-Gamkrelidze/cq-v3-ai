@@ -41,8 +41,10 @@ automating what human QA reviewers do, grounded in each customer's own policies.
 > **Divergence from the original spec:** the first CLAUDE.md described a batch, PHP-driven
 > `POST /calls` pipeline scored end-of-day via the Anthropic Batch API. What actually got built is
 > an **interactive, self-serve web app** (upload → synchronous analyze → results in the browser)
-> with per-tenant KBs, fact-check, and rubric scoring. The PHP batch-ingestion path and background
-> workers are **not built** (see `docs/ROADMAP.md`, optional item). Don't assume the batch design.
+> with per-tenant KBs, fact-check, and rubric scoring. The PHP batch-ingestion path and batch
+> scoring workers are **not built** (see `docs/ROADMAP.md`, optional item) — the one background
+> process that exists, `cq-worker`, serves the chat feature (§2), not batch scoring. Don't assume
+> the batch design.
 
 ---
 
@@ -52,10 +54,11 @@ Monorepo, orchestrated by **Docker Compose** (project name **`cqv3`** — always
 
 | Service (container) | Image / build | Role |
 |---|---|---|
-| `cq-api`   | `./backend` (FastAPI, py3.11) | The app: all API endpoints + serves nothing itself in prod |
+| `cq-api`   | `./backend` (FastAPI, py3.11) | The app: all API endpoints + serves nothing itself in prod. Also runs the **server-health sampler** (psutil: host-level CPU/load/memory from `/proc`, the container's own network counters, DB size → `system_metrics`) and the **load flusher** (per-tenant request counters → `tenant_load`) as lifespan tasks |
 | `cq-db`    | `pgvector/pgvector:pg16` | Postgres 16 + **pgvector** (relational + JSONB + vectors) |
 | `cq-web`   | `nginx:alpine` | Serves `frontend/public` static files; reverse-proxies `/api/` → `api:8000`; `/gh-webhook` → host |
 | `cq-embeddings` | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.6` | Self-hosted **BGE-M3** embeddings (TEI), multilingual, no external key |
+| `cq-worker` | `./backend` (same image as api), `python -m app.worker` | Periodic out-of-band duties: stale copilot-suggestion reaper, nightly KB **curation** mining + applying human-accepted proposals, queued full-KB re-embeds, media/anon **retention** purge, hourly **`health_purge`** of old health rows. Runs **no migrations** (api-only) and has its own small pool (`DB_POOL_MAX=5`) |
 
 **Request flow (prod):** browser → `cq-web` (nginx :80) → static UI, and `/api/*` proxied to
 `cq-api:8000`. The api calls `cq-db`, `cq-embeddings`, and the ElevenLabs/Anthropic APIs.
@@ -162,6 +165,32 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   brake in *Bot control* (kill switch). Token usage is metered per tenant in `llm_usage`
   (`feature = autopilot | copilot | handoff`). Contract for the chat-side team:
   `docs/CHAT_INTEGRATION.md`; paste-ready Claude Code prompt for their repo: `docs/CHAT_SIDE_PROMPT.md`.
+  **The consumer is Swift Chat ("CQ Chat")** — `swiftchat-server` (Express + Prisma + Socket.IO,
+  `src/services/cq/*`, `src/routes/cqRouter.ts`) and `swiftchat-suite` (React dashboards + the
+  customer widget). Its conversation `aiState` is `bot` (CQ answers; the session stays `waiting`
+  with no operator and is **excluded from auto-assignment** until handoff, though operators see
+  it with a "Bot answering" badge and may claim it) → `handed_off` (a human owns it; every message
+  is mirrored to CQ for the copilot; one-way) | `copilot` (tenant mapped to CQ but the bot was not
+  offered — autopilot off, circuit open or bot paused: plain human flow + copilot mirrors) |
+  `closed`. Customer socket events: `session:ai-state`, `session:request-human`. Inline `[n]`
+  citation markers are **stripped** from bot replies on every channel; operators get citations in
+  the copilot panel.
+- **KB curation loop** (`routers/curation.py`, `services/curation/{miner,cluster,propose,apply,
+  runner}.py`, `db/curation.sql`, run by `cq-worker`): nightly, per tenant (staggered 02:00–05:00
+  UTC), chat turns + call transcripts are mined → clustered → turned into KB **add / update /
+  remove proposals** that a human reviews (`/v1/curation/proposals` for tenants,
+  `/admin/curation/{tenant_id}/...` for the operator; accept / decline / bulk). **Nothing
+  auto-applies at any confidence**, and curation is **never reachable with an integration
+  credential** (`_deny_integration`) — the chat service can feed it, not review it.
+- **Server health (superadmin)** (`services/health_metrics.py`, `routers/admin.py` under
+  `/admin/health/*`, console tab `health` → `app/console/HealthTab.tsx`, tables
+  `system_metrics` / `tenant_load` in `db/health.sql`): KPIs (CPU, load, memory, swap, disk,
+  network and disk throughput, api RSS/CPU/fds, DB size + pool, active jobs, uptime), charts over
+  **1h / 6h / 24h / 7d / 30d** downsampled **server-side** with `date_bin` (≤ ~400 points), and a
+  **per-tenant load table** (requests, errors, latency, bytes, AI calls/tokens from `llm_usage`,
+  audio jobs/ms) where **share = request wall time** — the honest attribution, because analyze and
+  AI work run inside the request. **Retention days** (1–365, default 7) and **sample interval**
+  (5–300 s, default 10) are settable in the tab (`app_settings` key `health`).
 
 **All AI structured outputs use forced tool-use with `strict: true` schemas + array-normalization**
 (`_as_str_list`) so the model can't return a shape that crashes the UI.
@@ -188,8 +217,19 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - **Tenant isolation via `client_id`.** Every tenant-scoped query filters by it. Malformed ids now
   return 400 (global `asyncpg.DataError` handler in `main.py`), not 500.
 - **Idempotent SQL migrations run on api startup** (`migrate.py` applies `analyzer.sql`, `kb.sql`,
-  `scoring.sql` in order — `analyzer.sql` first because it creates `app_settings`, read during
-  startup). No Alembic yet; column changes must stay `ADD COLUMN IF NOT EXISTS`.
+  `scoring.sql`, `partner.sql`, `chat.sql`, **`curation.sql`** (after `chat.sql` — same feature's
+  second half), `kb_ops.sql`, `media.sql`, … in a **hardcoded** order — `analyzer.sql` first because
+  it creates `app_settings`, read during startup; a new `db/*.sql` that is not added to that list
+  never runs; **`health.sql` is the last entry**). Only the api runs migrations — `cq-worker`
+  waits for its tables instead. No Alembic yet; column changes must stay `ADD COLUMN IF NOT EXISTS`.
+- **Server health sampler lives inside Docker.** psutil's CPU / load / memory numbers come from
+  `/proc`, i.e. the **host** (all containers share the kernel), while the network counters are the
+  **api container's own** interface and `api_*` is the api process alone — read the page with that
+  in mind. `HEALTH_SAMPLER_ENABLED` (env, default true) starts the sampler + load flusher in the
+  api lifespan; **tests set it false** (conftest) so nothing samples in the background. The
+  **retention purge runs only in `cq-worker`** (`health_purge`, hourly) — an api-only deployment
+  grows `system_metrics` / `tenant_load` forever. `requirements.txt` gained **`psutil`**, so the
+  deploy that ships this must **rebuild the image** (`up -d --build`, which the webhook does).
 - **Data safety:** all data lives in the `pgdata` (and `hf_cache`) Docker volumes. **Never
   `docker compose down -v`.** Rebuilds/redeploys don't touch volumes.
 - **Server is Rocky Linux 8, SELinux enforcing.** Bind mounts need `:z` (set). systemd services
@@ -232,6 +272,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (409) — by design, so an internal pricing floor is never quoted to a customer by accident. Two
   independent off switches: the tenant's `autopilot_enabled` and the superadmin kill switch
   (`app_settings.autopilot_kill`, 5 s cache).
+- **Bot 429s carry a machine-readable `code`** the chat side branches on: `rate_limited_tenant`
+  (the tenant's `answer_tenant_per_minute` cap) and `rate_limited_enduser` (the end user's
+  `answer_enduser_per_hour` cap), beside the existing `llm_busy`. Swift Chat pauses the *bot* for
+  the tenant on `rate_limited_tenant` and on `409 autopilot_not_enabled` (copilot mirrors keep
+  flowing), hands off **only that conversation** on `rate_limited_enduser`, and opens its circuit
+  only on 401/403/503/5xx/timeouts — so never collapse these into one generic 429, and keep the
+  kill switch answering `503 autopilot_disabled`. Until the codes ship it string-matches
+  "per minute" in the 429 message, so do not reword that message either.
 - **Chat config resolution** = code defaults ← superadmin default blob
   (`app_settings.default_chat_config`) ← the tenant's active `chat_configs` row; `is_default` in
   the response tells the UI which layer it is looking at. Keep the default free of raw SQL in
@@ -275,9 +323,56 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   Gemini keys and press *Test connection* before assigning either to a workspace.
 - **2026-09-08 — chat bot launched in the UI.** Tenant BOT tab live (was behind a "coming soon"
   flag), superadmin-editable default bot config, one chat-service credential with a grant per
-  tenant + a console to manage them, integration contract + chat-side prompt written. **Pending:**
-  the chat service's own integration (their repo, using `docs/CHAT_SIDE_PROMPT.md`), then issuing
-  the credential, sharing KB documents with the bot, and enabling autopilot per pilot tenant.
+  tenant + a console to manage them, integration contract + chat-side prompt written.
+  **Done 2026-09-08 (chat side):** Swift Chat integrated — `swiftchat-server` `ca1a3aa`,
+  `swiftchat-suite` `47f2539`.
+- **2026-09-09 — server health page.** Console tab *Server health*: host + api + DB samples every
+  `sample_interval_s` into `system_metrics`, every request metered per principal/tenant into
+  `tenant_load` (minute buckets), ranged charts + per-tenant load table + settings, retention
+  purge in the worker. Lands with a `psutil` image rebuild; nothing to configure on the server.
+- **2026-09-09 — the CQ key moved into Swift Chat's database.** `PlatformSettings` holds the
+  `cqi_` key encrypted (AES-256-GCM) with a public key-id for display; the Swift Chat superadmin
+  dashboard's *CQ AI connection* card edits and tests it; the `CQ_API_KEY` env var is only a
+  one-time bootstrap import on server start (see checklist step 10).
+- **2026-09-09 — integration audit + fix pass (both products, in flight).** CQ: the 429 `code`s
+  above, the contract docs (`docs/CHAT_INTEGRATION.md`, `docs/CHAT_SIDE_PROMPT.md`) re-aligned
+  with the code. Swift Chat: `aiState` gains `copilot`, bot sessions leave the human queue until
+  handoff, `handOff` is the single re-entry into the queue, customer events `session:ai-state` /
+  `session:request-human`, `[n]` markers stripped, per-contact ingest queue, `facebook` channel
+  renamed `messenger`. **Pending (operational) — the pilot go-live checklist, in order:**
+  1. Deploy the Swift Chat fixes together (push = auto-deploy; confirm `git log origin/main` on
+     both repos) — until then a widget bot session shows a spinner with a disabled input.
+  2. CQ server `.env` (VPN for SSH): set `SECRETS_KEY`, `docker compose -p cqv3 up -d`, then
+     `GET /api/health` must report secrets sealed.
+  3. Console → *AI providers*: a default `llm` connection exists and *Test connection* passes
+     (otherwise every `/answer` degrades to refusal + handoff with an `llm_error` frame).
+  4. Console → *Default bot*: greeting **and** refusal copy in en/ka/ru (code defaults are
+     empty), disclosure mode, `answer_tenant_per_minute` / `answer_enduser_per_hour` (60/60).
+  5. Console → *Tenants*: copy the pilot tenant's `client_id` uuid in **lower case** (Swift Chat
+     rejects slugs).
+  6. Pilot workspace → KB tab: share at least one document with the bot (`visibility=public`).
+  7. Pilot workspace → BOT tab: languages, refusal copy per language, escalation keywords, tick
+     Autopilot, Save (a 409 means no public document yet).
+  8. Console → *Bot control* → *Chat connections* → New: **all four scopes** (`chat:turn`,
+     `chat:suggest`, `chat:answer`, `chat:sync` — the GDPR purge needs `chat:sync`), tick the
+     pilot workspace, copy the one-time `cqi_<key_id>.<secret>`. Later tenants get a **grant**
+     on the same row (`POST /admin/integrations/{id}/grants`), never a new key.
+  9. Console → *Bot control*: global pill *running*, pilot row autopilot ● and not Stopped.
+  10. Swift Chat SuperAdmin dashboard → *CQ AI connection*: paste the `cqi_` key (stored
+      encrypted in `PlatformSettings`; the `CQ_API_KEY` env var is only a one-time bootstrap
+      import), base URL `https://ai.communiq.ge/api` → Test connection. Admin dashboard → *AI
+      Assistant (CQ)*: paste the `client_id` → Save → Test connection (health ok +
+      `autopilot_enabled: true`) → switch on *Let the bot answer first*.
+  11. Probe from the widget: grounded question → bot answer with the disclosure line; off-KB
+      question → refusal + handoff, session in the operator queue with the summary in the copilot
+      panel; "I want a human" → handoff; an operator reply after handoff → a copilot draft in ~1 s.
+  12. Kill-switch drill: *Stop* on the pilot row → next customer message gets `503
+      autopilot_disabled`, `[cq] circuit opened` in the Swift Chat log, refusal copy sent, new
+      conversations go straight to humans; *Resume* → the half-open `GET /config` probe closes
+      the circuit within 45 s. Separately flip the tenant's Autopilot toggle → expect `409
+      autopilot_not_enabled` (bot paused, no circuit open).
+  13. Confirm metering (`llm_usage.feature` in `autopilot | copilot | handoff`) for the pilot
+      tenant, and run Swift Chat's `scripts/validate-cq.ts` locally and record the real pass count.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, all three UIs — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.
@@ -301,7 +396,8 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 See **`docs/ROADMAP.md`** for the prioritized list. Top items:
 1. ~~Register the GitHub webhook~~ ✅ done — pushes auto-deploy.
 2. ~~Push + deploy the QA-fix commits~~ ✅ done.
-3. **HTTPS/TLS** once a domain exists (Caddy or nginx+certbot; open 443).
+3. ~~HTTPS/TLS~~ ✅ done — `https://ai.communiq.ge`, Let's Encrypt in `cq-web` (see §5). The
+   open item in its place is the **chat bot pilot go-live** — the operational checklist in §6.
 4. **PII/PHI redaction** before transcripts go to Claude (compliance for banks/clinics).
 5. **Production hardening** — lock CORS to real domains, rotate keys, add Alembic, add tests/CI.
 6. *(optional)* the original spec's PHP `POST /calls` batch ingestion + audio storage (S3/Spaces) +

@@ -475,3 +475,72 @@ def autopilot_killed(kill: dict, client_id: str | None) -> bool:
     if kill.get("global_disabled"):
         return True
     return str(client_id or "") in (kill.get("disabled_clients") or [])
+
+
+# ---------------------------------------------------------------------------
+# Server health sampling (app_settings 'health') — how often the api samples the host and
+# how long the samples and the per-tenant load counters are kept (services/health_metrics).
+#
+# Bounded on both sides, unlike the storage retention above: a 0-day retention would purge
+# the row the sampler just wrote, and a sub-5-second interval is a DB write every few seconds
+# for a chart nobody can read at that resolution. 365 days at 10 s is ~3M rows — the ceiling
+# is there so a typo cannot quietly make the table the biggest thing in the database.
+# ---------------------------------------------------------------------------
+HEALTH_KEY = "health"
+HEALTH_DEFAULTS = {"retention_days": 7, "sample_interval_s": 10}
+HEALTH_BOUNDS = {"retention_days": (1, 365), "sample_interval_s": (5, 300)}
+
+
+class HealthSettingError(ValueError):
+    """A ValueError that also names the field, so the route can return `{detail, field}`
+    without parsing prose."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+def _health_setting(field: str, value) -> int:
+    """A whole number within HEALTH_BOUNDS[field]. Raises HealthSettingError (a ValueError)
+    for anything else — same door-refusal policy as `_retention_days`."""
+    if field not in HEALTH_BOUNDS:
+        raise HealthSettingError(field, f"unknown health setting: {field}")
+    lo, hi = HEALTH_BOUNDS[field]
+    if isinstance(value, bool):
+        raise HealthSettingError(field, f"{field} must be a whole number")
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise HealthSettingError(field, f"{field} must be a whole number") from None
+    if not lo <= n <= hi:
+        raise HealthSettingError(field, f"{field} must be between {lo} and {hi}")
+    return n
+
+
+async def get_health_config() -> dict:
+    """`{retention_days: int, sample_interval_s: int}`. Never raises: a corrupt stored value
+    falls back to its default, and says so once in the log."""
+    ov = await _load_key(HEALTH_KEY)
+    cfg = dict(HEALTH_DEFAULTS)
+    for field in HEALTH_DEFAULTS:
+        if field not in ov:
+            continue
+        try:
+            cfg[field] = _health_setting(field, ov[field])
+        except ValueError:
+            log.warning("health.%s is not valid (%r); using default", field, ov.get(field))
+    return cfg
+
+
+async def set_health_config(patch: dict) -> dict:
+    """Merge `patch` into the health blob and return the effective config. Known fields are
+    validated (HealthSettingError on garbage); None values and unknown keys are ignored, so a
+    form that sends only what it changed cannot smuggle anything else into the blob."""
+    ov = await _load_key(HEALTH_KEY)
+    for field in HEALTH_DEFAULTS:
+        value = patch.get(field)
+        if value is None:
+            continue
+        ov[field] = _health_setting(field, value)
+    await _save_key(HEALTH_KEY, ov)
+    return await get_health_config()
