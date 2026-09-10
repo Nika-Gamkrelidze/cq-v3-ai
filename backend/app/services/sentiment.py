@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 import httpx
 
@@ -63,6 +64,72 @@ def _clamp01(v) -> float | None:
         return max(0.0, min(1.0, float(v)))
     except (TypeError, ValueError):
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Is the voice half actually working? One answer, for every caller that asks.
+# --------------------------------------------------------------------------- #
+# This capability fails SILENTLY by design: prosody degrades to text-only and every call still
+# returns 200. So the ONLY way anyone learns the tone model is broken is by asking. The console
+# probe used to ask and then throw the answer away — it read `loaded` and, finding it false,
+# reported "loads on first use", which is true after a deploy and a lie forever afterwards when
+# `warm_error` is set. A model that cannot load reported itself as healthy indefinitely.
+#
+# States, worst to best:
+#   disabled     no sentiment_url — prosody is off on purpose
+#   unreachable  nothing answers (not built, not running, wrong URL, crash loop)
+#   model_error  the sidecar is up and the checkpoint FAILED to load — an operator must look;
+#                retrying will not help, and this is the state that used to read as "ok"
+#   warming      up, model still loading — normal for the first minute after a deploy
+#   ok           up and loaded
+STATUS_TTL_S = 10.0             # /health is unauthenticated and hit often; do not probe per call
+_status_cache: tuple[float, dict] | None = None
+
+
+async def status(*, force: bool = False) -> dict:
+    """→ {state, model, detail}. Never raises. Cached for STATUS_TTL_S.
+
+    `detail` carries the sidecar's own exception when the model failed to load; it is meant
+    for an authenticated operator view, NOT for the public health endpoint, which reports the
+    state word alone.
+    """
+    global _status_cache
+    now = time.monotonic()
+    if not force and _status_cache and now - _status_cache[0] < STATUS_TTL_S:
+        return _status_cache[1]
+
+    cfg = await settings_store.get_effective()
+    url = (cfg.get("sentiment_url") or "").strip()
+    if not url:
+        out = {"state": "disabled", "model": None,
+               "detail": "no sentiment_url configured — sentiment is text-only"}
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+                resp = await client.get(url.rstrip("/") + "/health")
+                resp.raise_for_status()
+                data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"health returned {type(data).__name__}, not an object")
+            model = data.get("model") or None
+            warm_error = str(data.get("warm_error") or "").strip()
+            if data.get("loaded"):
+                out = {"state": "ok", "model": model, "detail": f"model {model} loaded"}
+            elif warm_error:
+                out = {"state": "model_error", "model": model,
+                       "detail": f"the voice-tone model failed to load: {warm_error[:500]}"}
+            else:
+                out = {"state": "warming", "model": model,
+                       "detail": f"model {model} is still loading"}
+        except Exception as exc:  # noqa: BLE001 — a status probe never raises
+            out = {"state": "unreachable", "model": None,
+                   "detail": f"prosody sidecar unreachable ({exc}) — sentiment is text-only"}
+
+    if out["state"] == "model_error":
+        # The operator needs this in the log even if nobody opens the console.
+        log.error("voice-tone sidecar: %s", out["detail"])
+    _status_cache = (now, out)
+    return out
 
 
 async def prosody(audio: bytes, filename: str | None = None,

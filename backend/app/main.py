@@ -17,6 +17,8 @@ from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, ch
 from .config import settings
 from .services import ai_registry, ai_resolve, analysis, settings_store
 from .services import auth as auth_service
+# `sentiment` is already bound to the ROUTER above; the service needs its own name.
+from .services import sentiment as sentiment_service
 from .services.ai_registry import RegistryError
 from .services.transcription import TranscriptionSettingsError
 from .services.migrate import run_startup_migrations
@@ -398,8 +400,17 @@ async def health(request: Request):
         except Exception as exc:  # noqa: BLE001 — the registry must not take /health down
             ai = {"connections": 0, "defaults": {c: None for c in ai_registry.CAPABILITIES},
                   "error": str(exc)}
+        # `sentiment` is the STATE WORD only, never the sidecar's exception text: this route is
+        # unauthenticated, and a load traceback carries paths. The operator gets the reason from
+        # the console's connection test. It is here at all because the voice half fails silently
+        # by design — text-only sentiment still returns 200 — so without one curl saying
+        # `model_error`, a tone model that never loads is invisible from outside the box.
+        try:
+            voice_tone = (await sentiment_service.status())["state"]
+        except Exception:  # noqa: BLE001 — /health must not depend on an optional sidecar
+            voice_tone = "unknown"
         return {"status": "ok", "database": "connected", "client_addressing": addressing,
-                "secrets": secrets_mode, "ai": ai}
+                "secrets": secrets_mode, "ai": ai, "voice_tone": voice_tone}
     except Exception as exc:  # noqa: BLE001
         return {"status": "degraded", "database": "unavailable", "detail": str(exc),
                 "client_addressing": addressing, "secrets": secrets_mode,

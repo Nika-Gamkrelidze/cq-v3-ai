@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..db import pool
 from ..services import (ai_config, chat_credentials, chat_store, claude, health_metrics, limits,
-                        settings_store, usage, voice)
+                        sentiment, settings_store, usage, voice)
 from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
@@ -188,25 +188,18 @@ async def _probe_sentiment(cfg: dict) -> dict:
     a warning rather than a failure — text-only sentiment is a working product, just a smaller
     one.
     """
-    import httpx
-    url = (cfg.get("sentiment_url") or "").strip()
-    if not url:
-        return {"level": "warn", "code": "sentiment_disabled",
-                "detail": "no sentiment_url configured — sentiment is text-only"}
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0)) as client:
-            r = await client.get(url.rstrip("/") + "/health")
-            r.raise_for_status()
-            d = r.json()
-    except Exception as exc:  # noqa: BLE001
-        return {"level": "warn", "code": "sentiment_unreachable",
-                "detail": f"prosody sidecar unreachable ({exc}) — sentiment is text-only"}
-    model = d.get("model") or "?"
-    if not d.get("loaded"):
-        # Lazy-loaded on first request, so "not loaded" is the normal state after a deploy.
-        return {"level": "ok",
-                "detail": f"reachable; model {model} loads on first use"}
-    return {"level": "ok", "detail": f"model {model} loaded"}
+    st = await sentiment.status(force=True)          # a probe the operator pressed: never cached
+    state = st["state"]
+    if state == "ok":
+        return {"level": "ok", "detail": st["detail"]}
+    if state == "warming":
+        # Normal for the first minute after a deploy, and ONLY then — `warm_error` is what
+        # separates this from a model that will never load, so it is not the same row.
+        return {"level": "ok", "detail": st["detail"] + " (normal right after a deploy)"}
+    # model_error is a real failure, not a warning about an absent optional service: the
+    # sidecar IS deployed, it just cannot serve. Reporting it green is what hid this for weeks.
+    level = "error" if state == "model_error" else "warn"
+    return {"level": level, "code": f"sentiment_{state}", "detail": st["detail"]}
 
 
 async def _probe_claude(cfg: dict) -> dict:
