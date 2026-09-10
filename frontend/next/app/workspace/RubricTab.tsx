@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { showModal } from '@/components/ui/Modal';
+import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
 import { useAutogrow } from '@/lib/autogrow';
 import {
@@ -22,6 +23,12 @@ export interface Dim {
   weight: number;
   description: string;
   guidance: string;
+  /* A MEASURED dimension. `factcheck` is scored from the knowledge-base fact-check and
+     `sentiment` from the tone analyser's politeness for the agent — by code, never by the
+     model reading the transcript. The workspace owns the WEIGHT and nothing else: renaming
+     one would leave a measured number under a label that no longer says where it came from,
+     and the server replaces the name on save anyway. */
+  source?: string;
 }
 
 interface Config {
@@ -37,6 +44,7 @@ const asDims = (raw: Partial<Dim>[] | undefined): Dim[] => (raw || []).map(d => 
   weight: Number(d.weight) || 0,
   description: d.description || '',
   guidance: d.guidance || '',
+  source: d.source || undefined,
 }));
 
 export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
@@ -152,10 +160,16 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
 
         <div>
           {dims.length ? dims.map((d, i) => (
-            <div className="sc-edit" key={i}>
+            <div className={`sc-edit${d.source ? ' sc-measured' : ''}`} key={i}>
               <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
                 <span className="sc-edit-num">{i + 1}</span>
-                {canEdit ? (
+                {d.source ? (
+                  <span className="inline" style={{ gap: 6 }}>
+                    <span className="pill ready">{t(`sc.measured.${d.source}`)}</span>
+                    <Tip text={t(`sc.measured.${d.source}.hint`)} />
+                  </span>
+                ) : null}
+                {canEdit && !d.source ? (
                   <button
                     type="button" className="act danger" title={t('sc.remove')} aria-label={t('sc.remove')}
                     onClick={() => setDims(prev => prev.filter((_, j) => j !== i))}
@@ -166,7 +180,8 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
                 <div style={{ flex: 2 }}>
                   <label>{t('sc.dname')}</label>
                   <input
-                    value={d.name} placeholder={t('sc.dname.ph')} disabled={readonly}
+                    value={d.name} placeholder={t('sc.dname.ph')}
+                    disabled={readonly || !!d.source}
                     onChange={e => patch(i, { name: e.target.value })}
                   />
                 </div>
@@ -178,18 +193,28 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
                   />
                 </div>
               </div>
-              <label>{t('sc.ddesc')}</label>
-              <input
-                value={d.description} disabled={readonly}
-                onChange={e => patch(i, { description: e.target.value })}
-              />
-              <label>{t('sc.dguide')}</label>
-              {/* Guidance can arrive from AI import as a section's whole criteria list; size
-                  each box to its text so it is readable without scrolling a 54px window. */}
-              <Guidance
-                value={d.guidance} disabled={readonly} placeholder={t('sc.dguide.ph')}
-                onChange={v => patch(i, { guidance: v })}
-              />
+              {/* A measured dimension shows WHERE ITS NUMBER COMES FROM in place of the
+                  description and guidance boxes. Those two exist to steer a model, and no
+                  model reads this row — leaving them editable would invite a workspace to
+                  write scoring instructions that nothing obeys. */}
+              {d.source ? (
+                <p className="hint" style={{ margin: '4px 0 0' }}>{t(`sc.measured.${d.source}.desc`)}</p>
+              ) : (
+                <>
+                  <label>{t('sc.ddesc')}</label>
+                  <input
+                    value={d.description} disabled={readonly}
+                    onChange={e => patch(i, { description: e.target.value })}
+                  />
+                  <label>{t('sc.dguide')}</label>
+                  {/* Guidance can arrive from AI import as a section's whole criteria list; size
+                      each box to its text so it is readable without scrolling a 54px window. */}
+                  <Guidance
+                    value={d.guidance} disabled={readonly} placeholder={t('sc.dguide.ph')}
+                    onChange={v => patch(i, { guidance: v })}
+                  />
+                </>
+              )}
             </div>
           )) : <div className="empty">{t('sc.nodims')}</div>}
         </div>

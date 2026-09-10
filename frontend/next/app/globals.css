@@ -224,6 +224,10 @@ button:disabled { opacity:.5; cursor:default; }
    card it sits in — the old flat rows all blurred into one another. */
 .sc-edit { border:1px solid var(--hairline); border-left:3px solid var(--beam); border-radius:var(--r-md);
   padding:14px 16px; margin:14px 0; background:color-mix(in oklab,var(--surface-2) 30%,transparent); }
+/* A MEASURED dimension: scored by an analyser, not by the model. The accent bar changes
+   colour rather than the whole card, so the rubric still reads as one list — these rows are
+   ordinary criteria that happen to carry a number the workspace cannot type. */
+.sc-measured { border-left-color:var(--ready,#3fb27f); }
 .sc-edit-num { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
   border-radius:50%; background:var(--beam); color:#0a1f30; font-weight:800; font-size:13px;
   font-family:var(--font-display); }
