@@ -105,7 +105,16 @@ def _tenant_owner(principal: Principal = Depends(resolve_principal)) -> str:
 
 @router.get("/sentiment/config")
 async def tenant_get_config(client_id: str = Depends(_tenant)):
-    return await sentiment_config.get_tenant_config(client_id)
+    """The workspace's sentiment settings, plus whether the VOICE half can actually run.
+
+    `voice_tone` rides along because the alternative is what shipped for months: prosody fails
+    silently by design — no sidecar means a text-only answer and a 200 — so a workspace whose
+    voice tone was dead saw an empty column and no reason anywhere. It is the sidecar's state
+    word (`ok | warming | model_error | unreachable | disabled`), never its exception text: a
+    tenant is not an operator, and a load traceback carries the deployment's paths.
+    """
+    cfg = await sentiment_config.get_tenant_config(client_id)
+    return {**cfg, "voice_tone": (await sentiment.status())["state"]}
 
 
 @router.put("/sentiment/config")

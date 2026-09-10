@@ -37,6 +37,7 @@ import { HealthTab } from './HealthTab';
 import { HistoryTab } from './HistoryTab';
 import { KbTab } from './KbTab';
 import { RubricTab } from './RubricTab';
+import { SentimentTab } from './SentimentTab';
 import { TranscriptionTab } from './TranscriptionTab';
 
 interface TenantRow { id: string; name: string }
@@ -68,6 +69,11 @@ const TABS: { key: TabName; icon: string; label: string }[] = [
   { key: 'kb', icon: '📚', label: 'tab.kb' },
   { key: 'analyze', icon: '🎧', label: 'tab.analyze' },
   { key: 'rubric', icon: '🎯', label: 'tab.scoring' },
+  /* Beside the rubric because the rubric now DEPENDS on it: the courtesy dimension is scored
+     from the tone analyser this tab configures, so the guidance written here moves a number on
+     every scorecard. It also carries the only place in the product that says out loud whether
+     the voice half is actually running. */
+  { key: 'sentiment', icon: '💬', label: 'snt.tab' },
   /* Its own tab, beside the rubric and the bot, because it is the same KIND of thing: a
      per-workspace AI setting with an inherited default. It sits before them deliberately —
      transcription is upstream of everything else here, and a rubric scored off a misheard word
@@ -379,6 +385,7 @@ export default function WorkspacePage() {
           <section className={`panel${tab === 'kb' ? ' active' : ''}`}><KbTab on={tab === 'kb'} gen={genState} /></section>
           <section className={`panel${tab === 'analyze' ? ' active' : ''}`}><AnalyseTab wbRef={wbRef} /></section>
           <section className={`panel${tab === 'rubric' ? ' active' : ''}`}><RubricTab on={tab === 'rubric'} gen={genState} /></section>
+          <section className={`panel${tab === 'sentiment' ? ' active' : ''}`}><SentimentTab on={tab === 'sentiment'} gen={genState} /></section>
           <section className={`panel${tab === 'transcription' ? ' active' : ''}`}><TranscriptionTab on={tab === 'transcription'} gen={genState} /></section>
           <section className={`panel${tab === 'ai' ? ' active' : ''}`}><AiTab on={tab === 'ai'} gen={genState} /></section>
           <section className={`panel${tab === 'health' ? ' active' : ''}`}><HealthTab on={tab === 'health'} gen={genState} /></section>

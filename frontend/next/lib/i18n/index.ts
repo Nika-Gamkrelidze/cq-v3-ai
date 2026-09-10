@@ -40,6 +40,7 @@
      features/kb.ts         kb. kba. tkb. vis. bulk. imp.
      features/retrieval.ts  retr. pg.
      features/scoring.ts    sc.
+     features/sentimentTab.ts   snt.
      features/timeline.ts   tl.
      features/transcription.ts  tr.
      features/tts.ts        tts. quota.
@@ -71,6 +72,7 @@ import * as editor from './features/editor';
 import * as kb from './features/kb';
 import * as retrieval from './features/retrieval';
 import * as scoring from './features/scoring';
+import * as sentimentTab from './features/sentimentTab';
 import * as timeline from './features/timeline';
 import * as transcription from './features/transcription';
 import * as tts from './features/tts';
@@ -90,7 +92,8 @@ export type Dict = Record<string, string>;
 
 const MODULES: Record<Lang, Dict>[] = [
   chrome,
-  ai, analysis, bot, convert, curation, editor, kb, retrieval, scoring, timeline, transcription,
+  ai, analysis, bot, convert, curation, editor, kb, retrieval, scoring, sentimentTab, timeline,
+  transcription,
   tts, workbench,
   account, aicfg, consolePage, copilot, home, usage, workspace,
 ];
