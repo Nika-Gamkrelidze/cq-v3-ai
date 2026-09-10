@@ -15,8 +15,10 @@ Single entry point for a fresh Claude / Claude Code session or a new engineer. I
 **CommuniQ CQ v3 AI** is a **multi-tenant AI call/audio-analysis SaaS**. Customer organizations
 ("tenants" — banks, insurers, clinics, hospitality, etc.) get, per tenant:
 
-1. **Audio analysis** — upload a call recording → **ElevenLabs Scribe** transcribes it → **Claude**
-   produces a structured analysis (summary, sentiment, topics, key points, action items, quality).
+1. **Audio analysis** — upload a call recording → a **speech-to-text** provider transcribes it →
+   a **text model** produces a structured analysis (summary, sentiment, topics, key points,
+   action items, quality). ElevenLabs Scribe and Claude are the defaults, but both are a
+   per-workspace dropdown now (§3, multi-provider AI) — do not hardwire either.
 2. **KB fact-check** — the call's factual claims are checked (RAG) against **that tenant's own
    knowledge base**: each claim is `SUPPORTED` / `CONTRADICTED` / `NOT_IN_KB` with evidence, plus an
    overall accuracy score. Catches agents giving wrong information.
@@ -56,7 +58,7 @@ Monorepo, orchestrated by **Docker Compose** (project name **`cqv3`** — always
 |---|---|---|
 | `cq-api`   | `./backend` (FastAPI, py3.11) | The app: all API endpoints + serves nothing itself in prod. Also runs the **server-health sampler** (psutil: host-level CPU/load/memory from `/proc`, the container's own network counters, DB size → `system_metrics`) and the **load flusher** (per-tenant request counters → `tenant_load`) as lifespan tasks |
 | `cq-db`    | `pgvector/pgvector:pg16` | Postgres 16 + **pgvector** (relational + JSONB + vectors) |
-| `cq-web`   | `nginx:alpine` | Serves `frontend/public` static files; reverse-proxies `/api/` → `api:8000`; `/gh-webhook` → host |
+| `cq-web`   | `./frontend` (build stage: `node:20-alpine` → `nginx:alpine`) | Compiles the Next app to static files (`output:'export'`) and serves them beside `frontend/public` (assets only) from one docroot; reverse-proxies `/api/` → `api:8000`; `/gh-webhook` → host |
 | `cq-embeddings` | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.6` | Self-hosted **BGE-M3** embeddings (TEI), multilingual, no external key |
 | `cq-worker` | `./backend` (same image as api), `python -m app.worker` | Periodic out-of-band duties: stale copilot-suggestion reaper, nightly KB **curation** mining + applying human-accepted proposals, queued full-KB re-embeds, media/anon **retention** purge, hourly **`health_purge`** of old health rows. Runs **no migrations** (api-only) and has its own small pool (`DB_POOL_MAX=5`) |
 
@@ -98,8 +100,8 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - Unified login: `POST /auth/login` returns `scope: admin|tenant` and routes the UI accordingly.
 - **Operator scope (`X-Act-As-Tenant`)** — a *verified superadmin* may add this header (tenant uuid
   or slug) to get a **tenant-shaped principal** for that one workspace, so the ordinary tenant
-  routes serve the operator console. This is why there is ONE page: `tenant.html` is both the
-  customer portal and the superadmin console (`kb-admin.html` is now just a redirect), and the
+  routes serve the operator console. This is why there is ONE page: **`/workspace`** is both the
+  customer portal and the superadmin console (the old `kb-admin.html` is a 301 into it), and the
   operator issues literally the same requests the customer does — no parallel twins to drift.
   Rules that must not regress (pinned by `backend/tests/test_act_as_tenant.py`):
   - The header is **inert for everyone else** — a tenant key asking to act as another workspace
@@ -127,7 +129,7 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (**PDF/DOCX/TXT/MD**), paste text, CSV (Q&A / key-value), plus API-key ingestion. Chunk → embed →
   `ready`. Semantic (pgvector cosine) retrieval with a **keyword (pg_trgm) fallback** for
   low-resource languages.
-- **KB admin console** (`frontend/public/kb-admin.html`, `routers/kb_admin.py`): superadmin operator
+- **KB admin console** (the KB tab of `/workspace` under operator scope, `routers/kb_admin.py`): superadmin operator
   command center across tenants — tenant selector, stats + params (embedding dim match), documents
   list/filter/search, edit doc (re-chunk/re-embed), chunk-level edit/delete, retrieval **playground**,
   duplicate detection (exact + near), activity/import logs, export (JSON/CSV), bulk actions.
@@ -137,9 +139,11 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - **Per-tenant weighted scoring rubric** (`services/scoring.py`, `scoring_store.py`, `routers/scoring.py`):
   superadmin or tenant defines dimensions+weights+guidance; Claude scores each with evidence; code
   computes weighted total + per-dimension contribution. Renders as a scorecard in the tenant portal.
-- **Three brand-styled trilingual UIs** (EN/KA/RU, light/dark, custom dropdowns, toasts, confirm
-  modals — no native browser dialogs). Shared `brand.css` + `brand.js` (`CQ.*` helpers). Pages:
-  `index.html` (public TTS+analyze), `tenant.html` (portal), `admin.html` (console), `kb-admin.html`.
+- **One brand-styled trilingual Next.js frontend** (EN/KA/RU, light/dark, custom dropdowns,
+  toasts, confirm modals — no native browser dialogs; shared React components in
+  `frontend/next/components/ui/*`, dictionaries in `lib/i18n/`). Pages: `/` (public
+  TTS + analyze), `/workspace` (portal **and** operator console), `/console` (superadmin),
+  `/ai-config` (AI setup), `/usage`, `/editor` (audio editor), `/account`, `/copilot`.
 - **Single sign-in** with admin routing; superadmin creds validated server-side.
 - **Auto-deploy webhook** (push to `main` → server pulls + rebuilds). See §5.
 - **Multi-provider AI** (`services/ai_registry.py`, `ai_resolve.py`, `providers/*`). A registry of
@@ -258,11 +262,26 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   Without `SECRETS_KEY` the API still boots in a **plaintext** mode (`/health.secrets`, console
   banner) and seals everything on the first boot after the key is set. **Losing the key makes
   every stored provider key unreadable — back it up.**
-- **OpenAI and Gemini adapters are unverified against the live APIs** (this repo holds no key
-  for either). Request/response shapes are pinned with `httpx.MockTransport`; the console's
-  *Test connection* is the live verification. Known first-use watch-item: OpenAI reasoning
-  models spend `max_completion_tokens` on hidden reasoning, so a 4096-token budget can come
-  back truncated — pick a larger budget or a non-reasoning model for that connection.
+- **Gemini speech-to-text speaks TWO Google APIs, chosen by the model id** — do not collapse
+  them (`providers/stt_gemini.py`). An id containing *transcribe* (`gemini-3.5-transcribe`,
+  the adapter's default) is a dedicated ASR model on the **Interactions API**
+  (`POST /v1beta/interactions`, `generation_config.transcription_config`): native speaker
+  diarization, word timestamps, BCP-47 hints (our `ka` → `ka-GE`), `store:false`. Any other id
+  is a chat model on `generateContent` with a transcript schema — segment-level timings,
+  speakers by ear. `-live` is WebSocket-only and is refused before any request.
+  **Google rejects `custom_vocabulary` combined with diarization or word timestamps**, so with
+  both set the adapter keeps speaker separation, drops the key terms and says so in the result
+  `detail` (the workspace's key-terms hint carries the same rule). Diarization off + key terms
+  ⇒ no `words` at all, and the analysis falls back to `segments_from_text`.
+- **Adapters verified against the live APIs, and adapters not.** Verified: Anthropic and
+  ElevenLabs (the deployment has always run on them) and, since 2026-09-10, **Gemini
+  speech-to-text** — a real `gemini-3.5-transcribe` connection passes *Test connection* on the
+  server. Still unverified because this repo holds no key: **Gemini text**, **OpenAI text and
+  voice**. Their request/response shapes are pinned with `httpx.MockTransport` only; the
+  console's *Test connection* is the live verification, and a failure now shows the provider's
+  own sentence in the row and the toast rather than a bare "Failed". Known first-use
+  watch-item: OpenAI reasoning models spend `max_completion_tokens` on hidden reasoning, so a
+  4096-token budget can come back truncated — pick a larger budget or a non-reasoning model.
 - **The legacy Integrations key/model fields are gone from the console.** On the first boot
   with an empty registry, `ai_registry.seed_from_legacy()` turns the admin-panel keys into
   default connections once; a keyless deployment stays on the legacy path with an empty
@@ -319,8 +338,9 @@ One principal resolver produces `superadmin | tenant | anonymous`:
 - **2026-09-08 — multi-provider AI.** Connection registry + per-workspace assignment + tenant
   BYO keys, encrypted at rest; Anthropic/OpenAI/Gemini text adapters and ElevenLabs/OpenAI
   voice adapters behind two seams; all 15 voice call sites migrated. **Pending on the server:**
-  set `SECRETS_KEY` in the server `.env` (see `.env.example`) so keys get sealed; add OpenAI /
-  Gemini keys and press *Test connection* before assigning either to a workspace.
+  set `SECRETS_KEY` in the server `.env` (see `.env.example`) so keys get sealed (`/api/health`
+  still reports `secrets: plaintext`); press *Test connection* on any OpenAI connection before
+  assigning it to a workspace — Gemini speech-to-text has since been verified (below).
 - **2026-09-08 — chat bot launched in the UI.** Tenant BOT tab live (was behind a "coming soon"
   flag), superadmin-editable default bot config, one chat-service credential with a grant per
   tenant + a console to manage them, integration contract + chat-side prompt written.
@@ -373,17 +393,27 @@ One principal resolver produces `superadmin | tenant | anonymous`:
       autopilot_not_enabled` (bot paused, no circuit open).
   13. Confirm metering (`llm_usage.feature` in `autopilot | copilot | handoff`) for the pilot
       tenant, and run Swift Chat's `scripts/validate-cq.ts` locally and record the real pass count.
+- **2026-09-10 — Gemini speech-to-text, live and verified.** Google's dedicated ASR model
+  `gemini-3.5-transcribe` (GA 2026-08-26) lives on the **Interactions API**, not
+  `generateContent`, so the first adapter's connection failed its test; the console showed only
+  "Failed" because the reason sat behind the ⓘ. Both are fixed (§4): the adapter routes by model
+  id and a failed test now prints the provider's own sentence. **An operator added a real Google
+  key and *Test connection* passed** — the first live verification of a non-founding provider.
+  Not done: Gemini **text-to-speech** (Google has a TTS model; no adapter yet), and no Georgian
+  call has been transcribed through it end to end, so diarization quality, word timings and the
+  *36 თვემდე / 36 წლამდე* class of error are still unmeasured against Scribe.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
-  rubric scoring, all three UIs — **including the QA fixes below** (pushed + deployed), plus the
+  rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.
 - The **7 QA bug fixes** from the full local regression pass (now live):
   1. Malformed UUID in path/body → was **500**, now **400** (global `asyncpg.DataError` handler).
   2. `analyze.py` guarded `stt["text"]` (missing/None transcript no longer 500s + strands the job).
   3. `reembed_document` raises on embedding-count mismatch (was a silent partial re-embed).
   4. `save_config` retries on concurrent version `UniqueViolation` (was 500).
-  5. `tenant.html` / `kb-admin.html` check `r.ok` + `Array.isArray` before `.map`/`.length`
-     (expired-token/404 error body could crash the chunk/document views).
-  6. kb-admin bulk **retag** uses a brand modal instead of native `prompt()`.
+  5. The portal / KB console check `r.ok` + `Array.isArray` before `.map`/`.length`
+     (expired-token/404 error body could crash the chunk/document views). Fixed on the legacy
+     pages; the guard was carried into the React port, which is what still runs.
+  6. KB bulk **retag** uses a brand modal instead of native `prompt()`.
   7. Added `toast.error` i18n key (EN/KA/RU).
 - **Local QA is fully green** (see the pass/fail matrix in the session that produced these fixes):
   auth, isolation, KB import (all methods + PDF/DOCX), KB-admin console, fact-check, scoring,
@@ -421,8 +451,9 @@ curl localhost:8000/health      # {"status":"ok",...}
 
 **URLs (local):**
 - Public app (nginx): `http://localhost/`  ·  API direct: `http://localhost:8000/`
-- Pages: `/index.html` (public TTS + analyze), `/tenant.html` (portal), `/admin.html` (console),
-  `/kb-admin.html` (KB operator console).
+- Pages (clean URLs, no `.html`): `/` (public TTS + analyze), `/workspace` (portal + KB operator
+  console), `/console` (superadmin), `/ai-config`, `/usage`, `/editor`, `/account`, `/copilot`.
+  The old `.html` paths 301 to these, query string intact.
 - API health `/health`; unified login `POST /auth/login`; superadmin uses `X-Admin-Token`.
 
 **Inspect the DB:** `docker compose exec db psql -U cq -d cq` (user/db/pass all `cq` locally).
@@ -437,15 +468,15 @@ curl localhost:8000/health      # {"status":"ok",...}
 
 **Dev conventions:**
 - Python 3.11, FastAPI, **asyncpg raw SQL** (`$1` params, uuid PKs, timestamptz), pydantic-settings.
-- Frontend is **mid-migration to Next.js**. New work goes in `frontend/next` (App Router,
-  React 19, TypeScript, **static export** — no Node process in production; nginx serves the
-  exported files beside the legacy ones and `try_files $uri $uri.html` gives them clean URLs).
-  The not-yet-ported pages are still vanilla JS in `frontend/public` (`brand.js` = `CQ.*`,
-  `brand.css`). **Read `docs/MIGRATION.md` before touching either stack** — it is the port's
+- Frontend is **Next.js, and only Next.js** — the migration finished and the vanilla stack was
+  deleted (`frontend/public` is assets only: favicon, logos, the guides zip). All work goes in
+  `frontend/next` (App Router, React 19, TypeScript, **static export** — no Node process in
+  production; `try_files $uri $uri.html` gives the exported files clean URLs).
+  **Read `docs/MIGRATION.md` before touching these pages** — it is the port's
   contract, and it lists the deliberate decisions a rewrite silently turns into regressions.
-  Trilingual either way: every user-facing string needs `en/ka/ru` keys and
-  `python3 scripts/check_i18n.py` must pass (it also reports keys still shared by both stacks,
-  a count that reaches zero when the last legacy page is deleted).
+  Trilingual: every user-facing string needs `en/ka/ru` keys and
+  `python3 scripts/check_i18n.py` must pass (it also reports keys still shared with the legacy
+  stack — that count is **0** since the cutover, and anything above zero means one came back).
 - New AI features: **forced tool-use + strict schema + array normalization**.
 - New tenant-scoped queries: **always filter by `client_id`.**
 - New DB columns/tables: idempotent (`ADD COLUMN IF NOT EXISTS`) in a `db/*.sql` applied by
