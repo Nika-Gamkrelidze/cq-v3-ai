@@ -317,9 +317,9 @@ def test_enabled_score_runs_against_the_default_rubric(api, registered, make_acc
     seen = {}
 
     async def _fake_scoring(transcript, config, api_key, model, client_id=None, segments=None,
-                            user_id=None):
+                            user_id=None, kb_check=None, semantic=None):
         seen.update(transcript=transcript, config=config, client_id=client_id,
-                    segments=segments, user_id=user_id)
+                    segments=segments, user_id=user_id, kb_check=kb_check, semantic=semantic)
         return {"config_version": config.get("version"), "weighted_total": 77.5,
                 "max_total": 100, "dimensions": [], "lanes": [], "operator_speaker": "agent"}
     monkeypatch.setattr(scoring, "run_scoring", _fake_scoring)

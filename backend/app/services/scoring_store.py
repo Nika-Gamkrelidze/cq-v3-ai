@@ -18,23 +18,37 @@ from datetime import datetime, timezone
 import asyncpg
 
 from ..db import pool
-from . import settings_store
+from . import scoring, settings_store
 from .scoring import normalize_dimensions
 
 DEFAULT_RUBRIC_KEY = "default_rubric"
 DEMO_SLUG = "demo"
 
+# Two of these are SYSTEM dimensions (`scoring.SYSTEM_DIMENSIONS`), scored by code from the
+# analyser that actually measures them rather than by a model re-reading the transcript.
+#
+# They replace two criteria this default used to carry as ordinary prose dimensions:
+#   "Correctness of information" (weight 45) — a model asked this from the transcript alone
+#       has nothing to check against. The KB fact-check verifies each claim against the
+#       workspace's own documents, which is the question that criterion was really asking.
+#   "Courtesy & empathy" — written by hand into most tenant rubrics. The tone analyser
+#       already returns politeness 0-100 PER SPEAKER, so it can score the agent's own
+#       wording instead of the mood of a call the customer may be driving.
+#
+# A tenant may re-weight both and delete neither name nor meaning; that is the point of
+# putting a measured number on a scorecard. Both are frequently NOT APPLICABLE (no KB, no
+# checkable claim, no tone pass) and `build_result` drops an unscored dimension out of the
+# denominator, so the weights below describe a fully-measured call.
 BUILTIN_DEFAULT = {
     "dimensions": [
         {"key": "greeting", "name": "Greeting & identification", "weight": 15.0,
          "description": "The agent greets the caller and verifies who they are.",
          "guidance": "Full marks for a warm greeting plus identity verification; low if skipped."},
-        {"key": "correctness", "name": "Correctness of information", "weight": 45.0,
-         "description": "The information given to the caller is accurate.",
-         "guidance": "High when every statement is correct; low for any wrong or misleading claim."},
+        {**scoring.SYSTEM_DIMENSIONS["factcheck"], "weight": 30.0, "source": "factcheck"},
         {"key": "problem_solving", "name": "Problem solving", "weight": 25.0,
          "description": "The caller's issue is understood and resolved.",
          "guidance": "High for a complete resolution or clear next step; low if the issue is left open."},
+        {**scoring.SYSTEM_DIMENSIONS["sentiment"], "weight": 15.0, "source": "sentiment"},
         {"key": "time_efficiency", "name": "Time efficiency", "weight": 15.0,
          "description": "The call stays focused and concise.",
          "guidance": "High for a focused call; low for avoidable delays, repetition or dead air."},
@@ -146,8 +160,8 @@ async def save_config_for(principal, dimensions, rubric: str, updated_by: str) -
 async def _save(col: str, owner_id: str, dimensions, rubric: str, updated_by: str) -> None:
     assert col in _OWNER_COLUMNS.values()
     dims, weights = _validated(dimensions)
-    # Retry on a version collision from a concurrent save for the same owner (both readers
-    # computed the same MAX(version)+1 -> UNIQUE(client_id, version) / (user_id, version)).
+# Retry on a version collision from a concurrent save for the same owner (both readers
+# computed the same MAX(version)+1 -> UNIQUE(client_id, version) / (user_id, version)).
     for _attempt in range(3):
         try:
             async with pool().acquire() as conn:

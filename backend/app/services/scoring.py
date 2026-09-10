@@ -124,8 +124,137 @@ def _as_str_list(value) -> list[str]:
     return [str(value).strip()]
 
 
+# --------------------------------------------------------------------------- #
+# System dimensions: scored by CODE from another analyser, weighted by the tenant
+# --------------------------------------------------------------------------- #
+# Two rubric criteria kept being written by hand as free-text dimensions the model judged from
+# the transcript — "correctness of information" and "courtesy/empathy" — while this product
+# already answers both with a purpose-built analyser that does it better:
+#
+#   kb_factcheck    the KB fact-check (`services/factcheck.py`) verifies each claim against the
+#                   tenant's OWN knowledge base and returns `accuracy_score`. A model asked
+#                   "was the information correct?" from the transcript alone cannot do this at
+#                   all — it has no documents to check against.
+#   agent_courtesy  the tone analyser (`services/semantic.py`) returns `politeness` 0-100 PER
+#                   SPEAKER with a role. That matters: overall call sentiment is dominated by
+#                   the CUSTOMER, so scoring an agent on it punishes them for handling an angry
+#                   caller. This reads the agent's own wording.
+#
+# They are `source`-marked dimensions: excluded from the model's prompt (so no tokens are spent
+# re-judging what is already measured), scored by `system_scores()` below, and weighted exactly
+# like any other dimension. A tenant may set the WEIGHT and nothing else — the name and the
+# meaning are the product's, because the number's provenance is the whole point.
+SYSTEM_SOURCES = ("factcheck", "sentiment")
+
+SYSTEM_DIMENSIONS = {
+    "factcheck": {
+        "key": "kb_factcheck",
+        "name": "Knowledge Base fact check",
+        "description": "How much of what the agent stated matches this workspace's knowledge base.",
+        "guidance": "Scored from the fact-check, not from the transcript: the share of "
+                    "checkable claims the knowledge base supports.",
+    },
+    "sentiment": {
+        "key": "agent_courtesy",
+        "name": "Courtesy & empathy",
+        "description": "How courteous the agent's own wording was, independent of the customer's mood.",
+        "guidance": "Scored from the tone analyser's per-speaker politeness for the agent, "
+                    "so a difficult customer does not lower it.",
+    },
+}
+
+
+def system_dimension(source: str, weight: float) -> dict:
+    """A ready-to-store dimension row for one system source."""
+    return {**SYSTEM_DIMENSIONS[source], "weight": max(0.0, float(weight)), "source": source}
+
+
+def agent_politeness(semantic: dict | None) -> int | None:
+    """The tone analyser's politeness for the AGENT, 0-100, or None.
+
+    None whenever the analyser has not run, found no agent, or gave no number — never 0.
+    A missing measurement is not a bad one, and `build_result` drops an unscored dimension out
+    of the weighting rather than scoring it zero.
+    """
+    if not isinstance(semantic, dict):
+        return None
+    for sp in (semantic.get("speakers") or []):
+        if not isinstance(sp, dict) or str(sp.get("role") or "").strip().lower() != "agent":
+            continue
+        try:
+            return max(0, min(100, int(round(float(sp.get("politeness"))))))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def factcheck_accuracy(kb_check: dict | None) -> int | None:
+    """The fact-check's accuracy score, 0-100, or None.
+
+    Deliberately nullable in FOUR distinct cases, all of which mean "not measured" and none of
+    which means "did badly": the tenant has no KB, the fact-check never ran, no checkable claim
+    was extracted, or every claim came back NOT_IN_KB. `accuracy_score` already excludes
+    NOT_IN_KB from its own denominator so an agent is not punished for gaps in the KB; scoring
+    its absence as 0 here would reintroduce exactly that punishment one level up.
+    """
+    if not isinstance(kb_check, dict):
+        return None
+    score = kb_check.get("accuracy_score")
+    if score is None:
+        return None
+    try:
+        return max(0, min(100, int(round(float(score)))))
+    except (TypeError, ValueError):
+        return None
+
+
+def system_scores(*, kb_check: dict | None = None, semantic: dict | None = None) -> dict:
+    """`by_key` entries for the system dimensions, in the shape `build_result` consumes.
+
+    A dimension whose signal is absent gets `score: None` and a rationale that says WHY in
+    words — the scorecard shows "—" and the weighting drops it, so the total stays out of 100
+    and remains comparable with a call where the signal was present.
+    """
+    acc = factcheck_accuracy(kb_check)
+    pol = agent_politeness(semantic)
+    return {
+        SYSTEM_DIMENSIONS["factcheck"]["key"]: {
+            "score": acc,
+            "rationale": _factcheck_rationale(kb_check, acc),
+            "evidence": [],
+        },
+        SYSTEM_DIMENSIONS["sentiment"]["key"]: {
+            "score": pol,
+            "rationale": ("Politeness of the agent's own wording, from the tone analyser."
+                          if pol is not None else
+                          "Not scored: the tone analyser has not run on this recording, or it "
+                          "could not tell which speaker is the agent."),
+            "evidence": [],
+        },
+    }
+
+
+def _factcheck_rationale(kb_check: dict | None, score: int | None) -> str:
+    if score is None:
+        if not isinstance(kb_check, dict):
+            return ("Not scored: no fact-check for this recording — the workspace has no "
+                    "knowledge base, or the check has not run.")
+        return ("Not scored: nothing in this call could be checked against the knowledge "
+                "base, so there is no accuracy to report.")
+    counts = kb_check.get("counts") if isinstance(kb_check.get("counts"), dict) else {}
+    verifiable = sum(int(counts.get(k) or 0)
+                     for k in ("supported", "partially_supported", "contradicted"))
+    return (f"{score}% of the {verifiable} checkable claim(s) in this call are supported by "
+            f"the knowledge base.")
+
+
 def normalize_dimensions(dimensions) -> list[dict]:
-    """Clean a config's dimension list: valid key/name, non-negative weight, string guidance."""
+    """Clean a config's dimension list: valid key/name, non-negative weight, string guidance.
+
+    `source` survives the whitelist (it is the only field a caller cannot invent freely — an
+    unknown value is dropped), because it is what marks a dimension as scored by code rather
+    than by the model.
+    """
     out, seen = [], set()
     for i, d in enumerate(dimensions or []):
         if not isinstance(d, dict):
@@ -141,13 +270,21 @@ def normalize_dimensions(dimensions) -> list[dict]:
             weight = float(d.get("weight"))
         except (TypeError, ValueError):
             weight = 0.0
-        out.append({
+        source = str(d.get("source") or "").strip().lower()
+        row = {
             "key": key,
             "name": name,
             "description": str(d.get("description") or "").strip(),
             "guidance": str(d.get("guidance") or "").strip(),
             "weight": max(0.0, weight),
-        })
+        }
+        if source in SYSTEM_SOURCES:
+            # The product owns everything about a system dimension except its weight, so the
+            # stored name/guidance are replaced rather than trusted: an old row, a hand-edited
+            # import or a rename in the UI must not leave a code-scored number under a label
+            # that no longer describes where it came from.
+            row = {**row, **SYSTEM_DIMENSIONS[source], "weight": row["weight"], "source": source}
+        out.append(row)
         if len(out) >= MAX_DIMENSIONS:
             break
     return out
@@ -201,12 +338,18 @@ def _timeline_for(transcript: str, segments) -> tuple[list[dict], str]:
 
 async def run_scoring(transcript: str, config: dict, api_key: str, model: str,
                       client_id: str | None = None, segments: list[dict] | None = None,
-                      user_id: str | None = None) -> dict | None:
+                      user_id: str | None = None, kb_check: dict | None = None,
+                      semantic: dict | None = None) -> dict | None:
     """Score the transcript against the owner's rubric. Returns None if nothing to score.
 
     `segments` (§2) places the evidence on the player's timeline; `segments=None` keeps the
     pre-v2 callers working unchanged. `user_id` names a registered user's personal rubric run
     for the log — `llm.call_tool` records usage by `client_id` only.
+
+    `kb_check` and `semantic` feed the SYSTEM dimensions (see SYSTEM_DIMENSIONS). Both are
+    optional and both are nullable all the way down: a caller that has neither — the raw-text
+    playground, a re-score of a pasted transcript — produces a scorecard whose system
+    dimensions read "—" and drop out of the weighting, rather than one that scores them zero.
     """
     if not (transcript or "").strip() or not api_key or not config:
         return None
@@ -214,30 +357,43 @@ async def run_scoring(transcript: str, config: dict, api_key: str, model: str,
     if not dims:
         return None
 
+    # The model never sees the system dimensions: it cannot check a knowledge base it has no
+    # access to, and asking it to re-judge tone it is not measuring would spend tokens
+    # producing a second, quieter opinion that disagrees with the one on the scorecard.
+    model_dims = [d for d in dims if not d.get("source")]
+    by_key: dict = {}
+    operator_speaker = "unknown"
     segs, timeline = _timeline_for(transcript, segments)
-    system = _build_system(config, dims)
-    try:
-        # stream=True for the same reason the KB imports stream: llm.ANALYSIS budgets 60 s of
-        # READ, and a non-streamed answer of thousands of Georgian tokens outlives that (and
-        # is exactly the long request Anthropic drops). Streaming makes the budget per chunk.
-        raw = await llm.call_tool(
-            feature="scoring", client_id=client_id, api_key=api_key, model=model,
-            system=system, user=f"<transcript>\n{timeline}\n</transcript>",
-            tool=SCORE_TOOL, opts=llm.ANALYSIS,
-            max_tokens=output_budget(len(dims)), stream=True)
-    except llm.LLMError as exc:
-        raise ScoringError(f"Scoring request failed: {exc}") from exc
 
-    by_key = {}
-    for s in (raw.get("scores") or []):
-        if isinstance(s, dict) and s.get("key") is not None:
-            by_key[str(s["key"]).strip()] = s
+    if model_dims:
+        system = _build_system(config, model_dims)
+        try:
+            # stream=True for the same reason the KB imports stream: llm.ANALYSIS budgets 60 s
+            # of READ, and a non-streamed answer of thousands of Georgian tokens outlives that
+            # (and is exactly the long request Anthropic drops). Streaming makes it per chunk.
+            raw = await llm.call_tool(
+                feature="scoring", client_id=client_id, api_key=api_key, model=model,
+                system=system, user=f"<transcript>\n{timeline}\n</transcript>",
+                tool=SCORE_TOOL, opts=llm.ANALYSIS,
+                max_tokens=output_budget(len(model_dims)), stream=True)
+        except llm.LLMError as exc:
+            raise ScoringError(f"Scoring request failed: {exc}") from exc
+        for s in (raw.get("scores") or []):
+            if isinstance(s, dict) and s.get("key") is not None:
+                by_key[str(s["key"]).strip()] = s
+        operator_speaker = str(raw.get("operator_speaker") or "unknown").strip() or "unknown"
+    else:
+        # A rubric made only of system dimensions is a real configuration, and it must cost
+        # ZERO tokens — the same discipline the bot keeps when it refuses ungrounded.
+        log.info("scoring client=%s: system dimensions only, no model call", client_id)
 
-    log.info("scoring client=%s user=%s dims=%d scored=%d segments=%d",
-             client_id, user_id, len(dims), len(by_key), len(segs))
-    return build_result(dims, by_key, config.get("version"),
-                        str(raw.get("operator_speaker") or "unknown").strip() or "unknown",
-                        segments=segs)
+    # After the model, so a model that answered under a system dimension's key cannot overwrite
+    # a measured number with a guessed one.
+    by_key.update(system_scores(kb_check=kb_check, semantic=semantic))
+
+    log.info("scoring client=%s user=%s dims=%d model_dims=%d scored=%d segments=%d",
+             client_id, user_id, len(dims), len(model_dims), len(by_key), len(segs))
+    return build_result(dims, by_key, config.get("version"), operator_speaker, segments=segs)
 
 
 def _level(score: int | None) -> str:
@@ -306,22 +462,45 @@ def apply_manual_scores(result: dict, edits: dict, *, edited_by: str) -> dict:
     # Stored weights are already percentages summing to ~100; falling back to an equal split
     # mirrors build_result's own rule for a rubric whose weights are all zero.
     total_weight = sum(float(d.get("weight") or 0) for d in dims) or float(len(dims) or 1)
-    weighted_total = 0.0
+
     for d in dims:
         key = str(d.get("key"))
-        if key in edits:
-            new = edits[key]
-            if new is not None and int(new) != (d.get("score") if isinstance(d.get("score"), int) else None):
-                d["edited"] = True
-                d["ai_score"] = d.get("ai_score", d.get("score"))
-            d["score"] = None if new is None else max(0, min(100, int(new)))
-        w = float(d.get("weight") or 0) or (1.0 if total_weight == len(dims) else 0.0)
+        if key not in edits:
+            continue
+        if d.get("source") in SYSTEM_SOURCES:
+            # A system dimension is a MEASUREMENT, not an opinion to overrule. Letting a
+            # reviewer type over it would leave a scorecard asserting a fact-check result that
+            # no fact-check produced, under a name that says otherwise — and the edit history
+            # would record only that a number changed, not that its provenance was voided.
+            # Disagreeing with the knowledge base is a reason to fix the knowledge base.
+            log.info("manual edit ignored for system dimension %s", key)
+            continue
+        new = edits[key]
+        if new is not None and int(new) != (d.get("score") if isinstance(d.get("score"), int) else None):
+            d["edited"] = True
+            d["ai_score"] = d.get("ai_score", d.get("score"))
+        d["score"] = None if new is None else max(0, min(100, int(new)))
+
+    # Same renormalisation as build_result: an unscored dimension leaves the denominator, so a
+    # reviewer clearing a score raises the weight of the rest instead of silently deducting it.
+    def _w(d):
+        return float(d.get("weight") or 0) or (1.0 if total_weight == len(dims) else 0.0)
+
+    scored_weight = sum(_w(d) for d in dims if d.get("score") is not None)
+    denominator = scored_weight or total_weight
+    weighted_total = 0.0
+    unscored = []
+    for d in dims:
         score = d.get("score")
-        d["contribution"] = round((score or 0) * w / total_weight, 1)
+        d["contribution"] = round((score or 0) * _w(d) / denominator, 1)
         if score is not None:
-            weighted_total += score * w / total_weight
+            weighted_total += score * _w(d) / denominator
+        else:
+            unscored.append(str(d.get("key")))
     return {**result, "dimensions": dims,
             "weighted_total": round(weighted_total, 1),
+            "scored_weight": round(100 * scored_weight / total_weight, 1),
+            "unscored": unscored,
             "edited_by": edited_by, "manually_edited": True}
 
 
@@ -335,29 +514,61 @@ def build_result(dims: list[dict], by_key: dict, version, operator_speaker: str,
     out-of-range one) and the quotes are kept as unplaced evidence.
     """
     segments = segments or []
-    total_weight = sum(d["weight"] for d in dims) or float(len(dims))  # equal weights if all 0
-    out_dims, lanes, weighted_total = [], [], 0.0
+    any_weight = any(x["weight"] for x in dims)
+    weights = {d["key"]: (d["weight"] if any_weight else 1.0) for d in dims}
+    total_weight = sum(weights.values()) or float(len(dims)) or 1.0
+
+    # Resolve every score FIRST, because the denominator depends on which dimensions actually
+    # got one. An unscored dimension is dropped from the weighting and the remaining weights
+    # are renormalised, so the total stays a number out of 100 and remains comparable with a
+    # call where everything scored.
+    #
+    # This is what makes the system dimensions honest. They are absent often and for reasons
+    # that are nobody's fault — no knowledge base, no checkable claim in the call, the tone
+    # analyser not run, a pasted transcript with no audio — and the previous arithmetic left
+    # their weight in the denominator while contributing nothing, which silently deducted
+    # points for a measurement that was never taken. A workspace giving the fact-check 30%
+    # would have capped every call with an uncheckable transcript at 70.
+    resolved: dict = {}
     for d in dims:
         raw = by_key.get(d["key"], {})
         try:
             score = int(round(float(raw.get("score"))))
         except (TypeError, ValueError):
             score = None
-        score = None if score is None else max(0, min(100, score))
-        w = d["weight"] if any(x["weight"] for x in dims) else 1.0
+        resolved[d["key"]] = None if score is None else max(0, min(100, score))
+    scored_weight = sum(weights[d["key"]] for d in dims if resolved[d["key"]] is not None)
+    denominator = scored_weight or total_weight
+
+    out_dims, lanes, weighted_total, unscored = [], [], 0.0, []
+    for d in dims:
+        raw = by_key.get(d["key"], {})
+        score = resolved[d["key"]]
+        w = weights[d["key"]]
+        # `weight` stays the share of the WHOLE rubric — what the owner configured and expects
+        # to see — while contributions and the total are computed over what was scored.
         weight_pct = round(100 * w / total_weight, 1)
-        contribution = round((score or 0) * w / total_weight, 1)
+        contribution = round((score or 0) * w / denominator, 1)
         if score is not None:
-            weighted_total += (score * w / total_weight)
+            weighted_total += (score * w / denominator)
+        else:
+            unscored.append(d["key"])
         evidence = _evidence(raw.get("evidence"), segments)
         spans = _dimension_spans(d, score, evidence, segments)
-        out_dims.append({
+        out = {
             "key": d["key"], "name": d["name"], "weight": weight_pct,
             "score": score, "max": 100, "contribution": contribution,
             "rationale": str(raw.get("rationale") or "").strip(),
             "evidence": evidence,
             "spans": spans,
-        })
+        }
+        if d.get("source"):
+            # Provenance travels WITH the stored scorecard, not just with the rubric. It is
+            # what stops `apply_manual_scores` letting a reviewer type over a measurement
+            # months later, and what lets the UI say where the number came from instead of
+            # showing a bare score with no evidence and no explanation.
+            out["source"] = d["source"]
+        out_dims.append(out)
         lanes.append({"key": d["key"], "name": d["name"], "score": score, "spans": spans})
     return {
         "config_version": version,
@@ -365,6 +576,12 @@ def build_result(dims: list[dict], by_key: dict, version, operator_speaker: str,
         "dimensions": out_dims,
         "weighted_total": round(weighted_total, 1),
         "max_total": 100,
+        # How much of the rubric the total was actually computed from, and which dimensions
+        # were left out. Without this a renormalised total is unauditable: 82 out of the whole
+        # rubric and 82 out of the two thirds that could be measured are different claims
+        # about an agent, and a QA review has to be able to tell them apart months later.
+        "scored_weight": round(100 * scored_weight / total_weight, 1),
+        "unscored": unscored,
         "lanes": lanes,
     }
 

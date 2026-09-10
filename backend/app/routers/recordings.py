@@ -481,7 +481,12 @@ async def paste_recording(request: Request, body: TextBody,
 # --------------------------------------------------------------------------- #
 # Analysers, on demand
 # --------------------------------------------------------------------------- #
-_ANALYSER_COLS = "id, filename, content_type, source, language, transcript, segments, audio_path"
+# `kb_check` and `semantic` are here for the SCORING analyser: the rubric's system dimensions
+# are scored from whatever those two analysers last produced for this recording, and a re-score
+# must read them rather than guess. `_load` decodes both (they are in `_JSON_COLS`), and the
+# other two analysers simply ignore the extra columns.
+_ANALYSER_COLS = ("id, filename, content_type, source, language, transcript, segments, "
+                  "audio_path, kb_check, semantic")
 
 
 @router.post("/recordings/{job_id}/factcheck")
@@ -632,9 +637,15 @@ async def score_recording(job_id: str, principal: Principal = Depends(resolve_pr
     cfg = await _settings("llm")
     await _pay_for_run(principal)
     try:
+        # The stored analyser results feed the rubric's system dimensions. Deliberately NOT
+        # recomputed here: a re-score is a cheap, repeatable button, and silently running a
+        # fact-check (two more model calls) behind it would triple what one unit buys. A
+        # recording whose analysers have not run yet scores those dimensions as "—" and the
+        # weighting renormalises, which is the same thing that happens when there is no KB.
         result = await scoring.run_scoring(
             transcript, config, cfg["anthropic_api_key"], cfg["llm_model"],
-            client_id=principal.client_id, segments=segs, user_id=_user_id(principal))
+            client_id=principal.client_id, segments=segs, user_id=_user_id(principal),
+            kb_check=row.get("kb_check"), semantic=row.get("semantic"))
     except scoring.ScoringError as exc:
         raise _upstream(exc) from exc
     if result is None:

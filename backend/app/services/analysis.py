@@ -17,7 +17,7 @@ import time
 
 from ..db import pool
 from . import (attribution, claude, factcheck, media, retrieval, scoring, scoring_store,
-               segments, sentiment, settings_store, transcription, voice)
+               segments, semantic, sentiment, settings_store, transcription, voice)
 
 log = logging.getLogger("cq")
 
@@ -208,9 +208,27 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
         try:
             cfg_scoring = await scoring_store.get_active_config(client_id)
             if cfg_scoring and cfg_scoring.get("dimensions"):
+                # The courtesy system dimension is scored from the tone analyser's per-speaker
+                # politeness, and the tone analyser is otherwise on-demand only. Run it HERE,
+                # and only when the rubric actually asks for it, so the dimension is a real
+                # measurement on the normal upload path instead of a permanent "—". Text mode
+                # alone: politeness is a judgement about WORDING, so the prosody half would be
+                # a second sidecar call for a number this dimension does not read.
+                dims = scoring.normalize_dimensions(cfg_scoring.get("dimensions"))
+                tone = None
+                if any(d.get("source") == "sentiment" for d in dims):
+                    try:
+                        tone = await semantic.analyse(
+                            segments=segs, transcript=transcript, audio=None,
+                            filename=filename, content_type=content_type, modes={"text"},
+                            api_key=cfg["anthropic_api_key"], model=cfg["llm_model"],
+                            client_id=client_id)
+                    except Exception:  # noqa: BLE001 — an unscored dimension, not a failed job
+                        log.warning("tone pass for scoring failed on job %s", job_id)
                 scorecard = await scoring.run_scoring(
                     transcript, cfg_scoring, cfg["anthropic_api_key"], cfg["llm_model"],
-                    client_id=client_id, segments=segs)
+                    client_id=client_id, segments=segs,
+                    kb_check=kb_check, semantic=tone)
         except Exception:  # noqa: BLE001
             scorecard = None
 
