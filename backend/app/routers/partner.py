@@ -320,6 +320,11 @@ class Dimension(BaseModel):
     description: str | None = ""
     guidance: str | None = ""
     weight: float = 0.0
+    # Same field, same reason, as `routers/scoring.py::Dimension`: GET returns `source` on a
+    # measured dimension, so POST has to accept it back or this endpoint documents a shape it
+    # refuses. `scoring_store.with_system_dimensions` would recover it from the key anyway —
+    # that is the belt — but a public contract should not rely on the braces.
+    source: str | None = None
 
 
 class RubricBody(BaseModel):
