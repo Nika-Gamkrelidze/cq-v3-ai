@@ -44,6 +44,13 @@ class Dimension(BaseModel):
     description: str | None = ""
     guidance: str | None = ""
     weight: float = 0.0
+    # A SYSTEM dimension's marker, and it must round-trip. `_dump` below is `model_dump()`, so
+    # a field missing here is silently DROPPED from every save: the editor sent `source`, the
+    # model ate it, the store saw an ordinary dimension, appended a fresh system one beside it,
+    # and the rubric grew by two rows on every press of Save. Claiming a source that is not in
+    # `scoring.SYSTEM_SOURCES` is harmless — `normalize_dimensions` drops the marker — and
+    # claiming a real one converts the row into that measured dimension, name and all.
+    source: str | None = None
 
 
 class ConfigBody(BaseModel):

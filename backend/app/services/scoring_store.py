@@ -101,6 +101,10 @@ async def _active(col: str, owner_id: str) -> dict | None:
     return _row_to_config(row) if row else None
 
 
+# key -> source, so a system dimension is still recognisable once its marker is gone.
+_SYSTEM_KEYS = {d["key"]: source for source, d in scoring.SYSTEM_DIMENSIONS.items()}
+
+
 def with_system_dimensions(dimensions) -> list:
     """Every rubric carries the system dimensions, whether or not its owner typed them.
 
@@ -118,13 +122,32 @@ def with_system_dimensions(dimensions) -> list:
       * and the tenant supplying the weight is the point — the product supplies the
         measurement, they decide what it is worth.
     Idempotent: a rubric that already carries one keeps its weight untouched.
+
+    A system dimension is recognised by its `source` marker OR by its key. Both, because the
+    marker is losable — it travels through a pydantic model, a JSONB column and an editor — and
+    a rubric that lost it would otherwise get a SECOND copy appended on every save, growing by
+    two rows each time. Matching on the key also repairs a rubric that was already damaged that
+    way: the row keeps the weight its owner chose and gets its marker back, and the duplicate
+    is dropped rather than renamed, because two dimensions claiming the same measurement is
+    never what anyone meant.
     """
-    dims = list(dimensions or [])
-    present = {d.get("source") for d in dims if isinstance(d, dict)}
+    out: list = []
+    present: set = set()
+    for d in (dimensions or []):
+        if isinstance(d, dict):
+            source = str(d.get("source") or "").strip().lower() \
+                or _SYSTEM_KEYS.get(str(d.get("key") or "").strip())
+            if source in scoring.SYSTEM_SOURCES:
+                if source in present:
+                    continue                       # a duplicate of one we already kept
+                present.add(source)
+                d = {**d, "source": source}
+        out.append(d)
     for source in scoring.SYSTEM_SOURCES:
         if source not in present:
-            dims.append(scoring.system_dimension(source, 0.0))
-    return dims
+            out.append(scoring.system_dimension(source, 0.0))
+    return out
+
 
 
 def _row_to_config(row) -> dict:

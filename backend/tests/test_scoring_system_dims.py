@@ -238,3 +238,38 @@ def test_a_rubric_saved_without_them_gets_them_back():
     assert {d.get("source") for d in dims if d.get("source")} == {"factcheck", "sentiment"}
     assert sum(d["weight"] for d in dims) == 100.0
     assert set(weights) == {d["key"] for d in dims}
+
+
+def test_saving_a_rubric_twice_does_not_grow_it():
+    """THE SAVE BUG. `routers/scoring.py::Dimension` had no `source` field, so `model_dump()`
+    dropped the marker on every PUT: the store saw two ordinary dimensions, appended a fresh
+    pair of system ones beside them, and the rubric gained two rows per press of Save while
+    the measured rows quietly became prose ones."""
+    saved = scoring_store.with_system_dimensions(
+        [{"key": "greeting", "name": "Greeting", "weight": 100.0}])
+    # What the editor posts back after a round trip through the API's pydantic model, in the
+    # broken world: same keys, marker gone.
+    posted = [{k: v for k, v in d.items() if k != "source"} for d in saved]
+    again = scoring_store.with_system_dimensions(posted)
+    assert len(again) == len(saved) == 3
+    assert {d.get("source") for d in again} == {None, "factcheck", "sentiment"}
+
+
+def test_a_rubric_already_damaged_by_that_bug_heals():
+    """Anyone who pressed Save while it was broken has duplicate, markerless rows stored. The
+    next read collapses them, keeps the weight its owner chose, and restores the marker —
+    no migration, no lost configuration."""
+    damaged = [
+        {"key": "greeting", "name": "Greeting", "weight": 70.0},
+        {"key": FC, "name": "Knowledge Base fact check", "weight": 30.0},      # marker lost
+        {"key": CO, "name": "Courtesy & empathy", "weight": 0.0},              # marker lost
+        {"key": FC, "name": "Knowledge Base fact check", "weight": 0.0, "source": "factcheck"},
+        {"key": CO, "name": "Courtesy & empathy", "weight": 0.0, "source": "sentiment"},
+    ]
+    healed = scoring_store.with_system_dimensions(damaged)
+    assert len(healed) == 3
+    by_key = {d["key"]: d for d in healed}
+    assert by_key[FC]["source"] == "factcheck"
+    assert by_key[FC]["weight"] == 30.0      # the weight the owner chose, not the duplicate's 0
+    assert by_key[CO]["source"] == "sentiment"
+    assert sum(d["weight"] for d in healed) == 100.0
