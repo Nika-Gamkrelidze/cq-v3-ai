@@ -199,3 +199,42 @@ async def test_a_rubric_of_only_system_dimensions_costs_zero_tokens(monkeypatch)
         kb_check={"accuracy_score": 64, "counts": {"supported": 4, "contradicted": 2}})
     assert res["weighted_total"] == 64.0
     assert res["dimensions"][0]["score"] == 64
+
+
+# --------------------------------------------------------------------------- auto-insert
+def test_an_existing_tenant_rubric_gains_the_measured_dimensions():
+    """THE HALF THAT WAS MISSING. Putting them in BUILTIN_DEFAULT reached almost nobody: an
+    owner who has ever saved a rubric has their own row, returned verbatim. The workspaces most
+    in need of the measured versions are exactly the ones that typed the prose ones by hand."""
+    typed_by_hand = [
+        {"key": "greeting", "name": "Greeting & Identification", "weight": 20.0},
+        {"key": "courtesy", "name": "Courtesy & Empathy", "weight": 15.0},
+        {"key": "resolution", "name": "Resolution", "weight": 65.0},
+    ]
+    dims = scoring_store.with_system_dimensions(typed_by_hand)
+    by_source = {d.get("source"): d for d in dims if isinstance(d, dict) and d.get("source")}
+    assert set(by_source) == {"factcheck", "sentiment"}
+    # Weight 0: no existing score moves until a person decides it should.
+    assert [d["weight"] for d in by_source.values()] == [0.0, 0.0]
+    # ...and the owner's own numbers are untouched, so the rubric still totals 100.
+    assert sum(d["weight"] for d in dims) == 100.0
+    assert [d["name"] for d in dims[:3]] == [d["name"] for d in typed_by_hand]
+
+
+def test_auto_insert_is_idempotent_and_keeps_a_chosen_weight():
+    once = scoring_store.with_system_dimensions([{"name": "Greeting", "weight": 100.0}])
+    weighted = [{**d, "weight": 25.0} if d.get("source") == "factcheck" else d for d in once]
+    twice = scoring_store.with_system_dimensions(weighted)
+    assert len(twice) == len(once)
+    fc = next(d for d in twice if d.get("source") == "factcheck")
+    assert fc["weight"] == 25.0      # a weight the tenant chose is never reset
+
+
+def test_a_rubric_saved_without_them_gets_them_back():
+    """An older UI, an API caller or a hand-built import cannot drop a measured criterion off a
+    workspace's scorecard by omitting it."""
+    dims, weights = scoring_store._validated(
+        [{"name": "Only this", "weight": 100.0}])
+    assert {d.get("source") for d in dims if d.get("source")} == {"factcheck", "sentiment"}
+    assert sum(d["weight"] for d in dims) == 100.0
+    assert set(weights) == {d["key"] for d in dims}

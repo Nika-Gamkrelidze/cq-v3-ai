@@ -101,10 +101,37 @@ async def _active(col: str, owner_id: str) -> dict | None:
     return _row_to_config(row) if row else None
 
 
+def with_system_dimensions(dimensions) -> list:
+    """Every rubric carries the system dimensions, whether or not its owner typed them.
+
+    Putting them in BUILTIN_DEFAULT alone would have reached almost nobody: an owner who has
+    ever saved a rubric has their OWN row, and `_active()` returns it verbatim. The two
+    criteria they duplicate — "is the information correct", "was the agent courteous" — are
+    exactly the ones a tenant writes by hand on day one, so the workspaces most in need of the
+    measured versions are the ones that would never have seen them.
+
+    Appended at **weight 0**, deliberately:
+      * every stored rubric already totals 100%, and inserting a weighted dimension would
+        either break that rule or silently rescale numbers a customer chose;
+      * a 0-weight dimension changes no existing score, so no scorecard shifts under anyone
+        without a person deciding it should;
+      * and the tenant supplying the weight is the point — the product supplies the
+        measurement, they decide what it is worth.
+    Idempotent: a rubric that already carries one keeps its weight untouched.
+    """
+    dims = list(dimensions or [])
+    present = {d.get("source") for d in dims if isinstance(d, dict)}
+    for source in scoring.SYSTEM_SOURCES:
+        if source not in present:
+            dims.append(scoring.system_dimension(source, 0.0))
+    return dims
+
+
 def _row_to_config(row) -> dict:
     dims = row["dimensions"]
     if isinstance(dims, str):
         dims = json.loads(dims)
+    dims = with_system_dimensions(dims)
     weights = row["weights"]
     if isinstance(weights, str):
         weights = json.loads(weights)
@@ -123,8 +150,13 @@ def _validated(dimensions) -> tuple[list[dict], dict]:
     """Normalize a dimension list and enforce the 100 % rule. Raises ValueError if invalid.
 
     Shared by every write path (tenant, user, default) so the default rubric can never be
-    stored in a shape a tenant rubric would be refused in."""
-    dims = normalize_dimensions(dimensions)
+    stored in a shape a tenant rubric would be refused in.
+
+    The system dimensions are re-added on WRITE as well as on read, so a client that posts a
+    rubric without them — an older UI, an API caller, a hand-built import — cannot drop a
+    measured criterion off a workspace's scorecard by omission. They come back at weight 0,
+    which keeps the 100% rule satisfied by whatever the caller actually sent."""
+    dims = normalize_dimensions(with_system_dimensions(dimensions))
     if not dims:
         raise ValueError("At least one scoring dimension with a name is required.")
     if not any(d["weight"] for d in dims):
@@ -231,6 +263,10 @@ async def _demo_config() -> dict | None:
 def _as_default(dims: list[dict], rubric, source: str, *, updated_at=None, updated_by=None) -> dict:
     """Shape the default exactly like a stored config (same keys as `_row_to_config`) so every
     renderer treats it as one, plus the two markers: `version 0` and `is_default`."""
+    # Here too, not only in BUILTIN_DEFAULT: a superadmin who saved a default rubric before the
+    # system dimensions existed, or a deployment still inheriting the demo tenant's, would
+    # otherwise hand every owner without a rubric of their own a default that measures nothing.
+    dims = normalize_dimensions(with_system_dimensions(dims))
     return {
         "version": 0,
         "dimensions": dims,

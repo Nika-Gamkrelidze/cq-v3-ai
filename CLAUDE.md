@@ -145,6 +145,13 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   model (no tokens re-judging a measurement), scored by code, and the tenant owns **only the
   weight** — the name and guidance are replaced on save, because provenance is the point. Both
   are frequently NOT APPLICABLE; see §4.
+  **Every rubric carries them, not just the built-in default** — `scoring_store.
+  with_system_dimensions()` appends any that are missing on every read AND every write, at
+  **weight 0**. Putting them only in `BUILTIN_DEFAULT` reached almost nobody: an owner who has
+  ever saved a rubric has their own row, which `_active()` returns verbatim, and the workspaces
+  that typed "correctness"/"courtesy" by hand are precisely the ones needing the measured
+  versions. Weight 0 keeps every stored rubric's 100% total valid and moves no existing score
+  until a person sets a weight — which is the tenant's half of the bargain.
 - **Sentiment settings** have their own workspace tab (`app/workspace/SentimentTab.tsx`,
   `GET/PUT /sentiment/config`, table `sentiment_configs`): `enabled` + `guidance`, plus the
   voice sidecar's live state. Note the coupling — that same `guidance` also steers the tone
