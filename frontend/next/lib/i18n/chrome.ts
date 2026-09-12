@@ -62,6 +62,7 @@ export const en: Dict = {
   'th.users': 'Users',
   'th.docs': 'Docs',
   'th.autopilot': 'Autopilot',
+  'th.selector': 'Workspace id',
   'th.size': 'Size',
 
   'btn.signin': 'Sign in',
@@ -235,6 +236,7 @@ export const ka: Dict = {
   'th.users': 'მომხმ.',
   'th.docs': 'დოკ.',
   'th.autopilot': 'ავტოპილოტი',
+  'th.selector': 'სამუშაო სივრცის ID',
   'th.size': 'ზომა',
 
   'btn.signin': 'შესვლა',
@@ -412,6 +414,7 @@ export const ru: Dict = {
   'th.users': 'Польз.',
   'th.docs': 'Док.',
   'th.autopilot': 'Автопилот',
+  'th.selector': 'ID пространства',
   'th.size': 'Размер',
 
   'btn.signin': 'Войти',

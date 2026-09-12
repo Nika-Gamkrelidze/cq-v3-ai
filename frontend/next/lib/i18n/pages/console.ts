@@ -271,6 +271,8 @@ export const en: Dict = {
   'kill.global.off': 'Running normally',
 
   'kill.tenants': 'Per tenant',
+  'kill.selector.hint': 'The workspace uuid a chat service sends as X-CQ-Tenant. Paste this into the chat product, never the tenant API key.',
+  'kill.selector.copyfail': 'Copy failed — select the id and copy it by hand.',
   'kill.stop': 'Stop',
   'kill.resume': 'Resume',
 
@@ -614,6 +616,8 @@ export const ka: Dict = {
   'kill.global.off': 'მუშაობს ნორმალურად',
 
   'kill.tenants': 'ორგანიზაციების მიხედვით',
+  'kill.selector.hint': 'სამუშაო სივრცის uuid, რომელსაც ჩატის სერვისი X-CQ-Tenant სათაურში აგზავნის. ჩატის პროდუქტში ჩასვით ეს, არასოდეს ტენანტის API გასაღები.',
+  'kill.selector.copyfail': 'კოპირება ვერ მოხერხდა — მონიშნეთ ID და ხელით დააკოპირეთ.',
   'kill.stop': 'შეჩერება',
   'kill.resume': 'აღდგენა',
 
@@ -957,6 +961,8 @@ export const ru: Dict = {
   'kill.global.off': 'Работает нормально',
 
   'kill.tenants': 'По организациям',
+  'kill.selector.hint': 'UUID рабочего пространства, который чат-сервис передаёт в заголовке X-CQ-Tenant. Вставляйте в чат-продукт именно его, а не API-ключ тенанта.',
+  'kill.selector.copyfail': 'Не удалось скопировать — выделите ID и скопируйте вручную.',
   'kill.stop': 'Остановить',
   'kill.resume': 'Возобновить',
 

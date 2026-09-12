@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { confirmDialog } from '@/components/ui/Modal';
 import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
+import { copyText } from '@/lib/clipboard';
 import { ApiError } from '@/lib/session';
 import { useI18n } from '@/lib/useI18n';
 import { SessionExpired, adminGet, adminSend } from './api';
@@ -150,6 +151,10 @@ export default function BotControlTab() {
                   <thead>
                     <tr>
                       <th>{t('th.name')}</th>
+                      <th>
+                        <span>{t('th.selector')}</span>
+                        <Tip text={t('kill.selector.hint')} />
+                      </th>
                       <th>{t('th.autopilot')}</th>
                       <th>{t('th.status')}</th>
                       <th />
@@ -164,6 +169,24 @@ export default function BotControlTab() {
                           <td>
                             {x.name}
                             {x.reachable ? null : <span className="hint"> {t('kill.overviewfail')}</span>}
+                          </td>
+                          {/* The value a chat service sends as X-CQ-Tenant. Every request on this
+                              page already used it and none displayed it, so operators pasted the
+                              name, the slug, the integration id or the tenant API key into the chat
+                              product instead. No await before copyText: production copies through
+                              the gesture-bound fallback, see lib/clipboard.ts. */}
+                          <td className="inline" style={{ gap: 8 }}>
+                            <code style={{ fontSize: 12 }}>{x.id}</code>
+                            <button
+                              className="ghost"
+                              type="button"
+                              onClick={() => {
+                                copyText(x.id).then(ok => toast(
+                                  ok ? t('pb.copied') : t('kill.selector.copyfail'), ok ? 'ok' : 'err'));
+                              }}
+                            >
+                              {t('pb.copy')}
+                            </button>
                           </td>
                           <td><span className={`pill ${x.autopilot ? 'on' : 'off'}`}>{x.autopilot ? '●' : '○'}</span></td>
                           <td><span className={`pill ${st.cls}`}>{t(st.key)}</span></td>
