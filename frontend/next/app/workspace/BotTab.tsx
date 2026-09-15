@@ -5,14 +5,21 @@
    superadmin route, exactly as `/scoring/config` mirrors its admin twin. GET answers the merged
    config plus `is_default` (this workspace has never saved its own bot) and `killed` (the
    operator's kill switch). A 404/405 is NAMED as the server's absence rather than thrown: a
-   tenant seeing a dead tab must be told it is the server, not their browser. */
+   tenant seeing a dead tab must be told it is the server, not their browser.
+
+   Answer policy, business scope, opening hours and off-topic handling are drawn by
+   `components/bot/ScopeCards.tsx` and parsed/serialised by `app/console/logic.ts` — the same
+   code the console's Default bot tab uses, so the two forms cannot drift apart. */
 
 import { useCallback, useEffect, useState } from 'react';
-import { confirmDialog } from '@/components/ui/Modal';
+import {
+  AnswerPolicyField, BusinessScopeField, OffTopicCard, OpeningHoursCard, scopeErrorText,
+} from '@/components/bot/ScopeCards';
 import { Select } from '@/components/ui/Select';
 import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
 import { ApiError, apiGet } from '@/lib/session';
+import { builtinCopyOf, checkScope, mergeScope, scopeFormFrom, type ScopeForm } from '../console/logic';
 import { failMessage, SCOPE, useWs } from './ctx';
 
 const LANGS = ['en', 'ka', 'ru'] as const;
@@ -27,6 +34,7 @@ interface Settings {
   limits?: Limits;
   escalation_keywords?: string[] | string;
   max_reply_chars?: number;
+  /** Legacy: read only as the fallback for `answer_policy`, and dropped on save. */
   allow_general_knowledge?: boolean;
   handoff_summary?: boolean;
   disclosure_mode?: string;
@@ -42,6 +50,8 @@ interface BotConfig {
   canned?: unknown[];
   min_score?: number; min_hits?: number; top_k?: number; suggestion_count?: number;
   settings?: Settings;
+  /** The engine's own wording per language, shown as placeholders in the copy boxes. */
+  builtin_copy?: unknown;
   version?: number | null;
   is_default?: boolean;
   killed?: boolean;
@@ -75,7 +85,8 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
   const [capEnduser, setCapEnduser] = useState('');
   const [capAnsTenant, setCapAnsTenant] = useState('');
   const [capAnsEnduser, setCapAnsEnduser] = useState('');
-  const [general, setGeneral] = useState(false);
+  // Policy, business scope, hours and off-topic: one sub-form, shared with the console.
+  const [botScope, setBotScope] = useState<ScopeForm>(() => scopeFormFrom(null));
   const [handoff, setHandoff] = useState(true);
 
   const [needPublic, setNeedPublic] = useState(false);
@@ -104,8 +115,9 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
     setCapEnduser(limits.enduser_per_hour == null ? '' : String(limits.enduser_per_hour));
     setCapAnsTenant(limits.answer_tenant_per_minute == null ? '' : String(limits.answer_tenant_per_minute));
     setCapAnsEnduser(limits.answer_enduser_per_hour == null ? '' : String(limits.answer_enduser_per_hour));
-    // Never default this to true: the safe value is false and a missing key means false.
-    setGeneral(s.allow_general_knowledge === true);
+    // Never defaults to the wider policy: `answer_policy` when it is a known word, else the
+    // legacy `allow_general_knowledge === true`, else `kb_only`.
+    setBotScope(scopeFormFrom(s));
     setHandoff(s.handoff_summary !== false);
     // An unknown mode falls back to the engine's own default rather than a blank trigger.
     setDiscMode(DISCLOSURE_MODES.includes(s.disclosure_mode as typeof DISCLOSURE_MODES[number])
@@ -135,17 +147,14 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
 
   useEffect(() => { if (on && ws.ready) void load(); }, [on, gen, ws.ready, load]);
 
-  /* Turning general knowledge ON is a deliberate risk decision, so it costs a confirmation.
-     Turning it OFF never does — the safe direction is always one click. */
-  const toggleGeneral = async (next: boolean) => {
-    if (!next) { setGeneral(false); return; }
-    if (await confirmDialog(t('bot.general.confirm'), { ok: t('bot.general.on') })) setGeneral(true);
-  };
-
   const save = async () => {
     setMsg({ text: '', kind: '' });
     setNeedPublic(false);
     if (!langs.length) { setMsg({ text: t('bot.languages.pickone'), kind: 'err' }); return; }
+    // Off-topic thresholds and opening hours the server would refuse with a 400 are named here,
+    // before the round trip, with the day or field that is wrong.
+    const scopeErr = checkScope(botScope);
+    if (scopeErr) { setMsg({ text: scopeErrorText(scopeErr, t), kind: 'err' }); return; }
     const greeting: Record<string, string> = {};
     const refusalOut: Record<string, string> = {};
     LANGS.forEach(l => {
@@ -182,17 +191,18 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
       greeting, refusal_copy: refusalOut, languages: langs,
       canned: Array.isArray(cfg?.canned) ? cfg!.canned : [],
       autopilot_enabled: autopilot,
-      settings: {
+      // `mergeScope` writes answer policy, scope, hours and off-topic, and DROPS the legacy
+      // `allow_general_knowledge` that the `...prev` spread would otherwise carry forward.
+      settings: mergeScope({
         ...prev,                                   // unknown knobs survive a save
         min_score: num(minScore, 0.35), min_hits: num(minHits, 1),
         top_k: num(topK, 8), suggestion_count: num(sugg, 2),
         max_reply_chars: num(maxChars, 1200),
         escalation_keywords: escalation.split(',').map(x => x.trim()).filter(Boolean),
-        allow_general_knowledge: general,
         handoff_summary: handoff,
         disclosure_mode: DISCLOSURE_MODES.includes(discMode as typeof DISCLOSURE_MODES[number]) ? discMode : 'first',
         disclosure, limits,
-      },
+      }, botScope),
     };
 
     setSaving(true);
@@ -217,11 +227,13 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
   const killed = !!cfg?.killed;                    // set by the superadmin kill switch
   const statePill = killed ? 'error' : autopilot ? 'ready' : 'notinkb';
   const stateText = killed ? t('bot.state.killed') : autopilot ? t('bot.state.live') : t('bot.state.off');
+  const builtin = builtinCopyOf(cfg);
 
   const trio = (
     label: string,
     value: Trio,
     set: (v: Trio) => void,
+    placeholders?: Record<string, string>,
   ) => (
     <div className="row stack-md">
       {LANGS.map(l => (
@@ -229,6 +241,7 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
           <label htmlFor={`${label}_${l}`}>{t('bot.lang.' + l)}</label>
           <textarea
             id={`${label}_${l}`} value={value[l]} disabled={readonly}
+            placeholder={placeholders?.[l] || undefined}
             onChange={e => set({ ...value, [l]: e.target.value })}
           />
         </div>
@@ -316,7 +329,7 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
           </div>
           <div className="card">
             <h3><span>{t('bot.refusal')}</span><Tip text={t('bot.refusal.hint')} /></h3>
-            {trio('b_ref', refusal, setRefusal)}
+            {trio('b_ref', refusal, setRefusal, builtin.refusal)}
           </div>
 
           <div className="card">
@@ -343,15 +356,11 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
             <div className="hint">{t('bot.cap.hint')}</div>
           </div>
 
-          {/* The refusal-vs-general-knowledge choice, stated as the risk it is. Off by default. */}
+          {/* How far beyond the shared documents the bot may go, and the description it uses to
+              tell a related question from an unrelated one. Documents-only by default. */}
           <div className="card">
-            <label className="inline" style={{ gap: 8 }}>
-              <input
-                type="checkbox" style={{ width: 'auto' }} checked={general} disabled={readonly}
-                onChange={e => void toggleGeneral(e.target.checked)}
-              />
-              <span>{t('bot.general')}</span><Tip text={t('bot.general.risk')} />
-            </label>
+            <AnswerPolicyField form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" />
+            <BusinessScopeField form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" />
             <label className="inline" style={{ gap: 8, marginTop: 14 }}>
               <input
                 type="checkbox" style={{ width: 'auto' }} checked={handoff} disabled={readonly}
@@ -360,6 +369,11 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
               <span>{t('bot.handoff')}</span><Tip text={t('bot.handoff.hint')} />
             </label>
           </div>
+
+          <OpeningHoursCard form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" />
+          <OffTopicCard
+            form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" builtin={builtin}
+          />
 
           {/* The disclosure line is appended by code after generation, so it is the one piece of
               bot copy a customer cannot talk the model out of. Empty text means the built-in

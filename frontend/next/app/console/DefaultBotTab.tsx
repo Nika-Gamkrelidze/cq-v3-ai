@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { confirmDialog } from '@/components/ui/Modal';
+import {
+  AnswerPolicyField, BusinessScopeField, OffTopicCard, OpeningHoursCard, scopeErrorText,
+} from '@/components/bot/ScopeCards';
 import { Select } from '@/components/ui/Select';
 import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
@@ -9,8 +11,8 @@ import { dateTime } from '@/lib/format';
 import { useI18n } from '@/lib/useI18n';
 import { SessionExpired, adminGet, adminSend, errText } from './api';
 import {
-  BOT_CAPS, BOT_LANGS, BOT_SOURCE, formFromConfig, payloadFromForm, sourcePill,
-  type BotConfig, type BotForm, type DisclosureMode,
+  BOT_CAPS, BOT_LANGS, BOT_SOURCE, builtinCopyOf, checkScope, formFromConfig, payloadFromForm, sourcePill,
+  type BotConfig, type BotForm, type DisclosureMode, type ScopeForm,
 } from './logic';
 import { CheckRow, Msg, type Note } from './parts';
 
@@ -25,6 +27,9 @@ import { CheckRow, Msg, type Note } from './parts';
        least one document with the bot, and the route here has no such field to send.
      * THE ANSWER CAPS EXIST ONLY HERE. The portal shows the copilot (draft) caps; how fast an
        UNATTENDED bot may talk to the public is an operator's decision, not a customer's.
+
+   Answer policy, business scope, opening hours and off-topic handling are not merely the same
+   fields but the same components (`components/bot/ScopeCards.tsx`) the portal renders.
 
    Loaded on tab activation rather than with the rest of the console: this route ships with the
    chat feature, and a console that failed to open because one tab's endpoint is not deployed yet
@@ -68,15 +73,11 @@ export default function DefaultBotTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Turning general knowledge ON is a deliberate risk decision — here, one taken for every
-     workspace that never chose otherwise — so it costs a confirmation. Turning it OFF never
-     does: the safe direction is always one click. */
-  const setGeneral = async (next: boolean) => {
-    if (!next) { set('allowGeneral', false); return; }
-    if (await confirmDialog(t('bot.general.confirm'), { ok: t('bot.general.on') })) {
-      set('allowGeneral', true);
-    }
-  };
+  /* Policy, hours and off-topic are one sub-form. The updater takes a function of the CURRENT
+     scope: switching the policy to general knowledge lands after an awaited confirmation — here,
+     one taken for every workspace that never chose otherwise — and must not write back a form
+     captured before the dialog opened. */
+  const setScope = (fn: (s: ScopeForm) => ScopeForm) => setForm(f => ({ ...f, scope: fn(f.scope) }));
 
   const toggleLang = (lang: string, on: boolean) =>
     setForm(f => ({
@@ -90,6 +91,11 @@ export default function DefaultBotTab() {
     setNote(null);
     if (!form.languages.length) {
       setNote({ kind: 'err', text: t('bot.languages.pickone') });
+      return;
+    }
+    const scopeErr = checkScope(form.scope);
+    if (scopeErr) {
+      setNote({ kind: 'err', text: scopeErrorText(scopeErr, t) });
       return;
     }
     setBusy(true);
@@ -110,6 +116,7 @@ export default function DefaultBotTab() {
   };
 
   const pill = sourcePill(BOT_SOURCE, cfg?.source, 'builtin');
+  const builtin = builtinCopyOf(cfg);
 
   return (
     <>
@@ -167,7 +174,7 @@ export default function DefaultBotTab() {
 
       <div className="card">
         <h3><span>{t('bot.refusal')}</span><Tip text={t('bot.refusal.hint')} /></h3>
-        <LangRow field="refusal" form={form} onChange={setLangText} t={t} />
+        <LangRow field="refusal" form={form} onChange={setLangText} t={t} placeholders={builtin.refusal} />
       </div>
 
       <div className="card">
@@ -229,13 +236,11 @@ export default function DefaultBotTab() {
         <LangRow field="disclosure" form={form} onChange={setLangText} t={t} />
       </div>
 
+      {/* How far beyond the shared documents the bot may go — documents-only unless someone
+          chose otherwise — and the description it uses to tell related questions from the rest. */}
       <div className="card">
-        <CheckRow checked={form.allowGeneral} onChange={v => void setGeneral(v)}>
-          <>
-            <span>{t('bot.general')}</span>
-            <Tip text={t('bot.general.risk')} />
-          </>
-        </CheckRow>
+        <AnswerPolicyField form={form.scope} update={setScope} t={t} idPrefix="db" />
+        <BusinessScopeField form={form.scope} update={setScope} t={t} idPrefix="db" />
         <CheckRow
           checked={form.handoffSummary}
           onChange={v => set('handoffSummary', v)}
@@ -247,6 +252,9 @@ export default function DefaultBotTab() {
           </>
         </CheckRow>
       </div>
+
+      <OpeningHoursCard form={form.scope} update={setScope} t={t} idPrefix="db" />
+      <OffTopicCard form={form.scope} update={setScope} t={t} idPrefix="db" builtin={builtin} />
 
       <div className="card">
         <div className="actions">
@@ -261,14 +269,16 @@ export default function DefaultBotTab() {
 }
 
 /** One trilingual field. `.stack-md` is what makes the three boxes stack on a narrow screen
-    instead of shrinking to three unusable columns. */
+    instead of shrinking to three unusable columns. `placeholders` shows the engine's built-in
+    wording, which is what an empty box means. */
 function LangRow({
-  field, form, onChange, t,
+  field, form, onChange, t, placeholders,
 }: {
   field: 'greeting' | 'refusal' | 'disclosure';
   form: BotForm;
   onChange: (field: 'greeting' | 'refusal' | 'disclosure', lang: string, v: string) => void;
   t: (k: string) => string;
+  placeholders?: Record<string, string>;
 }) {
   return (
     <div className="row stack-md">
@@ -277,6 +287,7 @@ function LangRow({
           <label htmlFor={`db_${field}_${l}`}>{t(`bot.lang.${l}`)}</label>
           <textarea
             id={`db_${field}_${l}`}
+            placeholder={placeholders?.[l] || undefined}
             value={form[field][l] || ''}
             onChange={e => onChange(field, l, e.target.value)}
           />

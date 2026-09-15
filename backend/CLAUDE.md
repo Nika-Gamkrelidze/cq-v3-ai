@@ -10,7 +10,9 @@ CMD). See the root CLAUDE.md for the big picture.
 - `app/models.py` — pydantic request/response models.
 - `app/routers/calls.py` — `POST /calls` (ingest, idempotent, X-API-Key), `GET /calls/{id}`.
 - `app/services/` — the AI seams (`llm.py`, `voice.py`), retrieval, KB ingest/re-embed, fact-check,
-  scoring, chat (`chat.py`, `chat_store.py`), `curation/` (miner → cluster → propose → apply),
+  scoring, chat (`chat.py`, `chat_store.py`, `chat_prompts.py` incl. the triage prompt,
+  `chat_safety.py`, `chat_copy.py` built-in customer copy, `chat_hours.py` business clock),
+  `curation/` (miner → cluster → propose → apply),
   `retention.py`, `audio_convert.py`, `health_metrics.py` (server-health sampler, per-request
   load accumulator, `/admin/health/*` queries over `system_metrics` / `tenant_load`). Routers beyond `calls.py` are listed in the root CLAUDE.md.
 - `app/worker.py` — the `cq-worker` container (`python -m app.worker`); see below.

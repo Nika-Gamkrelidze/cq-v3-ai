@@ -154,8 +154,12 @@ def sanitize_output(text: str, hits: list[dict]) -> str:
 # bot say something expensive. Extend it here; do not move this logic into the prompt, where
 # an injected instruction gets a vote.
 COMMITMENT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # Amount-then-currency ("50 GEL", "29,99 ₾") OR currency-then-amount ("$29.99", "GEL 29",
+    # "€49") — the second is how English writes a price, and it used to pass unnoticed.
     ("money", re.compile(
-        r"\b\d[\d\s.,]*\s?(?:gel|usd|eur|lari|ლარ\w*|₾|\$|€|₽|руб\w*|доллар\w*|евро)",
+        r"\b\d(?:[\d\s.,]*\d)?\s?(?:(?:gel|usd|eur|gbp|lari)\b|ლარ\w*|₾|\$|€|£|₽|руб\w*|лари"
+        r"|доллар\w*|евро)"
+        r"|(?:[$€£₾₽]|\b(?:gel|usd|eur|gbp)\b\.?)\s?\d(?:[\d\s.,]*\d)?",
         re.IGNORECASE)),
     ("percentage", re.compile(r"\b\d{1,3}\s?%")),
     ("discount", re.compile(
@@ -181,17 +185,111 @@ COMMITMENT_PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
-def detect_commitment(text: str) -> str | None:
-    """The label of the first commitment pattern the text trips, or None.
+# Labels a knowledge-base passage can never make safe to say unattended: "you don't need a
+# doctor" is not a fact a document can vouch for on behalf of THIS customer.
+NEVER_FROM_KB = frozenset({"assurance"})
 
-    ADR-001 security bar item 7: commitment-shaped output forces a handoff *even when it is
-    perfectly grounded*, because the cost of being wrong is not symmetric with the cost of
-    being slow.
+# A number as written in prose: grouped thousands ("1 000", "1,000.50") or a plain decimal.
+_NUMBER_RE = re.compile(r"\d{1,3}(?:[  ,.]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?")
+
+# What has to sit next to a number in the passage for it to be the SAME kind of figure. Written
+# as stems in all three languages, because the answer's language and the KB's often differ
+# (an English reply quoting a Georgian price list).
+_UNIT_CUES: dict[str, re.Pattern] = {
+    "money": re.compile(r"gel|lari|usd|eur|gbp|dollar|euro|tetri|ლარ|თეთრ|₾|\$|€|£|₽|руб|лари"
+                        r"|доллар|евро", re.IGNORECASE),
+    "percentage": re.compile(r"%|percent|процент|პროცენტ", re.IGNORECASE),
+    "deadline": re.compile(r"hour|day|week|month|business|час|дн|день|недел|месяц|საათ|დღ|კვირ"
+                           r"|თვ", re.IGNORECASE),
+}
+
+
+def _number_key(token: str) -> str:
+    """Canonical form of a written number, so "29,99", "29.99" and "29.990" compare equal and
+    "1 000" equals "1000". A single separator followed by exactly three digits is read as a
+    thousands separator — the way prices are written in all three languages."""
+    tok = re.sub(r"[\s ]", "", token).strip(".,")
+    if "," in tok and "." in tok:
+        cut = max(tok.rfind(","), tok.rfind("."))
+        whole, frac = re.sub(r"[.,]", "", tok[:cut]), tok[cut + 1:]
+    elif "," in tok or "." in tok:
+        parts = tok.split("," if "," in tok else ".")
+        if len(parts) == 2 and len(parts[1]) != 3:
+            whole, frac = parts
+        else:
+            whole, frac = "".join(parts), ""
+    else:
+        whole, frac = tok, ""
+    whole = whole.lstrip("0") or "0"
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac}" if frac else whole
+
+
+def _passage_texts(passages) -> list[str]:
+    out = []
+    for p in passages or []:
+        text = p.get("content") if isinstance(p, dict) else p
+        if text:
+            out.append(str(text))
+    return out
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip().lower()
+
+
+def _passage_states(label: str, fragment: str, passage: str) -> bool:
+    """Whether one passage says what `fragment` (a single commitment match) says.
+
+    With numbers: every number in the fragment must appear in the passage with a cue of the
+    same kind (a currency for money, a time unit for a deadline) close to it — so "within 3
+    business days" is backed by "installation takes 3 working days" but not by "3 plans".
+    Without numbers ("refund", "ფასდაკლებ"): the matched words themselves must be in the
+    passage. Cross-language keyword matches therefore do not count, which fails toward handoff.
+    """
+    numbers = [_number_key(t) for t in _NUMBER_RE.findall(fragment)]
+    if not numbers:
+        return _squash(fragment) in _squash(passage)
+    cue = _UNIT_CUES.get(label)
+    for key in numbers:
+        found = False
+        for m in _NUMBER_RE.finditer(passage):
+            if _number_key(m.group(0)) != key:
+                continue
+            window = passage[max(0, m.start() - 12):m.end() + 24]
+            if cue is None or cue.search(window):
+                found = True
+                break
+        if not found:
+            return False
+    return True
+
+
+def detect_commitment(text: str, passages=None) -> str | None:
+    """The label of the first commitment in `text` that no passage backs, or None.
+
+    ADR-001 security bar item 7 as first written: commitment-shaped output forces a handoff
+    *even when it is perfectly grounded*. That is still what happens when `passages` is None —
+    the copilot, and every answer written without the KB (general knowledge, chitchat), where
+    nothing a model says about a price or a date is the company's word.
+
+    With `passages` (the KB chunks the model was actually given), a commitment the company has
+    itself published — "installation within 3 business days", "29.99 GEL a month" — is no
+    longer a reason to hand off. The first pilot conversation is why: the bot quoted the
+    tenant's own installation time, the regex called it a promise, and the customer was moved
+    to a human queue one question later with no idea why. What still hands off is a figure or
+    promise the passages do not contain (the dangerous case), anything in `NEVER_FROM_KB`, and
+    every match in a text that mixes a backed figure with an unbacked one — each match is
+    checked on its own.
     """
     if not text:
         return None
+    corpus = _passage_texts(passages) if passages is not None else None
     for label, pattern in COMMITMENT_PATTERNS:
-        if pattern.search(text):
+        for match in pattern.finditer(text):
+            if (corpus and label not in NEVER_FROM_KB
+                    and any(_passage_states(label, match.group(0), p) for p in corpus)):
+                continue
             return label
     return None
 
@@ -230,8 +328,11 @@ ESCALATION_PATTERNS: list[tuple[str, re.Pattern]] = [
         r"|ადვოკატ|სასამართლო|სარჩელ", re.IGNORECASE)),
     ("complaint", re.compile(
         r"\b(?:complaint|complain|unacceptable|scam|fraud|terrible\s+service|"
-        r"speak\s+to\s+(?:a\s+)?(?:human|manager|supervisor|person)|"
-        r"real\s+person|talk\s+to\s+someone)\b"
+        # "talk to a person" is also what the built-in off-topic cut-off copy tells a customer
+        # to write (chat_copy.DEFAULT_OFF_TOPIC_CUTOFF) — keep the two in step.
+        r"(?:speak|talk|chat)\s+(?:to|with)\s+(?:an?\s+)?(?:real\s+)?(?:human|manager|supervisor"
+        r"|person|operator|agent|colleague|someone)|(?:human|live)\s+(?:agent|operator)|"
+        r"real\s+person)\b"
         r"|жалоба|обман|мошенн|безобрази|позов(?:и|ите)\s+человек|оператор[ауы]?\b"
         r"|საჩივარ|თაღლით|ოპერატორ|ადამიან(?:თან|ს)", re.IGNORECASE)),
     ("distress", re.compile(

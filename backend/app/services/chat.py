@@ -17,6 +17,9 @@ and **no Anthropic call is made** — not a call with a cautious prompt, not a c
 none. "I don't know" is therefore a property of the system rather than a hope pinned on
 prompt wording, it cannot be argued out of by an injected instruction, and it costs exactly
 zero tokens. That last part is verifiable: after a refusal, `llm_usage` has no new row.
+(The public bot now also has a TRIAGE step for messages the documents do not settle — one
+small, passage-free classification call; see `run_answer`. The gate still decides, in code,
+whether passages may reach a model at all.)
 
 **2. The ladder exists because the cold path is slow.** Tier 1 is the top-3 KB passage
 cards, built from retrieval hits with no model involved, emitted as its own event before any
@@ -35,10 +38,12 @@ rather than in the router on purpose: a brake that a future route can forget to 
 brake. The rule that actually matters — never hold a pool connection across an LLM or
 embedding await — remains true by construction.
 """
+import dataclasses
 import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from . import chat_prompts, chat_safety, llm, settings_store
 from .retrieval import retrieve_ranked, unavailable_ranked
@@ -68,12 +73,26 @@ DEFAULTS = {
     # asked for in the directive — a model that ignores the instruction still cannot ship a
     # 4 KB wall of text to a WhatsApp thread.
     "max_reply_chars": chat_safety.DEFAULT_MAX_REPLY_CHARS,
-    # THE product default (ADR-001 open decision #1): when the KB has no good answer the bot
-    # refuses with the tenant's copy and offers a human. It never falls back to general
-    # knowledge. A tenant opts in by setting this True in `chat_configs.settings`, which is
-    # why the eventual product answer is a config change and not a rewrite.
-    "allow_general_knowledge": False,
+    # ADR-001 open decision #1, resolved as configuration: `kb_only` (the default) gives a
+    # question inside the business's field that the documents do not answer the refusal and a
+    # colleague; `general` lets triage answer it from general knowledge. `chat_prompts.
+    # answer_policy` also reads the legacy `allow_general_knowledge` boolean for older rows.
+    "answer_policy": "kb_only",
     "handoff_summary": True,
+    # The public bot skips triage only when the customer's OWN message scores at least this
+    # against the published documents (and the gate passed). Retrieval's floor is 0.35 and
+    # unrelated same-language text scores ~0.30-0.45 under BGE-M3 (see retrieval.py), so the
+    # min_score of 0.35 most stored configs carry could not tell a planet question from a price
+    # question. Below this a message costs one small triage call, not a refusal — which is why
+    # it can err high.
+    "direct_min_score": 0.5,
+    # Off-topic questions per conversation before a warning / before the bot stops answering
+    # anything the documents do not clearly cover. 0 switches either off.
+    "off_topic_warn_after": 3,
+    "off_topic_cutoff_after": 5,
+    # False: a price or deadline a given passage states does not force a handoff
+    # (chat_safety.detect_commitment). True restores "every commitment goes to a human".
+    "handoff_on_kb_commitments": False,
 }
 
 # Gate outcomes. Stable strings — they are stored on the turn row, drive the curation
@@ -87,6 +106,14 @@ REASON_KEYWORD_ONLY = "keyword_only"  # trigram fallback only — see `strict` b
 REASON_DISABLED = "autopilot_off"     # the tenant never enabled the public bot
 REASON_KILLED = "autopilot_killed"    # the operator brake — settings_store kill switch
 REASON_ESCALATE = "escalation"        # the customer asked for a human (or tripped a marker)
+REASON_LLM_ERROR = "llm_error"        # a model call failed, or produced nothing usable
+REASON_WEAK_MATCH = "weak_match"      # the gate passed, but the customer's own words scored below
+                                      # the direct threshold (`direct_match`) — typically a
+                                      # follow-up window match — and the turn was not answered
+                                      # from the documents
+REASON_RISKY = "risky"                # handoff: triage saw an emergency or an advice request
+REASON_RELATED_NOT_IN_KB = "related_not_in_kb"   # handoff: an in-field question the documents
+                                                 # do not answer, under the kb_only policy
 
 
 @dataclass(slots=True)
@@ -117,6 +144,13 @@ class ChatContext:
     # The raw inbound envelope (display_name, attachment, channel, text). Quarantined
     # wholesale by chat_prompts.wrap_untrusted — see that module for why it is not just text.
     envelope: dict = field(default_factory=dict)
+    # The public bot's per-conversation context, loaded by the router (the engine reads no
+    # tables). Defaulted: the copilot and every older construction site pass none of it.
+    business_name: str | None = None
+    industry: str | None = None
+    off_topic_count: int = 0
+    # The business clock's "now". None means the real clock; tests pin it.
+    now: datetime | None = None
 
 
 def _cfg(cfg: dict, key: str):
@@ -230,7 +264,7 @@ def build_turn_envelope(*, client_id: str, suggest_ref: str,
                         reason: str = "", tier1: list[dict] | None = None,
                         suggestions: list[dict] | None = None, reply: dict | None = None,
                         handoff: dict | None = None, stages: dict | None = None,
-                        model: str | None = None) -> dict:
+                        model: str | None = None, scope: dict | None = None) -> dict:
     """THE Turn object (ADR-001 "API contract").
 
     Built here and nowhere else, and deliberately free of any `ChatContext` argument. The warm
@@ -266,6 +300,9 @@ def build_turn_envelope(*, client_id: str, suggest_ref: str,
         "suggestions": suggestions or [],
         "reply": reply,
         "handoff": handoff or {"recommended": False, "reason": None, "summary": None},
+        # The public bot's decision about what kind of message this was and how it was served
+        # (see `run_answer`); null on copilot envelopes.
+        "scope": scope,
         # Tokens are recorded by llm.py straight into `llm_usage` and are not returned to the
         # caller, so this carries the timing half only. `latency_ms` is the per-stage dict
         # that makes P4's tuning empirical instead of guessed.
@@ -520,13 +557,9 @@ async def run_suggest(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
 
 def _with_cfg(ctx: ChatContext, cfg: dict) -> ChatContext:
     """A shallow copy carrying an adjusted config — the caller's dict is never mutated,
-    because it is very likely a cached config row shared by concurrent turns."""
-    return ChatContext(
-        client_id=ctx.client_id, conversation_id=ctx.conversation_id,
-        suggest_ref=ctx.suggest_ref, locale=ctx.locale, messages=ctx.messages, cfg=cfg,
-        api_key=ctx.api_key, model=ctx.model, mode=ctx.mode,
-        integration_id=ctx.integration_id, channel=ctx.channel, turn_ref=ctx.turn_ref,
-        conversation_ref=ctx.conversation_ref, envelope=ctx.envelope)
+    because it is very likely a cached config row shared by concurrent turns. `replace`, not a
+    field-by-field copy, so a field added to ChatContext can never be silently dropped here."""
+    return dataclasses.replace(ctx, cfg=cfg)
 
 
 def _normalize_suggestions(raw, hits: list[dict], count: int) -> list[dict]:
@@ -553,6 +586,101 @@ def _normalize_suggestions(raw, hits: list[dict], count: int) -> list[dict]:
     return out
 
 
+# --- the public bot's scope decisions (pure) ------------------------------------
+
+SCOPE_DIRECT = "direct"          # the customer's own words matched the published documents
+SCOPE_TRIAGE = "triage"          # the small classification call decided
+SCOPE_CUTOFF = "cutoff"          # past the off-topic cut-off: built-in copy, no model
+SCOPE_REFUSAL = "refusal"        # the zero-token refusal (nothing published to read)
+SCOPE_ESCALATION = "escalation"  # the customer asked for a person / tripped a marker
+SCOPE_OFF = "off"                # kill switch or autopilot disabled
+
+KIND_BUSINESS = chat_prompts.KIND_BUSINESS
+KIND_RELATED = chat_prompts.KIND_RELATED
+KIND_OFF_TOPIC = chat_prompts.KIND_OFF_TOPIC
+KIND_RISKY = chat_prompts.KIND_RISKY
+
+
+def own_score(r: dict) -> float | None:
+    """Best vector score of the customer's message ALONE — retrieval's `query_top_scores[0]`.
+
+    The fused `top_score` is the best score across the raw message AND the follow-up window,
+    and the window prepends the bot's last line, which usually names the company. That is how
+    "list me the planets", asked right after the bot introduced an internet provider, scored
+    like a question about the internet provider. A result without per-query scores (a stub, an
+    older retrieval) has only the fused number, which then stands in.
+    """
+    r = r or {}
+    tops = r.get("query_top_scores")
+    if isinstance(tops, list) and tops:
+        return float(tops[0]) if tops[0] is not None else None
+    if r.get("method") == "vector" and r.get("top_score") is not None:
+        return float(r["top_score"])
+    return None
+
+
+def direct_match(r: dict, cfg: dict, grounded: bool) -> bool:
+    """Whether the public bot may skip triage: the gate passed AND the customer's own words
+    score at least max(min_score, direct_min_score)."""
+    if not grounded:
+        return False
+    own = own_score(r)
+    floor = max(_num(_cfg(cfg, "min_score"), DEFAULTS["min_score"]),
+                _num(_cfg(cfg, "direct_min_score"), DEFAULTS["direct_min_score"]))
+    return own is not None and own >= floor
+
+
+def off_topic_limits(cfg: dict) -> tuple[int, int]:
+    """(warn_after, cutoff_after), each 0 when switched off."""
+    warn = int(_num(_cfg(cfg, "off_topic_warn_after"), DEFAULTS["off_topic_warn_after"]))
+    cutoff = int(_num(_cfg(cfg, "off_topic_cutoff_after"), DEFAULTS["off_topic_cutoff_after"]))
+    return max(0, warn), max(0, cutoff)
+
+
+def off_topic_state(count: int, warn_after: int, cutoff_after: int) -> str:
+    """'ok' | 'warned' | 'cut_off' for a conversation that has asked `count` off-topic questions."""
+    if cutoff_after and count >= cutoff_after:
+        return "cut_off"
+    if warn_after and count >= warn_after:
+        return "warned"
+    return "ok"
+
+
+def _scope(ctx: ChatContext, *, source: str, kind: str | None = None, answered: bool = False,
+           count: int | None = None) -> dict:
+    """The envelope's `scope` object. `count` is the conversation's off-topic total AFTER this
+    turn; the router persists it when it moved (`routers/chat._record_off_topic`)."""
+    warn_after, cutoff_after = off_topic_limits(ctx.cfg)
+    n = ctx.off_topic_count if count is None else count
+    return {
+        "policy": chat_prompts.answer_policy(ctx.cfg),
+        "source": source,
+        "kind": kind,
+        "answered": bool(answered),
+        "off_topic": {"count": n, "warn_after": warn_after, "cutoff_after": cutoff_after,
+                      "state": off_topic_state(n, warn_after, cutoff_after)},
+    }
+
+
+def _no_handoff() -> dict:
+    return {"recommended": False, "reason": None, "summary": None}
+
+
+def _llm_code(exc: Exception) -> str:
+    return "llm_busy" if isinstance(exc, llm.LLMBusyError) else "llm_error"
+
+
+def _free_text(text: str, max_chars: int) -> str:
+    """Model text written WITHOUT passages, validated the way an answer is: markup stripped,
+    every URL dropped (there is no passage to allowlist one against), length enforced, and any
+    `[n]` marker removed (there is nothing for it to cite)."""
+    text = chat_safety.strip_unsafe_markup(text or "")
+    text = chat_safety.drop_foreign_urls(text, [])
+    text = chat_safety.enforce_length(text, max_chars)
+    text, _ = chat_safety.resolve_citations(text, [])
+    return text.strip()
+
+
 # --- run_answer: the public autopilot -----------------------------------------
 
 async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
@@ -575,10 +703,20 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         `autopilot_enabled` (OFF by default, forever) and the operator's kill switch in
         `app_settings` (see `settings_store.get_autopilot_kill_switch` — 5 s TTL, so a
         superadmin stops a misbehaving bot in seconds without a redeploy).
-      * **Refusal costs zero tokens.** When the gate says no, the tenant's refusal copy in the
-        conversation's locale goes out with `handoff.recommended=True` and **no Anthropic call
-        of any kind is made** — not the answer, not the handoff summary. That is assertable:
-        after a refusal, `llm_usage` has no new row.
+      * **No passage reaches a model the gate did not approve.** When the documents cannot
+        ground a business question, the tenant's refusal copy goes out with
+        `handoff.recommended=True` and the answer model is never called.
+      * **Triage, for what the documents do not settle** (2026-09-14). A message whose own
+        words do not strongly match the published documents (`direct_match`) gets ONE small
+        forced-tool-use call (`feature="triage"`, no passages) that sorts it into business /
+        related / chitchat / off_topic / risky and writes the short reply that kind allows.
+        Business questions go on to the grounded answer or the refusal; the other kinds never
+        see a passage. That is what lets the bot say what day it is, redirect a question about
+        planets instead of spending a full answer on it (and warn, then stop, a conversation
+        that keeps doing it), give an emergency the emergency number first, and — only under
+        the `general` policy — tell a hospital's patient which kind of doctor treats a broken
+        leg. The exits that still cost zero tokens: both off switches, a KB with nothing
+        published, and the off-topic cut-off.
       * **The answer streams.** `llm.stream_text`, `opts=llm.ANSWER`, because a customer-facing
         answer is long enough that time-to-first-token is a product property (the copilot's
         short variants are not). Forced tool-use and token streaming do not combine, so the
@@ -589,7 +727,8 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         above. A successful injection can make this bot say something wrong. It can never make
         it act.
       * **Output validation is python, after generation** (`chat_safety`): markup stripped,
-        foreign URLs dropped, length enforced, commitment-shaped output forced to a handoff.
+        foreign URLs dropped, length enforced, and a commitment that no passage the model was
+        given states (or any legal/medical assurance) forced to a handoff.
     """
     ev = _Seq()
     started = time.monotonic()
@@ -599,6 +738,8 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
                       "locale": chat_prompts.normalize_locale(ctx.locale), "proto": PROTO})
 
     refusal = chat_prompts.refusal_text(ctx.cfg, ctx.locale)
+    max_chars = int(_num(_cfg(ctx.cfg, "max_reply_chars"), DEFAULTS["max_reply_chars"]))
+    max_tokens = int(_num(_cfg(ctx.cfg, "max_tokens"), DEFAULTS["max_tokens"]))
 
     def _reply(text: str, citations: list | None = None, answered: bool = False) -> dict:
         """Every reply this engine can emit, refusals included, goes through here — so the AI
@@ -609,13 +750,15 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         return {"text": _disclosed(text, ctx), "citations": citations or [],
                 "answered_from_kb": answered}
 
-    def _silent(reason: str) -> ChatEvent:
-        """Terminal envelope for 'the bot is not allowed to speak'. Zero tokens, always."""
+    def _done(*, reason: str, text: str, handoff: dict, scope: dict,
+              retrieval: dict | None = None, grounded: bool = False,
+              citations: list | None = None, answered_from_kb: bool = False) -> ChatEvent:
+        """The one terminal event of the public bot, so no exit can forget `scope`."""
         stages["total"] = _ms(started)
         return ev("done", _envelope_for(
-            ctx, retrieval=None, grounded=False, reason=reason,
-            reply=_reply(refusal),
-            handoff=_handoff(reason, ctx), stages=stages))
+            ctx, retrieval=retrieval, grounded=grounded, reason=reason,
+            reply=_reply(text, citations, answered_from_kb), handoff=handoff,
+            stages=stages, scope=scope))
 
     # 1. The operator brake, first — it must win over every tenant setting below it.
     t = time.monotonic()
@@ -623,12 +766,14 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     stages["kill_switch"] = _ms(t)
     if settings_store.autopilot_killed(kill, ctx.client_id):
         log.warning("autopilot suppressed by kill switch (client=%s)", ctx.client_id)
-        yield _silent(REASON_KILLED)
+        yield _done(reason=REASON_KILLED, text=refusal, handoff=_handoff(REASON_KILLED, ctx),
+                    scope=_scope(ctx, source=SCOPE_OFF))
         return
 
     # 2. The tenant's own opt-in. False for a tenant that has never configured chat.
     if not bool(_cfg(ctx.cfg, "autopilot_enabled")):
-        yield _silent(REASON_DISABLED)
+        yield _done(reason=REASON_DISABLED, text=refusal, handoff=_handoff(REASON_DISABLED, ctx),
+                    scope=_scope(ctx, source=SCOPE_OFF))
         return
 
     # 3. "Get me a human" outranks any answer we could give. Checked on the CUSTOMER's text
@@ -638,11 +783,14 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     escalation = chat_safety.should_escalate(_last_customer_text(ctx), ctx.cfg)
     if escalation:
         handoff = await _handoff_with_summary(f"{REASON_ESCALATE}:{escalation}", ctx, stages)
-        stages["total"] = _ms(started)
-        yield ev("done", _envelope_for(
-            ctx, retrieval=None, grounded=False, reason=REASON_ESCALATE,
-            reply=_reply(refusal),
-            handoff=handoff, stages=stages))
+        # These turns used to get the refusal copy — "I don't have that in my knowledge base"
+        # said to someone who had just asked for a person, or described an emergency. They get
+        # the handoff notice, and a distress marker gets the emergency number first.
+        notice = (chat_prompts.safety_notice_text(ctx.cfg, ctx.locale)
+                  if escalation == "distress" else chat_prompts.handoff_notice_text(ctx.locale))
+        yield _done(reason=REASON_ESCALATE, text=notice, handoff=handoff,
+                    scope=_scope(ctx, source=SCOPE_ESCALATION,
+                                 kind="risky" if escalation == "distress" else None))
         return
 
     cfg = dict(ctx.cfg or {})
@@ -651,92 +799,194 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
 
     queries, r, grounded, reason = await _ground(ctx, visibility="public", stages=stages)
     hits = r.get("hits") or []
+    direct = direct_match(r, ctx.cfg, grounded)
     yield ev("grounding", {"grounded": grounded, "reason": reason,
                            "method": r.get("method"), "top_score": r.get("top_score"),
-                           "hit_count": len(hits), "kb_present": bool(r.get("kb_present"))})
+                           "hit_count": len(hits), "kb_present": bool(r.get("kb_present")),
+                           # Additive: the retrieval verdict above is decided before triage; this
+                           # says whether the customer's own words were enough to skip it.
+                           "direct": direct})
 
-    # The product default (ADR-001 open decision #1): refuse, offer a human, never improvise.
-    # A tenant that has explicitly opted in gets an answer attempt instead — still marked
-    # ungrounded, still handed off, and the prompt still makes the model label it.
-    allow_general = chat_prompts.general_knowledge_allowed(ctx.cfg)
-    if not grounded and not allow_general:
-        # The zero-token refusal. No tier1 event either: passage cards are an operator
-        # affordance, and dumping raw KB excerpts at a customer is not an answer.
-        stages["total"] = _ms(started)
-        yield ev("done", _envelope_for(
-            ctx, retrieval=r, grounded=False, reason=reason,
-            reply=_reply(refusal),
-            handoff=_handoff(reason, ctx), stages=stages))
-        return
-
+    policy = chat_prompts.answer_policy(ctx.cfg)
+    warn_after, cutoff_after = off_topic_limits(ctx.cfg)
     context_hits = hits[:int(_num(_cfg(ctx.cfg, "context_hits"), DEFAULTS["context_hits"]))]
-    max_chars = int(_num(_cfg(ctx.cfg, "max_reply_chars"), DEFAULTS["max_reply_chars"]))
-    system = chat_prompts.build_system(ctx.cfg, mode="autopilot", locale=ctx.locale)
-    user = chat_prompts.build_user(
-        hits=context_hits, messages=ctx.messages, envelope=_inbound(ctx),
-        directive=chat_prompts.build_answer_directive(grounded=grounded, max_chars=max_chars))
+    # What a turn served WITHOUT the documents reports as its grounding reason: the gate's own
+    # when the gate refused, or `weak_match` when it passed but the customer's own words were
+    # below the direct threshold. `ok` next to `grounded: false` would read as a contradiction.
+    weak_reason = reason if not grounded else REASON_WEAK_MATCH
 
-    t = time.monotonic()
-    chunks: list[str] = []
-    try:
-        async for delta in llm.stream_text(
-                feature="autopilot", client_id=ctx.client_id, integration_id=ctx.integration_id,
-                api_key=ctx.api_key, model=ctx.model, system=system, user=user,
-                opts=llm.ANSWER,
-                max_tokens=int(_num(_cfg(ctx.cfg, "max_tokens"), DEFAULTS["max_tokens"]))):
-            chunks.append(delta)
-            # Deltas are RAW model text — unsanitized, uncited, untruncated. They are a
-            # progressive-rendering nicety; the authoritative text is the one on `done`, and a
-            # consumer that renders deltas must replace them with it. A channel that cannot
-            # replace what it has already sent (SMS, email) must not render deltas at all.
-            yield ev("delta", {"text": delta})
-    except llm.LLMError as exc:
+    async def _grounded_answer(source: str, kind: str | None):
+        """The KB-grounded, streamed answer: passages in, citations resolved, output validated.
+
+        Forced tool-use and token streaming do not combine, so this call gets no tools at all
+        (ADR-001's "no tools beyond a terminal submit_answer" bar, met by subtraction)."""
+        system = chat_prompts.build_system(ctx.cfg, mode="autopilot", locale=ctx.locale)
+        user = chat_prompts.build_user(
+            hits=context_hits, messages=ctx.messages, envelope=_inbound(ctx),
+            directive=chat_prompts.build_answer_directive(grounded=True, max_chars=max_chars),
+            preamble=chat_prompts.clock_block(ctx.cfg, ctx.now))
+
+        t = time.monotonic()
+        chunks: list[str] = []
+        try:
+            async for delta in llm.stream_text(
+                    feature="autopilot", client_id=ctx.client_id,
+                    integration_id=ctx.integration_id, api_key=ctx.api_key, model=ctx.model,
+                    system=system, user=user, opts=llm.ANSWER, max_tokens=max_tokens):
+                chunks.append(delta)
+                # Deltas are RAW model text — unsanitized, uncited, untruncated. They are a
+                # progressive-rendering nicety; the authoritative text is the one on `done`, and
+                # a consumer that renders deltas must replace them with it. A channel that cannot
+                # replace what it has already sent (SMS, email) must not render deltas at all.
+                yield ev("delta", {"text": delta})
+        except llm.LLMError as exc:
+            stages["llm"] = _ms(t)
+            log.warning("autopilot answer failed (client=%s): %s", ctx.client_id, exc)
+            yield ev("error", {"code": _llm_code(exc), "message": str(exc), "fatal": False})
+            # Falls back to the refusal rather than silence: the customer is waiting, and a
+            # handoff is a correct outcome for an outage. The summary stays on the cheap path —
+            # a second model call immediately after one just failed is optimism, not design.
+            yield _done(retrieval=r, reason=REASON_LLM_ERROR, text=refusal,
+                        handoff=_handoff(REASON_LLM_ERROR, ctx),
+                        scope=_scope(ctx, source=source, kind=kind))
+            return
         stages["llm"] = _ms(t)
-        stages["total"] = _ms(started)
-        log.warning("autopilot answer failed (client=%s): %s", ctx.client_id, exc)
-        yield ev("error", {"code": "llm_busy" if isinstance(exc, llm.LLMBusyError) else "llm_error",
-                           "message": str(exc), "fatal": False})
-        # Falls back to the refusal rather than silence: the customer is waiting, and a
-        # handoff is a correct outcome for an outage. The summary stays on the cheap path —
-        # a second Anthropic call immediately after one just failed is optimism, not design.
-        yield ev("done", _envelope_for(
-            ctx, retrieval=r, grounded=False, reason="llm_error",
-            reply=_reply(refusal),
-            handoff=_handoff("llm_error", ctx), stages=stages))
+
+        # Validation order is load-bearing: markup and URLs first (they can contain digits that
+        # look like markers), length next, citations LAST — so the returned citation list is
+        # exactly what survived into the final text rather than a superset of it.
+        t = time.monotonic()
+        text = chat_safety.strip_unsafe_markup("".join(chunks))
+        text = chat_safety.drop_foreign_urls(text, context_hits)
+        text = chat_safety.enforce_length(text, max_chars)
+        text, cites = chat_safety.resolve_citations(text, context_hits)
+        stages["validate"] = _ms(t)
+
+        if not text:
+            # Nothing usable came back. The refusal copy promises a colleague, so the turn must
+            # actually go to one — it used to be sent with no handoff at all.
+            yield _done(retrieval=r, reason=REASON_LLM_ERROR, text=refusal,
+                        handoff=_handoff(REASON_LLM_ERROR, ctx),
+                        scope=_scope(ctx, source=source, kind=kind))
+            return
+
+        handoff = _no_handoff()
+        # A commitment forces a handoff unless a passage the model was GIVEN states it (see
+        # chat_safety.detect_commitment) — the tenant's own published installation time is not
+        # a promise the bot made up. The deltas have already left the building, so this cannot
+        # retract the text; it flags the turn for a human, which is the actionable half.
+        passages = None if bool(_cfg(ctx.cfg, "handoff_on_kb_commitments")) else context_hits
+        commitment = chat_safety.detect_commitment(text, passages)
+        if commitment:
+            handoff = await _handoff_with_summary(f"commitment:{commitment}", ctx, stages)
+        yield _done(retrieval=r, grounded=True, reason=REASON_OK, text=text, citations=cites,
+                    answered_from_kb=True, handoff=handoff,
+                    scope=_scope(ctx, source=source, kind=kind, answered=True))
+
+    # 5. Nothing published to read, or retrieval could not run: the zero-token refusal.
+    if not r.get("kb_present"):
+        yield _done(retrieval=r, reason=reason, text=refusal, handoff=_handoff(reason, ctx),
+                    scope=_scope(ctx, source=SCOPE_REFUSAL))
         return
-    stages["llm"] = _ms(t)
 
-    # Validation order is load-bearing: markup and URLs first (they can contain digits that
-    # look like markers), length next, citations LAST — so the returned citation list is
-    # exactly what survived into the final text rather than a superset of it.
+    # 6. The customer's own words match the published documents: straight to the answer.
+    if direct:
+        async for event in _grounded_answer(SCOPE_DIRECT, None):
+            yield event
+        return
+
+    # 7. A conversation past the off-topic cut-off gets no model call for anything the documents
+    #    do not clearly cover. No handoff and no closed chat: a customer who joked first and then
+    #    asks about their plan in so many words still reaches step 6 above.
+    if cutoff_after and ctx.off_topic_count >= cutoff_after:
+        yield _done(retrieval=r, reason=weak_reason,
+                    text=chat_prompts.off_topic_cutoff_text(ctx.cfg, ctx.locale),
+                    handoff=_no_handoff(), scope=_scope(ctx, source=SCOPE_CUTOFF))
+        return
+
+    # 8. Triage: one small call, no passages, decides what kind of message this is — under
+    #    BOTH policies. `kb_only` differs only in what a related question gets (the refusal and a
+    #    colleague instead of a general answer). So a refusal now costs one small call where it
+    #    used to cost none: that is the price of telling "what day is it?" from "what are your
+    #    prices?", and a joke from a customer. The free exits that remain are the two off
+    #    switches, an empty KB and the off-topic cut-off.
     t = time.monotonic()
-    text = chat_safety.strip_unsafe_markup("".join(chunks))
-    text = chat_safety.drop_foreign_urls(text, context_hits)
-    text = chat_safety.enforce_length(text, max_chars)
-    text, cites = chat_safety.resolve_citations(text, context_hits)
-    stages["validate"] = _ms(t)
+    try:
+        raw = await llm.call_tool(
+            feature="triage", client_id=ctx.client_id, integration_id=ctx.integration_id,
+            api_key=ctx.api_key, model=ctx.model,
+            system=chat_prompts.build_triage_system(
+                ctx.cfg, locale=ctx.locale, policy=policy,
+                business_name=ctx.business_name, industry=ctx.industry),
+            user=chat_prompts.build_triage_user(
+                messages=ctx.messages, envelope=_inbound(ctx),
+                clock=chat_prompts.clock_block(ctx.cfg, ctx.now),
+                doc_titles=[h.get("title") for h in hits], max_chars=max_chars),
+            tool=chat_prompts.TRIAGE_TOOL, opts=llm.ANSWER, max_tokens=max_tokens,
+            # The system prompt is tenant-stable (the clock is in the user block), so it caches.
+            cache_system=True)
+    except llm.LLMError as exc:
+        stages["triage"] = _ms(t)
+        log.warning("autopilot triage failed (client=%s): %s", ctx.client_id, exc)
+        yield ev("error", {"code": _llm_code(exc), "message": str(exc), "fatal": False})
+        yield _done(retrieval=r, reason=REASON_LLM_ERROR, text=refusal,
+                    handoff=_handoff(REASON_LLM_ERROR, ctx),
+                    scope=_scope(ctx, source=SCOPE_TRIAGE))
+        return
+    stages["triage"] = _ms(t)
 
-    answered = bool(text) and grounded
-    if not text:
-        text, cites = refusal, []
+    raw = raw if isinstance(raw, dict) else {}
+    kind = str(raw.get("kind") or "").strip().lower()
+    if kind not in chat_prompts.TRIAGE_KINDS:
+        # A strict schema makes this unlikely, never impossible. "business" is the reading that
+        # can only end in the documents or a colleague.
+        kind = KIND_BUSINESS
+    model_text = _free_text(str(raw.get("reply") or ""), max_chars)
 
-    handoff = {"recommended": False, "reason": None, "summary": None}
-    commitment = chat_safety.detect_commitment(text)
+    if kind == KIND_BUSINESS:
+        if grounded:
+            async for event in _grounded_answer(SCOPE_TRIAGE, kind):
+                yield event
+            return
+        yield _done(retrieval=r, reason=reason, text=refusal, handoff=_handoff(reason, ctx),
+                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind))
+        return
+
+    if kind == KIND_RISKY:
+        handoff = await _handoff_with_summary(REASON_RISKY, ctx, stages)
+        yield _done(retrieval=r, reason=weak_reason,
+                    text=model_text or chat_prompts.safety_notice_text(ctx.cfg, ctx.locale),
+                    handoff=handoff, scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind))
+        return
+
+    if kind == KIND_OFF_TOPIC:
+        count = ctx.off_topic_count + 1
+        text = model_text or chat_prompts.off_topic_redirect_text(ctx.locale)
+        if cutoff_after and count >= cutoff_after:
+            text = chat_prompts.off_topic_cutoff_text(ctx.cfg, ctx.locale)
+        elif warn_after and count == warn_after:
+            text = f"{text}\n\n{chat_prompts.off_topic_warning_text(ctx.cfg, ctx.locale)}"
+        yield _done(retrieval=r, reason=weak_reason, text=text, handoff=_no_handoff(),
+                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind, count=count))
+        return
+
+    if kind == KIND_RELATED and policy != "general":
+        yield _done(retrieval=r, reason=weak_reason, text=refusal,
+                    handoff=_handoff(REASON_RELATED_NOT_IN_KB, ctx),
+                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind))
+        return
+
+    # Chitchat, or a related question under the `general` policy: the model's own short reply.
+    if not model_text:
+        yield _done(retrieval=r, reason=REASON_LLM_ERROR, text=refusal,
+                    handoff=_handoff(REASON_LLM_ERROR, ctx),
+                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind))
+        return
+    handoff = _no_handoff()
+    # No passages here, so ANY price, deadline or promise in a reply written without the
+    # documents is unbacked by definition and goes to a human.
+    commitment = chat_safety.detect_commitment(model_text)
     if commitment:
-        # Commitment-shaped output forces a handoff even when the answer is perfectly
-        # grounded. The deltas have already left the building, so this cannot retract the
-        # text — it flags the turn for a human, which is the actionable half. Suppressing
-        # before the first delta would mean a non-streaming autopilot; a tenant who wants that
-        # guarantee is choosing latency for it, which is a config decision we have not been
-        # asked to make.
         handoff = await _handoff_with_summary(f"commitment:{commitment}", ctx, stages)
-    elif not grounded:
-        # The opted-in general-knowledge answer. Always handed off: we just told a customer
-        # something the tenant's KB does not say.
-        handoff = _handoff("ungrounded_answer", ctx)
-
-    stages["total"] = _ms(started)
-    yield ev("done", _envelope_for(
-        ctx, retrieval=r, grounded=grounded, reason=reason,
-        reply=_reply(text, cites, answered),
-        handoff=handoff, stages=stages))
+    yield _done(retrieval=r, reason=weak_reason, text=model_text, handoff=handoff,
+                scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind, answered=True))

@@ -41,7 +41,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, Header, HTTPException,
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ..services import chat, chat_store, limits, llm, settings_store
+from ..services import chat, chat_copy, chat_store, limits, llm, settings_store
 from ..services.auth import (Principal, assert_expected_tenant, make_token,
                              resolve_principal, verify_token)
 
@@ -513,6 +513,7 @@ async def _drive(client_id: str, suggest_ref: str, ctx: chat.ChatContext):
             if ev.name == "done":
                 envelope = ev.data
                 await _persist(client_id, suggest_ref, envelope)
+                await _record_off_topic(ctx, envelope)
                 yield ("done", {"turn": envelope, "seq": n})
                 continue
             yield (ev.name, {**ev.data, "seq": n})
@@ -530,8 +531,36 @@ async def _drive(client_id: str, suggest_ref: str, ctx: chat.ChatContext):
 
 def _state_for(envelope: dict) -> str:
     """'ready' | 'refused'. One definition, because the stored row's state and the state the
-    blocking answer response reports must never be able to disagree."""
-    return "ready" if bool((envelope.get("grounding") or {}).get("grounded")) else "refused"
+    blocking answer response reports must never be able to disagree.
+
+    `ready` also covers a reply that did not come from the documents but IS an answer — a
+    greeting, today's date, a general-knowledge reply under the `general` policy
+    (`scope.answered`). Reporting those as refusals would tell the chat site the bot declined."""
+    if bool((envelope.get("grounding") or {}).get("grounded")):
+        return "ready"
+    return "ready" if bool((envelope.get("scope") or {}).get("answered")) else "refused"
+
+
+async def _record_off_topic(ctx: chat.ChatContext, envelope: dict) -> None:
+    """File the conversation's new off-topic count when this turn changed it.
+
+    Here, beside `_persist`, rather than in the engine (which owns no persistence) — so the
+    blocking and the streamed answer count a turn the same way. Logged, never raised: a lost
+    increment costs one extra off-topic reply, a raised error would cost the customer theirs.
+    """
+    if ctx.mode != MODE_AUTOPILOT:
+        return
+    try:
+        count = int(((envelope.get("scope") or {}).get("off_topic") or {}).get("count") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return
+    if count == ctx.off_topic_count:
+        return
+    try:
+        await chat_store.set_off_topic_count(ctx.client_id, ctx.conversation_id, count)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not store off-topic count conversation=%s: %s",
+                    ctx.conversation_id, exc)
 
 
 async def _persist(client_id: str, suggest_ref: str, envelope: dict) -> None:
@@ -574,13 +603,19 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
     # Last-resort locale: the tenant's own first configured language, not a hardcoded one. A
     # caller that sends `locale` always wins; this only covers a turn that arrived without one.
     fallback = str((cfg.get("languages") or ["ka"])[0] or "ka")
+    # The public bot also needs the conversation's off-topic count and the tenant's name for its
+    # triage prompt. The copilot needs neither, and its background path stays one query lighter.
+    extra = (await chat_store.get_conversation_context(client_id, conversation_id)
+             if mode == MODE_AUTOPILOT else {})
     return chat.ChatContext(
         client_id=str(client_id), conversation_id=str(conversation_id),
         suggest_ref=suggest_ref, locale=locale or fallback,
         messages=messages, cfg=cfg, api_key=app_cfg["anthropic_api_key"],
         model=app_cfg["llm_model"], mode=mode, integration_id=integration_id,
         conversation_ref=conversation_ref, turn_ref=turn_ref, channel=channel,
-        envelope=envelope or {})
+        envelope=envelope or {},
+        business_name=extra.get("business_name"), industry=extra.get("industry"),
+        off_topic_count=int(extra.get("off_topic_count") or 0))
 
 
 # --------------------------------------------------------------------------- #
@@ -989,6 +1024,10 @@ async def get_config(p: Principal = Depends(require_chat("chat:turn", "chat:sugg
         "persona": cfg.get("persona"),
         "greeting": _json(cfg.get("greeting")) or {},
         "refusal_copy": _json(cfg.get("refusal_copy")) or {},
+        # Always all three languages. The line the chat site sends when IT hands a conversation
+        # over (circuit open, bot paused, an attachment): `refusal_copy` is `{}` unless a tenant
+        # wrote one, and a handoff that sent it was a silent one.
+        "handoff_notice": dict(chat_copy.DEFAULT_HANDOFF_NOTICE),
         "languages": cfg.get("languages") or [],
         "canned": _json(cfg.get("canned")) or [],
         "autopilot_enabled": bool(cfg.get("autopilot_enabled")),

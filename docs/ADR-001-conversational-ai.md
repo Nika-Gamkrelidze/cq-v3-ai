@@ -671,3 +671,95 @@ cost dashboard · PII/PHI redaction.
    varies by industry, and Instagram/WhatsApp have their own platform rules.
 8. **Which tenant is the pilot, and who produces the labelled KA/RU evaluation set?**
 9. **Escalation keyword list and after-hours fallback message, per tenant.**
+
+---
+
+## Addendum — 2026-09-14: answer policy, triage, off-topic turns and business hours
+
+**Status:** Accepted. Resolves open decision #1 and narrows two claims made above; the text above
+is left as it was written. The current contract is `CHAT_INTEGRATION.md` §5.1 (`handoff_notice`),
+§5.2 (the answer flow) and §6 (the `scope` object).
+
+### Why
+
+The first pilot conversation — the chat widget talking to the autopilot of a demo tenant with an
+internet-provider KB — failed in four ways, each of which the design above permitted:
+
+1. **"What day is it today?" and "list the planets" were both refused.** The prompt was KB-only
+   and the model was never given the date, so the bot could neither handle the small talk
+   customers open with nor tell a plainly off-topic message from a KB miss.
+2. **Off-topic messages passed the grounding gate anyway.** The tenant's stored `min_score`
+   equalled retrieval's own floor, and the retrieval window prepends the bot's previous line —
+   which named the company — so an unrelated message retrieved company passages, cost a full
+   grounded-answer call and was logged as grounded. The deterministic gate (Decision, idea 3) is
+   only as sharp as its threshold and its query.
+3. **A fact quoted from the KB forced a handoff.** "Installation typically within 3 business days"
+   matched the `deadline` commitment pattern (security bar, item 7), and the one-way handoff ended
+   the bot's part in a conversation it was answering correctly.
+4. **The chat side's failure handoff was silent.** On its own failures it sent the tenant's refusal
+   copy, which is `{}` until someone writes it.
+
+### Decision
+
+**Open decision #1 is answered per tenant, by `answer_policy`:**
+
+| `answer_policy` | A business-related question the KB does not cover |
+|---|---|
+| `kb_only` — **default** | Refusal copy + handoff, as this ADR assumed. |
+| `general` | A general answer, labelled as not coming from the KB, with no promises and no handoff. This is the tenant's written opt-in from security bar item 9. |
+
+The two policies run the same flow and differ only on this row. The boolean
+`allow_general_knowledge` that stood in for this decision is honoured only when `answer_policy` is
+absent.
+
+**A triage step sits between the gate and the answer, under both policies.** A message the KB
+matches strongly on its own (`direct_min_score`) goes straight to the grounded answer. Otherwise
+one small forced-tool-use call classifies it against the tenant's one-sentence business description
+as `business`, `related`, `chitchat`, `off_topic` or `risky`, and writes the short reply for the
+kinds that are not a KB answer; a business question the gate cannot support is refused with a
+handoff, as before. It is given no KB passages and
+has nothing to act with, so security bar item 7's capability rule stands. Small talk is answered;
+an off-topic turn gets a one-sentence redirect and is counted per conversation — a warning, then a
+cut-off, and **neither hands off** (a cut-off conversation still gets answers the KB clearly
+covers); a risky message gets a safety reply and a handoff. Every autopilot model call is given the
+business's local date and time, its weekly hours and whether it is open now.
+
+**"Refusal costs zero tokens" is narrowed to four exits.** The kill switch, autopilot disabled, an
+empty or unavailable KB and the off-topic cut-off still make no model call at all, provably in
+`llm_usage`. Every other refusal on the public bot — the gate failing (Decision, idea 3), or a
+`related_not_in_kb` under `kb_only` — now costs one small triage call and never an answer call,
+metered separately as `llm_usage.feature = 'triage'` so its cost never hides inside `autopilot`.
+The gate keeps its real job: it still decides, in code, whether a model may answer **from the KB**;
+it no longer decides whether a model is called. Keeping the zero-token gate refusal under
+`kb_only` was considered and rejected: small talk that fails the gate ("what day is it?") would
+still be refused under the default policy, which is point 1 again.
+
+**The commitment rule is narrowed to invented commitments.** A figure (a number with its unit or
+currency) or keyword that appears in a passage the model was given no longer forces a handoff; an
+invented one still does, `assurance` always does, and replies built without passages (general,
+small talk) hand off on any commitment. `handoff_on_kb_commitments = true` restores the original
+rule for a tenant.
+
+**Failure handoffs carry CQ's `handoff_notice`** (always en/ka/ru, built-in wording) instead of the
+refusal copy; the chat side falls back to a non-empty refusal copy, then to its own built-in
+notice. A failure handoff is never silent.
+
+### Consequences
+
+- **Spend per bot message is no longer zero-or-one call.** A gate refusal costs a triage call
+  where it used to cost nothing, and a triaged business question costs triage plus the grounded
+  answer. Compare `triage` with `autopilot` in `llm_usage` for the pilot
+  before quoting a per-conversation cost.
+- **`state: ready` now means "the customer got an answer"**, general and small talk included, and
+  `refused` no longer implies a handoff (an off-topic redirect or the cut-off is `refused` without
+  one). Routing was
+  always meant to key on `handoff.recommended`; now it has to.
+- **`ungrounded_answer` is retired** as a handoff reason; stored history keeps it.
+- **Off-topic turns are no longer logged as grounded.** Every outcome that is not a KB-grounded
+  answer reports `grounded: false`, and a new `grounding.reason`, `weak_match`, names point 2's
+  case: a gate that passed while the customer's own words scored below the direct threshold —
+  typically a match only through the conversation window.
+- **Open decision #9 is only half answered.** The bot knows the opening hours and says whether the
+  business is open; there is still no after-hours fallback message or routing.
+- **The new thresholds are guesses** — a warning after 3 off-topic turns, a cut-off after 5,
+  `direct_min_score` 0.5 — exactly as the curation thresholds were. Only real traffic sets them.

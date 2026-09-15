@@ -2,8 +2,10 @@
 
 **Audience:** engineers building the chat service's backend integration with CQ.
 **Source of truth:** `backend/app/routers/chat.py`, `services/chat.py`, `services/auth.py`,
-`services/chat_credentials.py` on `main` as of 2026-09-08. Where `docs/ADR-001` and the code
-differ, this document follows the **code** and says so in a one-line *ADR note*.
+`services/chat_credentials.py` on `main` as of 2026-09-08; the bot's answer policy, off-topic
+handling and business hours (§5.1 `handoff_notice`, §5.2, §6 `scope`) as of 2026-09-14. Where
+`docs/ADR-001` and the code differ, this document follows the **code** and says so in a one-line
+*ADR note*.
 
 - **Base URL:** `https://ai.communiq.ge/api` — every path below is relative to it, so
   `POST /v1/chat/answer` is `https://ai.communiq.ge/api/v1/chat/answer`.
@@ -17,14 +19,15 @@ differ, this document follows the **code** and says so in a one-line *ADR note*.
 
 CQ is the AI layer behind the chat product. Per tenant it holds a knowledge base (KB), a chat
 config (persona, greeting, refusal copy, languages, AI-disclosure copy, escalation keywords,
-rate caps) and the LLM spend. **The chat backend is the system of record for conversations and
+rate caps, answer policy, business description, opening hours, off-topic thresholds) and the LLM
+spend. **The chat backend is the system of record for conversations and
 messages; CQ keeps a lossy mirror** — enough history to answer and to draft, nothing more.
 
 Over one prefix, `/v1/chat/`, CQ offers three things:
 
 | Layer | Endpoint | What it does |
 |---|---|---|
-| **Autopilot (the bot)** | `POST /v1/chat/answer` | Given the customer's message, returns a reply that is either grounded in the tenant's *published* KB documents, or the tenant's refusal copy — and, in either case, a `handoff` block saying whether a human should take over. No general knowledge unless the tenant opted in. **CQ appends the AI-disclosure line itself; do not add another.** |
+| **Autopilot (the bot)** | `POST /v1/chat/answer` | Given the customer's message, returns a reply — an answer grounded in the tenant's *published* KB documents, a short small-talk reply, an off-topic redirect, a general answer (only for a tenant on `answer_policy: general`), or the tenant's refusal copy — and, in every case, a `handoff` block saying whether a human should take over (§5.2). **CQ appends the AI-disclosure line itself; do not add another.** |
 | **Copilot (drafts for an operator)** | `POST /v1/chat/turns` → `GET /v1/chat/suggestions/{suggest_ref}` | Every customer message is ingested (202, ~15 ms); drafts are generated in the background and read back with one indexed SELECT — or streamed over SSE. `POST /v1/chat/feedback` records what the operator did with a draft. |
 | **Mirror** | `POST /v1/chat/conversations:sync`, `DELETE /v1/chat/conversations/{external_ref}` | Bulk-mirror threads CQ never served; purge one thread on GDPR erasure. |
 
@@ -66,12 +69,12 @@ sequenceDiagram
   participant CQ as CQ /api/v1/chat
   participant OP as Operator queue
   CB->>CQ: GET /config (X-CQ-Key, X-CQ-Tenant)
-  CQ-->>CB: 200 {autopilot_enabled, greeting, refusal_copy, languages, version}
+  CQ-->>CB: 200 {autopilot_enabled, greeting, refusal_copy, handoff_notice, languages, version}
   Note over CB: offer the bot only if chat-side ai_bot_enabled AND autopilot_enabled
   CB->>C: greeting[locale] (static text, no CQ call)
   C->>CB: message m1
   CB->>CQ: POST /answer {conversation_ref, turn_ref: m1, content, locale}
-  CQ-->>CB: 200 {state, turn: {reply, handoff, grounding, citations, usage}}
+  CQ-->>CB: 200 {state, turn: {reply, handoff, scope, grounding, citations, usage}}
   CB->>C: turn.reply.text (disclosure already appended by CQ)
   CB->>CQ: POST /turns {role: bot, turn_ref: <bot msg id>} (mirror, no generation)
   alt turn.handoff.recommended == false
@@ -94,7 +97,7 @@ sequenceDiagram
   C->>CB: message
   CB->>CQ: POST /answer
   CQ-->>CB: 503 autopilot_disabled / 409 autopilot_not_enabled / 429 / 5xx / timeout
-  CB->>C: refusal_copy[locale] from the cached config (the chat side sends this one)
+  CB->>C: handoff_notice[locale] from the cached config (the chat side sends this one, fallbacks in §5.1)
   CB->>OP: route conversation, reason = HTTP status + code
   Note over CB: state = handed_off. On 503 or 5xx open the circuit for this tenant and re-probe GET /config
 ```
@@ -172,7 +175,7 @@ TENANT='<cq_client_id uuid>'
 # transport probe (unauthenticated) — proves the proxy streams
 curl -s $BASE/v1/chat/health
 
-# tenant config: the CQ-side enable flag, the greeting, the refusal copy
+# tenant config: the CQ-side enable flag, the greeting, the refusal copy, the handoff notice
 curl -s $BASE/v1/chat/config -H "X-CQ-Key: $KEY" -H "X-CQ-Tenant: $TENANT"
 
 # the bot answers one customer message (blocking)
@@ -246,6 +249,7 @@ prove the path through the proxy before anything else.
   "persona": "…",
   "greeting":      {"ka": "გამარჯობა! …", "ru": "Здравствуйте! …", "en": "Hello! …"},
   "refusal_copy":  {"ka": "…", "ru": "…", "en": "…"},
+  "handoff_notice": {"ka": "…", "ru": "…", "en": "…"},
   "languages": ["ka", "ru", "en"],
   "canned": [],
   "autopilot_enabled": true,
@@ -254,10 +258,20 @@ prove the path through the proxy before anything else.
 ```
 
 - `version: 0` with empty `greeting`/`refusal_copy` means the tenant runs on built-in defaults.
-- `refusal_copy[locale]` is the exact text CQ puts in `reply.text` when it refuses; use it as your
-  own fallback message when an `/answer` call fails (§2.2). If empty, CQ's built-in refusal is:
-  *EN* "I don't have that in my knowledge base, so I don't want to guess. Let me pass you to a
-  colleague who can help." (KA and RU equivalents exist.)
+- `refusal_copy[locale]` is the exact text CQ puts in `reply.text` when it refuses an answer (the
+  refusal rows in §5.2; escalations carry a built-in notice instead). If empty, CQ's built-in
+  refusal is: *EN* "I don't have that in my knowledge base, so I don't want to guess. Let me pass
+  you to a colleague who can help." (KA and RU equivalents exist.) It is **not** the message for a
+  handoff the chat side makes on its own: it is `{}` for every tenant that never wrote one, and a
+  failure handoff that sends it says nothing at all.
+- `handoff_notice` is **always** present in `en`, `ka` and `ru`: CQ's built-in handoff wording
+  (*EN* at the time of writing: "I'm passing this conversation to a colleague, who will reply here
+  as soon as possible."), and the same text CQ itself sends on a complaint, legal-threat or keyword
+  escalation (§5.2). **Send it when the chat side hands off on a failure** — any failure that
+  routes a bot conversation to an operator (§2.2, §7). A failure handoff must never be silent, so
+  the fallback order is: `handoff_notice[locale]` → when the cached config has no `handoff_notice`
+  (a CQ that predates it), `refusal_copy[locale]` if non-empty → when there is no config at all, or
+  both are empty, the chat side's own built-in en/ka/ru handoff notice.
 - `languages[0]` is the locale CQ assumes when you omit `locale`.
 
 ### 5.2 `POST /v1/chat/answer` — scope `chat:answer` — the bot
@@ -328,30 +342,120 @@ customer's message **was** mirrored.
               "citations": [{"n": 1, "document_id": "…", "chunk_id": "…", "title": "…", "score": 0.71}],
               "answered_from_kb": true},
     "handoff": {"recommended": false, "reason": null, "summary": null},
+    "scope": {"policy": "kb_only", "source": "direct", "kind": null, "answered": true,
+              "off_topic": {"count": 0, "warn_after": 3, "cutoff_after": 5, "state": "ok"}},
     "usage": {"input_tokens": null, "output_tokens": null, "model": "claude-…",
               "latency_ms": {"kill_switch": 1, "retrieval": 180, "gate": 0, "llm": 2400, "validate": 1, "total": 2600}}
   }
 }
 ```
 
-- `state` is `"ready"` when `turn.grounding.grounded` is true and `"refused"` otherwise. **Make the
-  routing decision on `turn.handoff.recommended`, not on `state`** — an opted-in general-knowledge
-  answer is `refused` + handoff, an escalation is `refused` + handoff, and a grounded answer that
-  promises money is `ready` + handoff.
-- `turn.reply.text` is **never empty** on a 200: it is the answer or the tenant's refusal copy, with
-  the disclosure line appended by CQ. Live `[n]` markers stay in the text and index `citations`;
-  strip them for channels where they look odd, or render them as footnotes.
+- `state` is `"ready"` when `turn.grounding.grounded` **or** `turn.scope.answered` is true, and
+  `"refused"` otherwise — so a small-talk or general answer is `ready`. **Make the routing decision
+  on `turn.handoff.recommended`, not on `state`** — an escalation is `refused` + handoff, a grounded
+  answer that promises money the KB never stated is `ready` + handoff, and an off-topic redirect or
+  the cut-off copy is `refused` with **no** handoff (the conversation stays in bot mode).
+- `turn.reply.text` is **never empty** on a 200: it is the answer, a small-talk or general reply, an
+  off-topic redirect (carrying the warning or the cut-off copy when a threshold is reached), the
+  tenant's refusal copy, or a built-in handoff or safety notice — with the disclosure line appended
+  by CQ. Live `[n]` markers stay in the text and index `citations`; strip them for channels where
+  they look odd, or render them as footnotes.
+- `turn.scope` (§6) says what the bot did with the message and why: the policy, the step that
+  produced the reply, triage's classification and the conversation's off-topic count. Log it; do
+  not route on it.
 - `suggest_ref` is `an_<turn_id>` for answers. Persist it — it is the join key for everything.
 
-**Engine outcomes, all HTTP 200** (see §6 for the reason strings):
+**Answer policy.** Each tenant's chat config carries `answer_policy` (the CQ workspace's BOT tab,
+inherited from the console's *Default bot* tab). It replaces the older `allow_general_knowledge`
+flag, which CQ honours only when `answer_policy` is absent. Both policies run the same flow and
+differ in **one** case only:
 
-| Situation | `grounding.reason` | `reply.text` | `handoff` |
+| `answer_policy` | A question related to the business that the KB does not cover (`scope.kind: "related"`) |
+|---|---|
+| `kb_only` **(default)** | Refusal copy + handoff `related_not_in_kb`. |
+| `general` | A general answer, labelled as not coming from the tenant's KB, with no promises and no handoff. |
+
+Everything else — small talk, off-topic and risky messages, questions about the business — is
+handled identically under both.
+
+**The order CQ decides in** — the first step that applies wins, and `scope.source` names it:
+
+1. Kill switch or autopilot off, caught inside the engine → `off`.
+2. The customer asks for a human, complains, threatens legal action, shows distress or uses a
+   tenant escalation keyword → a built-in handoff notice (for distress, a built-in safety notice)
+   + handoff → `escalation`.
+3. The tenant's KB is empty or unavailable to the bot (`grounding.kb_present` false or null) →
+   refusal copy + handoff `kb_empty` → `refusal`.
+4. **Direct:** the retrieval gate passed **and** the customer's own words matched the KB strongly
+   (best vector score ≥ the higher of `min_score` and `direct_min_score`, 0.5 by default) → the
+   KB-grounded answer, no triage → `direct`.
+5. The conversation is **cut off** for off-topic turns (below) → cut-off copy, no handoff → `cutoff`.
+6. Everything else, under **both** policies → one small **triage** call classifies the message
+   against the tenant's business description → `triage`, with `scope.kind`:
+
+| Customer message | `scope.kind` | Reply | `handoff` |
 |---|---|---|---|
-| Customer asks for a human / legal threat / distress / tenant escalation keyword | `escalation` | refusal copy | `recommended: true`, `reason: "escalation:<marker>"`, model-written `summary` (+ `goal`) |
-| KB has no usable answer (tenant KB empty, no hits, score below 0.45, keyword-only match) | `kb_empty` \| `no_hits` \| `low_score` \| `keyword_only` | refusal copy | `true`, `reason` = that string, `summary` = last customer message (≤ 400 chars). **Zero tokens spent.** |
-| Grounded answer | `ok` | the answer (≤ 1200 chars by default) | `recommended: false` — **unless** the text is commitment-shaped (price, discount, refund promise): then `true`, `reason: "commitment:<label>"` |
-| Tenant opted into general knowledge and the KB had nothing | `no_hits` etc. with `grounded: false` | the answer | `true`, `reason: "ungrounded_answer"` |
-| Model call failed mid-answer | `llm_error` | refusal copy | `true`, `reason: "llm_error"` |
+| A question about the business | `business` | Gate passed: the KB-grounded answer. Gate failed: refusal copy. | Grounded answer: no, unless it makes an invented commitment (below). Refusal: yes, `reason` = the gate reason (`no_hits` \| `low_score` \| `keyword_only`). |
+| Related to the business, but the KB does not cover it | `related` | `general`: a labelled general answer. `kb_only`: refusal copy. | `general`: no, unless it makes a commitment. `kb_only`: yes, `related_not_in_kb`. |
+| Small talk — hello, thanks, what day or time it is, are you open, are you a bot | `chitchat` | A short answer, using the business's local date, time and opening hours. | No, unless it makes a commitment. |
+| Unrelated to the business ("list the planets") | `off_topic` | A one-sentence redirect to what the business does; the warning or cut-off copy when a threshold is reached. | **Never.** |
+| A possible risk to someone's safety | `risky` | A safety reply, emergency number first. | Yes, `risky`, with a model-written summary. |
+
+A failed triage call (model error, busy, truncated output) is refusal copy + handoff `llm_error`,
+with `grounding.reason: "llm_error"`, `scope.source: "triage"` and `scope.kind: null`.
+
+Every outcome that is not a KB-grounded answer — small talk, `related` (answered or refused),
+off-topic, risky, the cut-off — reports `grounding.grounded: false`, with `grounding.reason` set
+to the gate's own reason, or `weak_match` when the gate passed but the customer's own words scored below
+the direct threshold (typically a match only through the recent conversation window). `reply.answered_from_kb` is `true` only on a
+KB-grounded answer.
+
+**Where tokens are spent.** Four exits make no model call at all: the kill switch, autopilot
+disabled, an empty or unavailable KB, and every cut-off reply. A direct match costs the grounded
+answer, as before. Everything else costs one small triage call — metered on its own as
+`llm_usage.feature = "triage"`, with no KB passages in it — and that is the whole cost of a
+refusal: a gate refusal or a `related_not_in_kb` spends the triage call and **never** an answer
+call. A `business` question that passed the gate adds the grounded answer. Escalation, commitment
+and `risky` handoffs add the handoff summary, as before.
+
+**Off-topic warning and cut-off.** CQ counts each conversation's off-topic turns
+(`scope.off_topic`). On the turn the count reaches the tenant's `off_topic_warn_after` (default 3)
+the redirect carries the warning copy; on the turn it reaches `off_topic_cutoff_after` (default 5)
+the reply is the cut-off copy and the conversation is cut off. **Neither hands off, and the bot
+stays on:** after the cut-off only a question the KB clearly covers (step 4) reaches the model;
+everything else gets the cut-off copy again, at zero tokens. `0` disables either threshold. Keep a
+cut-off conversation in bot mode.
+
+**Commitments.** A price, percentage, discount, refund, guarantee or deadline that the KB itself
+states no longer forces a handoff: when the figure (a number with its unit or currency) or the
+keyword appears in a passage the model was given, the answer goes out as it is — "installation
+within 3 business days", quoted from the KB, stays with the bot. An invented one still hands off
+with `commitment:<label>`, `commitment:assurance` always does, and small-talk and general replies
+have no passages, so any commitment in them hands off. Symbol-first prices ("$29.99", "₾29",
+"GEL 29") are caught too. The CQ operator can restore "every commitment hands off" per tenant.
+
+**Date, time and opening hours.** Every autopilot model call — triage and the grounded answer — is
+given the business's current local date and time (in the tenant's timezone, `Asia/Tbilisi` by
+default), its weekly opening hours, the tenant's hours note and whether it is open right now. The
+chat side sends nothing for this.
+
+**Engine outcomes, all HTTP 200** (see §6 for the reason strings; the triage replies are in the table
+above):
+
+| Situation | `grounding.reason` | `scope.source` | `reply.text` | `handoff` |
+|---|---|---|---|---|
+| Customer asks for a human / complaint / legal threat / tenant escalation keyword | `escalation` | `escalation` | the built-in handoff notice — the same text as `GET /config` → `handoff_notice` | `recommended: true`, `reason: "escalation:<marker>"`, model-written `summary` (+ `goal`) |
+| Distress | `escalation` | `escalation` | a built-in safety notice, the emergency number (112 by default) first | `true`, `reason: "escalation:distress"`, model-written `summary` (+ `goal`) |
+| Tenant KB empty or unavailable (`kb_present` false or null) | `kb_empty` | `refusal` | refusal copy | `true`, `reason: "kb_empty"`, `summary` = last customer message (≤ 400 chars). **Zero tokens spent.** |
+| A business question the KB cannot support (no hits, score below the tenant's `min_score`, keyword-only match) | `no_hits` \| `low_score` \| `keyword_only` | `triage`, `kind: "business"` | refusal copy | `true`, `reason` = that string, `summary` = last customer message (≤ 400 chars). One triage call, no answer call. |
+| Grounded answer | `ok` | `direct`, or `triage` with `kind: "business"` | the answer (≤ 1200 chars by default) | `recommended: false` — **unless** it makes a commitment the passages do not contain, or an `assurance`: then `true`, `reason: "commitment:<label>"` |
+| Conversation cut off | the gate's reason, or `weak_match` | `cutoff` | cut-off copy | `recommended: false`. **Zero tokens spent.** |
+| Triage call failed | `llm_error` | `triage`, `kind: null` | refusal copy | `true`, `reason: "llm_error"` |
+| Model call failed mid-answer | `llm_error` | | refusal copy | `true`, `reason: "llm_error"` |
+
+A grounded answer that comes back empty hands off with `reason: "llm_error"` (before 2026-09-14 it
+sent the refusal copy with no handoff). `ungrounded_answer` is no longer produced: a `general`
+answer does not hand off.
 
 #### 5.2.1 Failure responses specific to this endpoint
 
@@ -378,7 +482,7 @@ event: open
 data: {"client_id":"6f1c…","suggest_ref":"an_c0de…","state":"running","seq":0}
 
 event: grounding
-data: {"grounded":true,"reason":"ok","method":"vector","top_score":0.71,"hit_count":4,"kb_present":true,"seq":1}
+data: {"grounded":true,"reason":"ok","method":"vector","top_score":0.71,"hit_count":4,"kb_present":true,"direct":true,"seq":1}
 
 event: delta
 data: {"text":"სხვა ბანკში ","seq":2}
@@ -398,11 +502,16 @@ Sequences you will see on the answer stream:
 | gate refusal (`no_hits` …) | `open` → `grounding` → `done` |
 | escalation, or kill/disable caught inside the engine | `open` → `done` |
 | model failure mid-stream | `open` → `grounding` → `delta`* → `error {"code":"llm_busy"\|"llm_error","message":…,"fatal":false}` → `done` (refusal + handoff) |
+| triage call failed | … → `error {"code":"llm_busy"\|"llm_error",…,"fatal":false}` → `done` (refusal + handoff `llm_error`) |
 | replay of a finished answer | `open {"state":"ready"\|"refused"}` → `grounding` → `tier1 {"cards":[]}` → `done` — ignore `tier1` on the answer path |
 | CQ-side stream failure | `error {"detail":…,"code":"stream_failed"\|"not_found"\|"timeout"\|"generation_failed"}` and the stream ends |
 
-Rule of thumb: an `error` frame that carries `"fatal": false` is followed by a `done`; one that
-carries `detail` is terminal. Reconnecting after a drop = re-POST with the same `turn_ref` (§8).
+The `grounding` frame carries an additive boolean `direct`: `true` when the message took the direct
+path (§5.2, step 4). Rule of thumb: an `error` frame that carries `"fatal": false` is followed by a
+`done`; one that carries `detail` is terminal. Reconnecting after a drop = re-POST with the same `turn_ref` (§8).
+A reply that is not the KB-grounded answer — small talk, a general answer, an off-topic redirect, a
+safety reply, cut-off copy — can reach `done` without a single `delta`; render from
+`done.turn.reply.text` either way.
 
 ### 5.3 `POST /v1/chat/turns` — scope `chat:turn` — **202** — the copilot ingest
 
@@ -495,6 +604,7 @@ a generation that dies is marked `error` by a reaper after 120 s.
     ],
     "reply": null,
     "handoff": {"recommended": false, "reason": null, "summary": null},
+    "scope": null,
     "usage": {"input_tokens": null, "output_tokens": null, "model": "claude-…", "latency_ms": {"retrieval": 170, "gate": 0, "llm": 1900, "total": 2100}}
   }
 }
@@ -606,23 +716,31 @@ One object, produced by one function, carried byte-identically by the blocking `
 | `client_id` | uuid | The tenant CQ resolved. Assert it. |
 | `channel` | string | Echo of the request's `channel`. |
 | `locale` | `ka`\|`ru`\|`en` | Normalized; unknown input becomes `en`. |
-| `grounding.grounded` | bool | Whether CQ was allowed to answer from the KB. |
-| `grounding.reason` | string | `ok` · `kb_empty` · `no_hits` · `low_score` · `keyword_only` · `escalation` · `autopilot_off` · `autopilot_killed` · `llm_error`. *ADR note: not in the ADR sketch.* |
+| `grounding.grounded` | bool | Whether CQ was allowed to answer from the KB. **`false` on every outcome that is not a KB-grounded answer** — small talk, `related`, off-topic, risky, the cut-off. |
+| `grounding.reason` | string | `ok` · `kb_empty` · `no_hits` · `low_score` · `keyword_only` · `escalation` · `autopilot_off` · `autopilot_killed` · `llm_error` · `weak_match` (an outcome that is not a KB-grounded answer, where the gate passed but the customer's own words scored below the direct threshold — typically a match only through the recent conversation window). *ADR note: not in the ADR sketch.* |
 | `grounding.method` | `vector`\|`keyword`\|`none` | Retrieval path. The bot only trusts `vector`. |
-| `grounding.top_score` | number \| null | Best cosine score (gate threshold 0.45 by default). |
+| `grounding.top_score` | number \| null | Best cosine score; the gate compares it with the tenant's `min_score`. |
 | `grounding.hit_count` | int | Retrieved passages. |
 | `grounding.kb_present` | bool | Whether the tenant has any KB the engine could see (published docs only, for the bot). |
 | `citations[]` | `{n, document_id, chunk_id, title, score}` | Every retrieved passage, numbered; `[n]` markers in text point here. |
 | `tier1[]` | `{n, title, snippet, chunk_id, document_id, score}` | ≤ 3 passage cards for the operator. **Always `[]` on answers.** |
 | `suggestions[]` | `{index, kind: answer\|clarify\|escalate, text, citations: [n…]}` | Copilot drafts (default 2; one `escalate` card on refusal). **Always `[]` on answers.** |
-| `reply` | `{text, citations: [citation…], answered_from_kb}` \| null | The bot's reply. **null on copilot envelopes.** `text` includes the disclosure line when CQ's disclosure policy says so. |
+| `reply` | `{text, citations: [citation…], answered_from_kb}` \| null | The bot's reply. **null on copilot envelopes.** `text` includes the disclosure line when CQ's disclosure policy says so. `answered_from_kb` is `true` only on a KB-grounded answer (`false` for general and small-talk answers). |
 | `handoff.recommended` | bool | **The routing signal.** |
-| `handoff.reason` | string \| null | A gate reason, `escalation:<keyword\|legal_threat\|complaint\|distress>`, `commitment:<label>`, `ungrounded_answer`, `llm_error`; copilot: `commitment_or_model_flagged`. |
-| `handoff.summary` | string \| null | What to show the operator: a model-written summary (≤ 600 chars) on escalation/commitment handoffs, otherwise the last customer message (≤ 400 chars). |
+| `handoff.reason` | string \| null | A gate reason, `escalation:<keyword\|legal_threat\|complaint\|distress>`, `commitment:<money\|percentage\|discount\|refund\|guarantee\|deadline\|assurance>`, `related_not_in_kb` (`kb_only`: a business-related question the KB does not cover), `risky` (triage judged the message a safety risk; the reply is a safety reply), `llm_error` (a model call failed — triage or the answer — or the grounded answer came back empty); copilot: `commitment_or_model_flagged`. **`ungrounded_answer` is no longer produced** (since 2026-09-14 a `general` answer does not hand off) — keep a label for it, stored history still carries it. |
+| `handoff.summary` | string \| null | What to show the operator: a model-written summary (≤ 600 chars) on escalation, commitment and `risky` handoffs, otherwise the last customer message (≤ 400 chars). |
 | `handoff.goal` | string | Present only when a model summary ran: the customer's goal in ≤ 120 chars. |
+| `scope` | object \| null | What the bot did with this message and why (§5.2). **null on copilot envelopes.** Log it; route on `handoff.recommended`, never on `scope`. |
+| `scope.policy` | `kb_only`\|`general` | The tenant's answer policy for this turn. |
+| `scope.source` | `direct`\|`triage`\|`cutoff`\|`refusal`\|`escalation`\|`off` | The step that produced the reply: `direct` — the message alone matched the KB strongly enough to answer without triage; `triage` — the triage call ran (see `kind`), and every refusal other than `kb_empty` comes from here; `cutoff` — the conversation is cut off for off-topic turns (zero tokens); `refusal` — the zero-token refusal for an empty or unavailable KB (`kb_empty`); `escalation` — an escalation marker; `off` — kill switch or autopilot off, caught inside the engine. |
+| `scope.kind` | `business`\|`related`\|`chitchat`\|`off_topic`\|`risky`\|null | Triage's classification; `null` when triage did not run, or failed (`source: "triage"`, `kind: null`, `llm_error`). |
+| `scope.answered` | bool | The customer got a real answer — from the KB, from general knowledge, or small talk. `false` for refusals, handoff and safety notices, safety replies, off-topic redirects and cut-off copy. With `grounding.grounded` it decides the response's `state`. |
+| `scope.off_topic.count` | int | The conversation's running total of off-topic turns, as of this turn. An on-topic turn does **not** reset it. |
+| `scope.off_topic.warn_after`, `scope.off_topic.cutoff_after` | int | The tenant's thresholds in force; `0` = never. |
+| `scope.off_topic.state` | `ok`\|`warned`\|`cut_off` | `cut_off`: anything the KB does not clearly cover gets the cut-off copy — the conversation is still in bot mode, with no handoff. |
 | `usage.input_tokens`, `usage.output_tokens` | null | **Always null**: CQ writes tokens to its own `llm_usage` ledger per tenant. *ADR note: the sketch shows numbers.* |
 | `usage.model` | string | The model id used. |
-| `usage.latency_ms` | object | Per-stage ms: `kill_switch`, `retrieval`, `gate`, `llm`, `validate`, `handoff_summary`, `total` (only the stages that ran). |
+| `usage.latency_ms` | object | Per-stage ms: `kill_switch`, `retrieval`, `gate`, `triage`, `llm`, `validate`, `handoff_summary`, `total` (only the stages that ran). |
 
 **Disclosure.** `reply.text` carries the tenant's AI-disclosure line appended **by CQ** — per tenant
 and per channel, default mode `first` (only on the bot's first reply in a thread, judged by the
@@ -725,16 +843,16 @@ All caps are per tenant and adjustable by the CQ operator in the tenant's chat c
 
 | Scope | Fields |
 |---|---|
-| **Tenant** | `cq_client_id`, `ai_bot_enabled`, cached config (`version`, `autopilot_enabled`, `greeting`, `refusal_copy`, `languages`, `fetched_at`), circuit-breaker state. |
+| **Tenant** | `cq_client_id`, `ai_bot_enabled`, cached config (`version`, `autopilot_enabled`, `greeting`, `refusal_copy`, `handoff_notice`, `languages`, `fetched_at`), circuit-breaker state. |
 | **Conversation** | AI state `bot` \| `handed_off` \| `copilot` (mapped to CQ, but the bot was never offered — human flow with drafts) \| `closed`; CQ's `conversation_id` (from any 200/202); `handoff` record — when, `reason`, `summary`, `goal`, and the source (`envelope` or `http_<status>:<code>`); `locale`, `channel`. |
-| **Customer message** | `turn_ref` (= message id), CQ `turn_id`, `suggest_ref`, mode (`an_`/`sg_`), HTTP status + `code`, latency, `idempotent_replay`, and the **whole envelope JSON** (at minimum `grounding`, `citations`, `handoff`, `usage`). |
-| **Bot reply sent** | its message id (used as the `role: "bot"` mirror `turn_ref`), the `suggest_ref` it came from, whether it was a refusal (`grounding.grounded == false`). |
+| **Customer message** | `turn_ref` (= message id), CQ `turn_id`, `suggest_ref`, mode (`an_`/`sg_`), HTTP status + `code`, latency, `idempotent_replay`, and the **whole envelope JSON** (at minimum `grounding`, `scope`, `citations`, `handoff`, `usage`). |
+| **Bot reply sent** | its message id (used as the `role: "bot"` mirror `turn_ref`), the `suggest_ref` it came from, and whether the customer got a real answer (`scope.answered`; on an envelope stored before `scope` existed, `grounding.grounded`). |
 | **Operator action** | what you sent to `/feedback` (`suggest_ref`, `action`, `variant_index`, `final_text`, `at`). |
 
 **Logging for reconciliation.** CQ meters tokens per tenant itself (`llm_usage`, features
-`autopilot` | `copilot` | `handoff`) — you need **no metering code**. Log every envelope's `usage`
-(model, per-stage latency) and `grounding` (grounded, reason, method, top_score, hit_count)
-keyed by `suggest_ref`, so a CQ invoice line or a "why did the bot refuse" question can be
+`autopilot` | `triage` | `copilot` | `handoff`) — you need **no metering code**. Log every
+envelope's `usage` (model, per-stage latency), `grounding` (grounded, reason, method, top_score,
+hit_count) and `scope` (policy, source, kind, off-topic state) keyed by `suggest_ref`, so a CQ invoice line or a "why did the bot refuse" question can be
 answered from your side without CQ access.
 
 ---
@@ -775,23 +893,35 @@ answered from your side without CQ access.
    documents the bot may quote as **public** — the copilot sees the whole KB, the bot only sees
    published documents, and CQ refuses to enable the bot while none are published.
 4. **Configure the bot in CQ:** persona, greeting (ka/ru/en), refusal copy, disclosure copy and
-   mode, escalation keywords, languages, caps. Leave `autopilot_enabled` **off** for the moment.
+   mode, escalation keywords, languages, caps — and the answer policy (`kb_only` unless the tenant
+   has agreed in writing to general answers), the business description triage uses to tell a
+   related question from an off-topic one, timezone, opening hours and hours note, and the
+   off-topic warning and cut-off thresholds and copy. Per tenant in the workspace's BOT tab, or
+   once for every tenant in the console's *Default bot* tab. Leave `autopilot_enabled` **off** for
+   the moment.
 5. **Copilot first.** With the chat-side flag off, run a real handed-off conversation: `/turns` →
    `/suggestions` shows drafts; `/feedback` returns 204; operator messages are mirrored.
 6. **Enable autopilot in CQ** (`autopilot_enabled: true`), keep the chat-side flag off, and probe
    `/answer` with a test end user: a grounded question (`state: ready`, `handoff.recommended: false`,
-   disclosure appended once); an off-KB question (`refused`, `reason: no_hits|low_score`, handoff
-   true, zero tokens); "I want to talk to a person" (`escalation:complaint`, model summary present).
-   Verify your state machine hands off and the copilot takes over on the next message.
+   disclosure appended once); a question the KB does not cover (under `kb_only`: `refused`, handoff
+   true, `reason` a gate reason — `no_hits|low_score|keyword_only` — or `related_not_in_kb`; under
+   `general` a related question instead gets a labelled general answer, `ready`, no handoff);
+   "what day is it today?" (`scope.kind: chitchat`, today's date in the tenant's timezone, `ready`,
+   no handoff, under either policy); an off-topic question, repeated (a redirect, the warning at the
+   warn threshold, the cut-off copy at the cut-off threshold, `handoff.recommended: false`
+   throughout — and afterwards a question the KB clearly covers is still answered); "I want to
+   talk to a person" (`escalation:complaint`, the `handoff_notice` text, model summary present).
+   Verify your state machine hands off only on `handoff.recommended` and the copilot takes over on
+   the next message.
 7. **Kill-switch drill.** CQ superadmin flips the kill switch (global or for the tenant) → within
-   5 s `/answer` returns **503** `autopilot_disabled` → the chat side sends the refusal copy, routes
+   5 s `/answer` returns **503** `autopilot_disabled` → the chat side sends `handoff_notice`, routes
    to an operator, opens the circuit; nothing goes out "as the bot". Flip it back → the half-open
    probe succeeds → new conversations get the bot again. Time both halves.
-8. **Reconcile spend.** CQ's AI-usage console shows the pilot tenant's `autopilot` / `copilot` /
+8. **Reconcile spend.** CQ's AI-usage console shows the pilot tenant's `autopilot` / `triage` / `copilot` /
    `handoff` rows; your per-`suggest_ref` log lines up by count.
 9. **Go live** by turning on the chat-side `ai_bot_enabled` for the pilot tenant. Alert on any
    401/403/400/422 (integration bug), on 429 rate (caps or abuse), on 5xx/503, and watch the
-   `handoff.reason` distribution for the first week.
+   `handoff.reason` and `scope.kind` distributions for the first week.
 
 ---
 

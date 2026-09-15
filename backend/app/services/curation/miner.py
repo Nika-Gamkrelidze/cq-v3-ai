@@ -251,6 +251,10 @@ LEFT JOIN LATERAL (
 ) q ON true
 WHERE s.client_id = $1
   AND s.created_at >= $2 AND s.created_at < $3
+  -- The public bot's own verdict that a turn was never a knowledge-base question (small talk,
+  -- off-topic, an emergency) or a cut-off reply is not a KB gap, however ungrounded it looks.
+  AND COALESCE(s.envelope->'scope'->>'kind', '') NOT IN ('chitchat', 'off_topic', 'risky')
+  AND COALESCE(s.envelope->'scope'->>'source', '') <> 'cutoff'
   AND (
         s.state = 'refused'
      OR s.grounding->>'grounded' = 'false'

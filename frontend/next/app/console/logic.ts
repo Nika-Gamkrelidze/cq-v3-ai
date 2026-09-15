@@ -137,7 +137,9 @@ export interface BotForm {
   maxChars: string;
   caps: Record<string, string>;
   disclosureMode: DisclosureMode;
-  allowGeneral: boolean;
+  /** Answer policy, business scope, opening hours and off-topic handling — the half of the
+      form the workspace BOT tab renders through the same components (see `ScopeForm`). */
+  scope: ScopeForm;
   handoffSummary: boolean;
 }
 
@@ -154,6 +156,9 @@ export interface BotConfig {
   top_k?: unknown;
   suggestion_count?: unknown;
   settings?: unknown;
+  /** `{refusal, off_topic_warning, off_topic_cutoff}`, each `{en, ka, ru}`: the engine's own
+      wording, shown as the placeholder of the box that would override it. */
+  builtin_copy?: unknown;
   source?: string;
   updated_at?: string | null;
   updated_by?: string | null;
@@ -176,8 +181,9 @@ const numText = (v: unknown, fallback: number): string =>
     Four defaults here are safe-direction choices, not conveniences:
 
       * an UNKNOWN disclosure mode falls back to disclosing (`first`), never to silence;
-      * `allow_general_knowledge` is true only when it is literally `true` — a missing key means
-        false, and `??`-defaulting it would let an absent field switch the risky behaviour on;
+      * the answer policy is `kb_only` unless `answer_policy` says `general` or — on a config
+        saved before that key existed — `allow_general_knowledge` is literally `true`; a missing
+        or unknown value must never switch the wider behaviour on (`answerPolicyOf`, below);
       * `handoff_summary` is the mirror image: on unless it is literally `false`;
       * a cap that is not set stays an EMPTY string, which is what "use the built-in" looks like
         in the box, rather than a zero that would read as "none allowed".
@@ -220,7 +226,7 @@ export function formFromConfig(cfg: BotConfig | null | undefined): BotForm {
     disclosureMode: DISCLOSURE_MODES.includes(text(s.disclosure_mode))
       ? (s.disclosure_mode as DisclosureMode)
       : 'first',
-    allowGeneral: s.allow_general_knowledge === true,
+    scope: scopeFormFrom(s),
     handoffSummary: s.handoff_summary !== false,
   };
 }
@@ -273,7 +279,9 @@ export function payloadFromForm(form: BotForm, cfg: BotConfig | null | undefined
     refusal_copy: nonEmpty(form.refusal),
     languages: form.languages,
     canned: Array.isArray(c.canned) ? c.canned : [],
-    settings: {
+    // `mergeScope` adds policy, scope, hours and off-topic, and drops the legacy
+    // `allow_general_knowledge` the `...prev` spread would otherwise carry forward.
+    settings: mergeScope({
       ...prev,
       min_score: num(form.minScore, 0.35),
       min_hits: num(form.minHits, 1),
@@ -281,13 +289,275 @@ export function payloadFromForm(form: BotForm, cfg: BotConfig | null | undefined
       suggestion_count: num(form.suggestions, 2),
       max_reply_chars: num(form.maxChars, 1200),
       escalation_keywords: form.escalation.split(',').map(s => s.trim()).filter(Boolean),
-      allow_general_knowledge: form.allowGeneral,
       handoff_summary: form.handoffSummary,
       disclosure_mode: form.disclosureMode,
       disclosure: nonEmpty(form.disclosure),
       limits,
-    },
+    }, form.scope),
   };
+}
+
+/* ------------------------------------ answer policy, opening hours and off-topic
+
+   The half of the bot form BOTH surfaces render through `components/bot/ScopeCards.tsx` — this
+   console's Default bot tab and the workspace's BOT tab — so its rules live here once, where the
+   node runner tests them. Flat keys inside `settings`; the server validates the same limits.
+
+   Safe-direction rules, again:
+
+     * THE POLICY FALLS BACK TO `kb_only`. `answer_policy` wins when it is one of the two known
+       words; otherwise the legacy `allow_general_knowledge` decides, and only a literal `true`
+       reads as `general`. A save writes `answer_policy` and DROPS the legacy key.
+     * HOURS OFF IS `null`, not an empty week. Seven closed days is a valid configured week;
+       "the bot has not been told" is the absence of the object.
+     * A DAY WITH SEVERAL INTERVALS keeps the ones the form cannot show. The UI edits the first
+       interval only; the rest (a split shift written through the API) ride along unchanged
+       while the day stays open, and closing the day is the one way to drop them.
+     * AN EMPTY COPY BOX MEANS THE BUILT-IN WORDING, so only languages with text are sent. */
+
+export type AnswerPolicy = 'kb_only' | 'general';
+
+export const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+export type DayKey = (typeof DAY_KEYS)[number];
+
+export const DEFAULT_TIMEZONE = 'Asia/Tbilisi';
+
+/** Offered when the browser cannot list its zones (`Intl.supportedValuesOf` is missing). */
+export const TIMEZONE_FALLBACK: readonly string[] = [
+  'Asia/Tbilisi', 'UTC', 'Europe/London', 'Europe/Berlin', 'Europe/Moscow', 'Europe/Istanbul', 'Asia/Dubai',
+];
+
+/** The server's limits and code defaults, restated for `maxLength` / `min` / `max` and the
+    pre-save check. */
+export const SCOPE_LIMITS = {
+  businessScope: 1000,
+  hoursNote: 500,
+  copy: 500,
+  warnMax: 50,
+  cutoffMax: 100,
+  warnDefault: 3,
+  cutoffDefault: 5,
+} as const;
+
+export interface HoursInterval {
+  open: string;
+  close: string;
+}
+
+export interface DayForm {
+  open: boolean;
+  /** `HH:MM`, as `<input type="time">` holds it. */
+  from: string;
+  to: string;
+  /** Intervals after the first, as stored; sent back unchanged while `open` stays true. */
+  rest: HoursInterval[];
+}
+
+/** The sub-form, as the person editing it holds it — numbers as the strings in their boxes. */
+export interface ScopeForm {
+  answerPolicy: AnswerPolicy;
+  businessScope: string;
+  timezone: string;
+  /** "Tell the bot our opening hours". Off sends `opening_hours: null`. */
+  hoursOn: boolean;
+  /** Always a full week: the stored one, or Mon–Fri 09:00–18:00 when nothing is stored, so
+      ticking `hoursOn` never shows seven blank rows. */
+  days: Record<DayKey, DayForm>;
+  hoursNote: string;
+  warnAfter: string;
+  cutoffAfter: string;
+  offTopicWarning: LangText;
+  offTopicCutoff: LangText;
+}
+
+/** `builtin_copy` from the config response, normalised to three strings per field. */
+export interface BuiltinCopy {
+  refusal: LangText;
+  offTopicWarning: LangText;
+  offTopicCutoff: LangText;
+}
+
+/** What `checkScope` found: an i18n key, plus the day for an hours error. */
+export interface ScopeError {
+  key: string;
+  day?: DayKey;
+}
+
+function langText(src: unknown): LangText {
+  const o = obj(src);
+  return Object.fromEntries(BOT_LANGS.map(l => [l, text(o[l])]));
+}
+
+function nonEmptyLang(src: LangText): LangText {
+  const out: LangText = {};
+  for (const l of BOT_LANGS) {
+    const v = (src[l] || '').trim();
+    if (v) out[l] = v;
+  }
+  return out;
+}
+
+export function answerPolicyOf(settings: unknown): AnswerPolicy {
+  const s = obj(settings);
+  if (s.answer_policy === 'kb_only' || s.answer_policy === 'general') return s.answer_policy;
+  return s.allow_general_knowledge === true ? 'general' : 'kb_only';
+}
+
+/** `HH:MM`, or '' for anything that is not a time. A stored `9:30` is padded rather than shown
+    as an empty box that the next save would report as missing. */
+function hhmm(v: unknown): string {
+  const m = typeof v === 'string' ? /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(v.trim()) : null;
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return '';
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+const OPENS = '09:00';
+const CLOSES = '18:00';
+
+/** Mon–Fri 09:00–18:00, the weekend closed. */
+export function defaultWeek(): Record<DayKey, DayForm> {
+  const week = {} as Record<DayKey, DayForm>;
+  for (const d of DAY_KEYS) {
+    week[d] = { open: d !== 'sat' && d !== 'sun', from: OPENS, to: CLOSES, rest: [] };
+  }
+  return week;
+}
+
+function weekFrom(hours: Record<string, unknown>): Record<DayKey, DayForm> {
+  return Object.fromEntries(DAY_KEYS.map(d => {
+    const list = Array.isArray(hours[d]) ? (hours[d] as unknown[]) : [];
+    const spans = list
+      .map(x => ({ open: hhmm(obj(x).open), close: hhmm(obj(x).close) }))
+      .filter(x => x.open && x.close);
+    // A missing day, like an empty list, is closed. It still carries 09:00–18:00 so ticking it
+    // open starts from two filled boxes; a closed day is sent as [] whatever the boxes hold.
+    if (!spans.length) return [d, { open: false, from: OPENS, to: CLOSES, rest: [] }];
+    return [d, { open: true, from: spans[0].open, to: spans[0].close, rest: spans.slice(1) }];
+  })) as Record<DayKey, DayForm>;
+}
+
+/** Fill the sub-form from a config's `settings` blob. */
+export function scopeFormFrom(settings: unknown): ScopeForm {
+  const s = obj(settings);
+  const hours = s.opening_hours;
+  const hoursOn = !!hours && typeof hours === 'object' && !Array.isArray(hours);
+  return {
+    answerPolicy: answerPolicyOf(s),
+    businessScope: text(s.business_scope),
+    timezone: text(s.timezone).trim() || DEFAULT_TIMEZONE,
+    hoursOn,
+    days: hoursOn ? weekFrom(obj(hours)) : defaultWeek(),
+    hoursNote: text(s.hours_note),
+    warnAfter: numText(s.off_topic_warn_after, SCOPE_LIMITS.warnDefault),
+    cutoffAfter: numText(s.off_topic_cutoff_after, SCOPE_LIMITS.cutoffDefault),
+    offTopicWarning: langText(s.off_topic_warning),
+    offTopicCutoff: langText(s.off_topic_cutoff),
+  };
+}
+
+/** The config response's `builtin_copy`, for placeholders. Blank when a server predates it. */
+export function builtinCopyOf(cfg: unknown): BuiltinCopy {
+  const b = obj(obj(cfg).builtin_copy);
+  return {
+    refusal: langText(b.refusal),
+    offTopicWarning: langText(b.off_topic_warning),
+    offTopicCutoff: langText(b.off_topic_cutoff),
+  };
+}
+
+/** An empty box is the default; anything else is taken as typed, so '2.5' fails the check
+    rather than being rounded into a threshold nobody chose. */
+function wholeOr(raw: string, fallback: number): number {
+  const v = raw.trim();
+  return v === '' ? fallback : Number(v);
+}
+
+/** The first thing the server would refuse, or null. Off-topic numbers first (they are one
+    card), then the first open day without two different times. Close earlier than open is
+    fine — it is past midnight. */
+export function checkScope(form: ScopeForm): ScopeError | null {
+  const warn = wholeOr(form.warnAfter, SCOPE_LIMITS.warnDefault);
+  const cut = wholeOr(form.cutoffAfter, SCOPE_LIMITS.cutoffDefault);
+  if (!Number.isInteger(warn) || warn < 0 || warn > SCOPE_LIMITS.warnMax
+    || !Number.isInteger(cut) || cut < 0 || cut > SCOPE_LIMITS.cutoffMax) {
+    return { key: 'bot.offtopic.range' };
+  }
+  if (warn > 0 && cut > 0 && cut <= warn) return { key: 'bot.offtopic.order' };
+  if (form.hoursOn) {
+    for (const d of DAY_KEYS) {
+      const day = form.days[d];
+      if (!day.open) continue;
+      const from = hhmm(day.from);
+      const to = hhmm(day.to);
+      if (!from || !to || from === to) return { key: 'bot.hours.invalid', day: d };
+    }
+  }
+  return null;
+}
+
+/** The sub-form's settings keys. Run `checkScope` first — this does not re-validate. */
+export function scopeSettings(form: ScopeForm): Record<string, unknown> {
+  const whole = (raw: string, fallback: number) => {
+    const v = wholeOr(raw, fallback);
+    return Number.isInteger(v) ? v : fallback;
+  };
+  return {
+    answer_policy: form.answerPolicy === 'general' ? 'general' : 'kb_only',
+    business_scope: form.businessScope.trim(),
+    timezone: form.timezone.trim() || DEFAULT_TIMEZONE,
+    opening_hours: form.hoursOn
+      ? Object.fromEntries(DAY_KEYS.map(d => {
+        const day = form.days[d];
+        return [d, day.open ? [{ open: hhmm(day.from), close: hhmm(day.to) }, ...day.rest] : []];
+      }))
+      : null,
+    hours_note: form.hoursNote.trim(),
+    off_topic_warn_after: whole(form.warnAfter, SCOPE_LIMITS.warnDefault),
+    off_topic_cutoff_after: whole(form.cutoffAfter, SCOPE_LIMITS.cutoffDefault),
+    off_topic_warning: nonEmptyLang(form.offTopicWarning),
+    off_topic_cutoff: nonEmptyLang(form.offTopicCutoff),
+  };
+}
+
+/** A settings blob with the sub-form written into it and the legacy policy key removed —
+    everything else in `settings` (the hidden engine knobs included) is left as it was. */
+export function mergeScope(
+  settings: Readonly<Record<string, unknown>>,
+  form: ScopeForm,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...settings, ...scopeSettings(form) };
+  delete out.allow_general_knowledge;
+  return out;
+}
+
+/** The zones the picker offers: the browser's list (plus `UTC`, which V8 omits, and the
+    default), or the short fallback — with a stored zone neither contains shown FIRST, so the
+    picker states the truth instead of an empty trigger a save would overwrite. */
+export function timezoneOptions(
+  current: string,
+  available: readonly string[] = supportedTimezones(),
+): string[] {
+  let list: string[];
+  if (available.length) {
+    list = [...available];
+    for (const z of [DEFAULT_TIMEZONE, 'UTC']) if (!list.includes(z)) list.push(z);
+    list.sort((a, b) => a.localeCompare(b));
+  } else {
+    list = [...TIMEZONE_FALLBACK];
+  }
+  const want = current.trim();
+  if (want && !list.includes(want)) list.unshift(want);
+  return list;
+}
+
+function supportedTimezones(): string[] {
+  const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+  if (typeof intl.supportedValuesOf !== 'function') return [];
+  try {
+    return intl.supportedValuesOf('timeZone');
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------------- the source pill

@@ -152,6 +152,10 @@ def test_sanitize_output_is_the_composition_of_both():
     ("refund", "We will refund you as soon as the parcel arrives."),
     ("guarantee", "I guarantee this will be resolved."),
     ("deadline", "It will be delivered within 3 business days."),
+    # Currency first — how English writes a price, and a gap until 2026-09-14.
+    ("money", "Plans start at $29.99/month."),
+    ("money", "The fee is ₾15."),
+    ("money", "It costs GEL 120 a year."),
     # Russian
     ("money", "Стоимость составляет 50 евро."),
     ("discount", "Мы сделаем вам скидку."),
@@ -188,10 +192,10 @@ def test_detect_commitment_has_known_false_negatives():
     and is trivially evadable; this test is that admission in executable form, so nobody reads
     a green suite as "commitment detection is covered".
 
-    The third one is the sharpest and is worth knowing about specifically: the `money` pattern
-    is written as *digits then currency*, so a symbol-first amount ("$120", "€49") — the normal
-    way to write a price in English — is not detected at all, while the same amount as
-    "120 USD" is. That is a gap a human should close in `COMMITMENT_PATTERNS`, not here.
+    The third used to be a symbol-first amount ("$120"), which the `money` pattern missed
+    because it was written as digits-then-currency. That gap was closed on 2026-09-14 (see the
+    currency-first cases above), exactly as this docstring asked; the example is now an amount
+    written in words, which no digit-based pattern will ever see.
 
     The mitigation is not a longer regex. It is that a commitment reaching a customer is
     *recoverable* — the turn is stored, the operator reviews it, and a human extends the list
@@ -200,7 +204,41 @@ def test_detect_commitment_has_known_false_negatives():
     """
     assert chat_safety.detect_commitment("We will make sure your funds are returned.") is None
     assert chat_safety.detect_commitment("You will have it before the weekend.") is None
-    assert chat_safety.detect_commitment("That will be $120 in total.") is None
+    assert chat_safety.detect_commitment("That will be a hundred and twenty lari in total.") is None
+
+
+@pytest.mark.parametrize("answer, passage", [
+    ("Installation usually takes within 3 business days [1].",
+     "Installation typically takes 3 business days after signing."),
+    ("The Basic plan is $29.99 a month [1].", "Basic plan — 29.99 USD per month."),
+    ("Basic costs 29,99 GEL [1].", "Basic: 29.99 ₾ / month"),
+    ("Students get 10% off [1].", "Students receive a 10 % discount on every plan."),
+    ("We deliver within 2 days [1].", "Delivery: 2 days in Tbilisi, 5 days elsewhere."),
+    ("ამანათი 3 დღეში ჩაბარდება [1].", "მიწოდება — 3 სამუშაო დღე."),
+    # The reply's language and the KB's often differ; numbers and unit stems do not care.
+    ("Installation takes within 3 business days [1].", "ინსტალაცია 3 სამუშაო დღეში."),
+])
+def test_a_commitment_the_given_passages_state_is_not_a_handoff(answer, passage):
+    """The pilot's surprise handoff: the bot quoted the tenant's own installation time."""
+    assert chat_safety.detect_commitment(answer) is not None, answer   # a commitment on its own
+    assert chat_safety.detect_commitment(answer, [{"content": passage}]) is None, (answer, passage)
+
+
+@pytest.mark.parametrize("answer, passage, label", [
+    ("We can install within 1 business day [1].",
+     "Installation typically takes 3 business days.", "deadline"),
+    ("The Basic plan is $19.99 a month [1].", "Basic plan — 29.99 USD per month.", "money"),
+    # The right number next to the wrong kind of thing is not backing.
+    ("It is 3 GEL a month [1].", "We have 3 plans.", "money"),
+    # Each match is checked on its own: one backed figure does not carry an invented one.
+    ("Basic is 29.99 GEL and Pro is 49.99 GEL [1].", "Basic plan — 29.99 GEL per month.", "money"),
+    # Never from a document.
+    ("You don't need a doctor for this [1].", "You don't need a doctor for this.", "assurance"),
+])
+def test_a_commitment_the_passages_do_not_state_still_hands_off(answer, passage, label):
+    assert chat_safety.detect_commitment(answer, [{"content": passage}]) == label
+    # An empty passage list backs nothing either.
+    assert chat_safety.detect_commitment(answer, []) == chat_safety.detect_commitment(answer)
 
 
 # --------------------------------------------------------------------------- #
@@ -226,6 +264,9 @@ def test_should_escalate_honours_tenant_keywords_from_either_config_level():
     ("legal_threat", "I will speak to my lawyer about this"),
     ("legal_threat", "я подам в суд"),
     ("complaint", "let me talk to a real person"),
+    # What the built-in off-topic cut-off copy tells a customer to write.
+    ("complaint", "talk to a person"),
+    ("complaint", "can I speak with an operator"),
     ("complaint", "ეს არის თაღლითობა"),
 ])
 def test_should_escalate_recognises_distress_complaint_and_legal_threat(reason, text):

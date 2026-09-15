@@ -24,9 +24,11 @@ called* install a counter that records the attempt before detonating. "The refus
 tokens" is therefore asserted, not assumed.
 """
 import asyncio
+import dataclasses
 import json
 import time
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -145,6 +147,39 @@ def _fake_answer(monkeypatch, text: str = SAFE_ANSWER, capture: dict | None = No
 
     monkeypatch.setattr(llm, "stream_text", _stream, raising=False)
     monkeypatch.setattr(llm, "call_tool", _tool, raising=False)
+    return calls
+
+
+def _fake_triage(monkeypatch, kind: str, reply: str = "", *, answer_text: str | None = None,
+                 capture: dict | None = None) -> _Calls:
+    """A triage model that answers `{kind, reply}`, plus (optionally) a streaming answer model.
+
+    `calls.tool` counts TRIAGE calls only — a handoff summary is served separately so a path
+    that also summarises does not muddy the count. With `answer_text=None` the answer model
+    detonates: the path under test must not reach it.
+    """
+    from app.services import llm
+
+    calls = _Calls()
+
+    async def _tool(**kw):
+        if kw.get("feature") == "handoff":
+            return {"summary": "Customer needs a colleague.", "customer_goal": "help"}
+        assert kw.get("feature") == "triage", kw.get("feature")
+        calls.tool += 1
+        if capture is not None:
+            capture.update(kw)
+        return {"kind": kind, "reply": reply}
+
+    async def _stream(**kw):
+        calls.stream += 1
+        if answer_text is None:
+            raise AssertionError("the answer model was called on a path that must not reach it")
+        for word in answer_text.split(" "):
+            yield word + " "
+
+    monkeypatch.setattr(llm, "call_tool", _tool, raising=False)
+    monkeypatch.setattr(llm, "stream_text", _stream, raising=False)
     return calls
 
 
@@ -510,22 +545,19 @@ def test_the_copilot_ingest_cannot_ask_for_the_public_engine(api, seed):
 # --------------------------------------------------------------------------- #
 # 4. The refusal costs zero tokens
 # --------------------------------------------------------------------------- #
-def test_refusal_makes_no_llm_call_and_writes_no_usage_row(seed, monkeypatch):
+def test_a_question_the_gate_cannot_ground_never_reaches_the_answer_model(seed, monkeypatch):
     """"I don't know" is a property of the system, not a hope pinned on prompt wording.
 
     conftest's fake embedder returns tenant B's vector for every query, so tenant A's question
-    is unanswerable from A's own KB and the deterministic gate refuses. Two independent
-    witnesses that nothing was spent: the model stubs were never entered, and `llm_usage` —
-    which `services/llm.py` writes on every call, success or failure — gained no row.
+    is unanswerable from A's own KB. Since 2026-09-14 such a message may spend ONE small triage
+    call (no passages) to learn whether it is small talk, off-topic or a business question —
+    here the stub says business — and then gets the refusal and a colleague. What it can never
+    do is reach the answer model: the stream stub was never entered. (The exits that still
+    spend nothing at all are asserted in `test_the_free_exits_spend_nothing`.)
     """
-    calls = _no_model(monkeypatch)
+    calls = _fake_triage(monkeypatch, "business")
     client_id = seed["a"]["client_id"]
 
-    def _usage_rows() -> int:
-        return sql(lambda c: c.fetchval(
-            "SELECT count(*) FROM llm_usage WHERE client_id = $1", uuid.UUID(client_id)))
-
-    before = _usage_rows()
     events = _with_db(lambda: _collect(
         chat.run_answer(_ctx(client_id, cfg={"autopilot_enabled": True}))))
     done = _done(events)
@@ -538,11 +570,11 @@ def test_refusal_makes_no_llm_call_and_writes_no_usage_row(seed, monkeypatch):
     # (`chat._disclosed`), so the refusal copy is the START of what the customer sees.
     assert done["reply"]["text"].startswith(chat_prompts.refusal_text({}, "en"))
     assert done["handoff"]["recommended"] is True
-    # The handoff summary is the customer's own last message — no second model call either.
+    # The handoff summary is the customer's own last message — no summary call either.
     assert done["handoff"]["summary"] == QUESTION
 
-    assert calls.total == 0, "the refusal path called the model"
-    assert _usage_rows() == before, "a refusal wrote an llm_usage row"
+    assert calls.stream == 0, "an ungrounded question reached the answer model"
+    assert calls.tool <= 1
     # And nothing of tenant B's leaked while refusing.
     assert B_MARK not in json.dumps(events, default=str)
 
@@ -569,7 +601,8 @@ def test_keyword_only_is_ungrounded_for_the_public_bot_but_grounded_for_the_copi
 
     _stub_retrieval(monkeypatch, KEYWORD_RESULT)
     _stub_kill_switch(monkeypatch)
-    calls = _no_model(monkeypatch)
+    # Triage may read the message (it is given no passages); the answer model must not run.
+    calls = _fake_triage(monkeypatch, "business")
 
     # The tenant asked for strict=False. The public bot overrules them.
     events = _drain(lambda: chat.run_answer(
@@ -579,7 +612,8 @@ def test_keyword_only_is_ungrounded_for_the_public_bot_but_grounded_for_the_copi
     assert done["grounding"]["grounded"] is False
     assert done["grounding"]["reason"] == chat.REASON_KEYWORD_ONLY
     assert done["reply"]["answered_from_kb"] is False
-    assert calls.total == 0, "a keyword-only hit reached the model on the public bot"
+    assert done["handoff"]["recommended"] is True
+    assert calls.stream == 0, "a keyword-only hit reached the answer model on the public bot"
 
     # The copilot, given the identical retrieval result, proceeds.
     from app.services import llm
@@ -599,46 +633,264 @@ def test_keyword_only_is_ungrounded_for_the_public_bot_but_grounded_for_the_copi
 
 
 # --------------------------------------------------------------------------- #
-# 6. General knowledge is opt-in
+# 6. What the bot does with a message the documents do not settle (2026-09-14)
+#
+# The first pilot conversation: "what day is today?" refused, "list the planets" answered at
+# full cost because the follow-up window matched, and a KB-stated installation time handed the
+# customer to a queue. Each test below is one of those, or the policy that replaced the old
+# `allow_general_knowledge` flag.
 # --------------------------------------------------------------------------- #
-def test_general_knowledge_fallback_is_off_unless_explicitly_opted_in(monkeypatch):
-    """ADR-001 open decision #1, built as configuration rather than code.
+WEAK_RESULT = {"method": "vector", "top_score": 0.62, "kb_present": True,
+               "hits": [_hit(PUBLIC_MARK, score=0.62)], "query_top_scores": [0.38, 0.62]}
+EMPTY_KB_RESULT = {"method": "none", "top_score": None, "kb_present": False, "hits": []}
+PINNED_NOW = datetime(2026, 9, 14, 11, 42, tzinfo=timezone.utc)     # 15:42 in Tbilisi, a Monday
+CID = "11111111-1111-1111-1111-111111111111"
+ON = {"autopilot_enabled": True}
+INSTALL = "Installation typically takes 3 business days after the contract is signed."
 
-    Default: no good KB answer ⇒ the tenant's refusal copy plus a human, never improvisation.
-    A tenant who wants the other behaviour sets one flag; the answer is still marked
-    ungrounded and still handed off, because we just told a customer something the tenant's
-    own KB does not say.
-    """
-    assert chat.DEFAULTS["allow_general_knowledge"] is False
-    assert chat_prompts.general_knowledge_allowed({}) is False
-    assert chat_prompts.general_knowledge_allowed({"settings": {}}) is False
+
+def _run(ctx: chat.ChatContext) -> dict:
+    return _done(_drain(lambda: chat.run_answer(ctx)))
+
+
+def test_answer_policy_defaults_to_kb_only_and_reads_the_legacy_flag():
+    """ADR-001 open decision #1, resolved as configuration. A row saved before the policy
+    existed carries only the old boolean; the new key wins wherever both are present."""
+    assert chat.DEFAULTS["answer_policy"] == "kb_only"
+    assert chat_prompts.answer_policy({}) == "kb_only"
+    assert chat_prompts.answer_policy({"settings": {"allow_general_knowledge": True}}) == "general"
+    assert chat_prompts.answer_policy({"settings": {"allow_general_knowledge": "yes"}}) == "kb_only"
+    assert chat_prompts.answer_policy(
+        {"settings": {"answer_policy": "kb_only", "allow_general_knowledge": True}}) == "kb_only"
+    assert chat_prompts.answer_policy({"settings": {"answer_policy": "general"}}) == "general"
+    assert chat_prompts.answer_policy({"settings": {"answer_policy": "anything"}}) == "kb_only"
+
+
+def test_what_day_is_it_is_answered_from_the_business_clock(monkeypatch):
+    """Nothing in the KB, default policy: one triage call whose prompt carries the tenant's
+    LOCAL date and time, and its short answer goes out — no refusal, no handoff."""
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+    seen: dict = {}
+    calls = _fake_triage(monkeypatch, "chitchat", "Today is Monday, 14 September.", capture=seen)
+
+    done = _run(dataclasses.replace(_ctx(CID, cfg=ON, text="hey what day is today?"),
+                                    now=PINNED_NOW))
+
+    assert "Monday, 14 September 2026, 15:42 (Asia/Tbilisi, UTC+04:00)" in seen["user"]
+    assert done["reply"]["text"].startswith("Today is Monday, 14 September.")
+    assert done["handoff"]["recommended"] is False
+    assert done["scope"]["kind"] == "chitchat" and done["scope"]["answered"] is True
+    assert done["reply"]["answered_from_kb"] is False
+    assert (calls.tool, calls.stream) == (1, 0)
+
+
+def test_general_and_chitchat_answers_are_ready_not_refused():
+    from app.routers import chat as chat_router
+
+    assert chat_router._state_for({"grounding": {"grounded": False},
+                                   "scope": {"answered": True}}) == "ready"
+    assert chat_router._state_for({"grounding": {"grounded": False},
+                                   "scope": {"answered": False}}) == "refused"
+    assert chat_router._state_for({"grounding": {"grounded": True}, "scope": None}) == "ready"
+
+
+def test_the_follow_up_window_no_longer_grounds_an_unrelated_question(monkeypatch):
+    """The window prepends the bot's last line, which named the company, so an unrelated
+    question fused to a good score and went straight to a full answer. The customer's OWN
+    score now decides whether triage is skipped."""
+    grounded, _ = chat.gate(WEAK_RESULT, {})
+    assert grounded is True
+    assert chat.own_score(WEAK_RESULT) == 0.38
+    assert chat.direct_match(WEAK_RESULT, {}, grounded) is False
+    # No per-query scores (an older retrieval, a stub): the fused top stands in.
+    assert chat.direct_match(VECTOR_RESULT, {}, True) is True
+    # The tenant's own min_score still raises the bar above direct_min_score.
+    assert chat.direct_match({**WEAK_RESULT, "query_top_scores": [0.55, 0.62]},
+                             {"min_score": 0.6}, True) is False
+
+    _stub_retrieval(monkeypatch, WEAK_RESULT)
+    _stub_kill_switch(monkeypatch)
+    calls = _fake_triage(monkeypatch, "off_topic", "I can only help with our services.")
+    done = _run(_ctx(CID, cfg=ON, text="list me planets of our solar system"))
+    assert calls.stream == 0
+    assert done["grounding"]["grounded"] is False
+    assert done["grounding"]["reason"] == chat.REASON_WEAK_MATCH
+
+
+def test_off_topic_is_redirected_then_warned_then_cut_off_without_a_handoff(monkeypatch):
+    """Warn at 3, stop at 5 (the defaults). The router carries the count in; the engine returns
+    the new count in `scope.off_topic`. Nothing hands off: the customer can still ask a real
+    question, or ask for a person."""
+    from app.services import chat_copy
 
     _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
     _stub_kill_switch(monkeypatch)
-    client_id = "11111111-1111-1111-1111-111111111111"
+    calls = _fake_triage(monkeypatch, "off_topic", "I can only help with our internet plans.")
 
-    # --- default: refuse, no tokens ---
+    first = _run(_ctx(CID, cfg=ON, text="list the planets"))
+    assert first["scope"]["off_topic"] == {"count": 1, "warn_after": 3, "cutoff_after": 5,
+                                           "state": "ok"}
+    assert first["reply"]["text"].startswith("I can only help with our internet plans.")
+    assert chat_copy.DEFAULT_OFF_TOPIC_WARNING["en"] not in first["reply"]["text"]
+    assert first["handoff"]["recommended"] is False
+    assert first["reply"]["answered_from_kb"] is False
+
+    third = _run(dataclasses.replace(_ctx(CID, cfg=ON, text="and their moons?"),
+                                     off_topic_count=2))
+    assert third["scope"]["off_topic"]["count"] == 3
+    assert third["scope"]["off_topic"]["state"] == "warned"
+    assert chat_copy.DEFAULT_OFF_TOPIC_WARNING["en"] in third["reply"]["text"]
+
+    fifth = _run(dataclasses.replace(_ctx(CID, cfg=ON, text="write me a poem"),
+                                     off_topic_count=4))
+    assert fifth["scope"]["off_topic"]["state"] == "cut_off"
+    assert fifth["reply"]["text"].startswith(chat_copy.DEFAULT_OFF_TOPIC_CUTOFF["en"])
+    assert fifth["handoff"]["recommended"] is False
+    assert calls.tool == 3
+
+    # Past the cut-off: no model call at all for a message the documents do not clearly cover…
+    silent = _no_model(monkeypatch)
+    after = _run(dataclasses.replace(_ctx(CID, cfg=ON, text="one more joke"), off_topic_count=5))
+    assert after["scope"]["source"] == "cutoff"
+    assert after["reply"]["text"].startswith(chat_copy.DEFAULT_OFF_TOPIC_CUTOFF["en"])
+    assert after["handoff"]["recommended"] is False
+    assert silent.total == 0
+
+    # …while a question the documents DO clearly cover is still answered.
+    _stub_retrieval(monkeypatch, VECTOR_RESULT)
+    answer = _fake_answer(monkeypatch)
+    real = _run(dataclasses.replace(_ctx(CID, cfg=ON), off_topic_count=9))
+    assert real["scope"]["source"] == "direct" and real["grounding"]["grounded"] is True
+    assert answer.stream == 1
+
+
+def test_the_free_exits_spend_nothing(monkeypatch):
+    """What still costs zero tokens: a KB with nothing published (and both off switches, and
+    the cut-off above)."""
+    _stub_retrieval(monkeypatch, EMPTY_KB_RESULT)
+    _stub_kill_switch(monkeypatch)
     calls = _no_model(monkeypatch)
-    done = _done(_drain(lambda: chat.run_answer(
-        _ctx(client_id, cfg={"autopilot_enabled": True}))))
-    assert done["reply"]["text"].startswith(chat_prompts.refusal_text({}, "en"))
-    assert done["reply"]["answered_from_kb"] is False
-    assert done["reply"]["citations"] == []
+    done = _run(_ctx(CID, cfg=ON, text="what are your prices?"))
     assert done["handoff"]["recommended"] is True
+    assert done["scope"]["source"] == "refusal"
     assert calls.total == 0
 
-    # --- opted in, via the `settings` jsonb (no schema change needed) ---
-    calls = _fake_answer(monkeypatch, text="Generally, orders ship in a few days.")
-    done = _done(_drain(lambda: chat.run_answer(
-        _ctx(client_id, cfg={"autopilot_enabled": True,
-                             "settings": {"allow_general_knowledge": True}}))))
-    assert calls.stream == 1, "the opt-in did not reach the model"
-    assert done["reply"]["text"].startswith("Generally, orders ship in a few days.")
-    # Ungrounded even though it answered, and handed to a human on the way out.
-    assert done["grounding"]["grounded"] is False
-    assert done["reply"]["answered_from_kb"] is False
+
+def test_a_business_question_goes_to_the_documents_or_to_a_colleague(monkeypatch):
+    _stub_kill_switch(monkeypatch)
+
+    # Nothing the gate can stand on: the refusal and a handoff; the answer model never runs.
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    calls = _fake_triage(monkeypatch, "business")
+    refused = _run(_ctx(CID, cfg=ON, text="how much is it?"))
+    assert refused["handoff"]["recommended"] is True
+    assert refused["handoff"]["reason"] == chat.REASON_NO_HITS
+    assert refused["scope"]["kind"] == "business"
+    assert calls.stream == 0
+
+    # A follow-up the window matched but the customer's own words did not: triage says
+    # business, so the grounded answer runs with the passages.
+    _stub_retrieval(monkeypatch, WEAK_RESULT)
+    calls = _fake_triage(monkeypatch, "business", answer_text=SAFE_ANSWER)
+    done = _run(_ctx(CID, cfg=ON, text="and how much?"))
+    assert (calls.tool, calls.stream) == (1, 1)
+    assert done["grounding"]["grounded"] is True
+    assert done["scope"]["source"] == "triage" and done["scope"]["kind"] == "business"
+    assert done["reply"]["answered_from_kb"] is True
+
+
+def test_a_related_question_gets_general_knowledge_only_under_the_general_policy(monkeypatch):
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+    question = "which doctor should i book for a broken leg?"
+    general_reply = ("An orthopaedist (a trauma specialist) treats broken bones — this is general "
+                     "information, not our own.")
+
+    _fake_triage(monkeypatch, "related", general_reply)
+    strict = _run(_ctx(CID, cfg=ON, text=question))
+    assert strict["reply"]["text"].startswith(chat_prompts.refusal_text({}, "en"))
+    assert strict["handoff"]["reason"] == chat.REASON_RELATED_NOT_IN_KB
+
+    seen: dict = {}
+    _fake_triage(monkeypatch, "related", general_reply, capture=seen)
+    general = _run(_ctx(CID, cfg={**ON, "settings": {"answer_policy": "general"}}, text=question))
+    assert general["reply"]["text"].startswith(general_reply)
+    assert general["handoff"]["recommended"] is False
+    assert general["scope"]["policy"] == "general" and general["scope"]["answered"] is True
+    assert "a short, helpful general answer" in seen["system"]
+
+    # Written without the documents, so any price in it is unbacked by definition.
+    _fake_triage(monkeypatch, "related", "It usually costs about $50 elsewhere.")
+    priced = _run(_ctx(CID, cfg={**ON, "settings": {"answer_policy": "general"}}, text=question))
+    assert priced["handoff"]["reason"] == "commitment:money"
+
+
+def test_a_risky_message_gets_the_emergency_number_first_and_a_colleague(monkeypatch):
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+    _fake_triage(monkeypatch, "risky", "")
+    done = _run(_ctx(CID, cfg=ON, text="my father fell and cannot move his leg"))
     assert done["handoff"]["recommended"] is True
-    assert done["handoff"]["reason"] == "ungrounded_answer"
+    assert done["handoff"]["reason"] == chat.REASON_RISKY
+    # The model wrote nothing, so the built-in safety notice went out.
+    assert "call 112 now" in done["reply"]["text"]
+    assert done["scope"]["kind"] == "risky"
+
+
+def test_asking_for_a_person_gets_the_handoff_notice_not_the_refusal(monkeypatch):
+    from app.services import chat_copy
+
+    _stub_kill_switch(monkeypatch)
+    _no_model(monkeypatch)    # the handoff summary falls back to the transcript
+    person = _run(_ctx(CID, cfg=ON, text="can I talk to a person please"))
+    assert person["reply"]["text"].startswith(chat_copy.DEFAULT_HANDOFF_NOTICE["en"])
+    assert person["handoff"]["reason"] == "escalation:complaint"
+
+    emergency = _run(_ctx(CID, cfg=ON, text="this is an emergency"))
+    assert emergency["reply"]["text"].startswith("If you or someone else may be in danger")
+    assert "call 112 now" in emergency["reply"]["text"]
+    assert emergency["handoff"]["reason"] == "escalation:distress"
+
+
+def test_a_failed_triage_hands_off_with_llm_error(monkeypatch):
+    from app.services import llm
+
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+
+    async def _tool(**kw):
+        raise llm.LLMBusyError("busy")
+
+    monkeypatch.setattr(llm, "call_tool", _tool, raising=False)
+    events = _drain(lambda: chat.run_answer(_ctx(CID, cfg=ON, text="hello")))
+    assert "error" in _names(events)
+    done = _done(events)
+    assert done["handoff"]["reason"] == chat.REASON_LLM_ERROR
+    assert done["reply"]["text"].startswith(chat_prompts.refusal_text({}, "en"))
+
+
+def test_a_deadline_the_documents_state_does_not_hand_off_but_an_invented_one_does(monkeypatch):
+    """The pilot's automatic "Connecting you to an operator…": the bot quoted the tenant's own
+    installation time and the commitment regex called it a promise."""
+    _stub_kill_switch(monkeypatch)
+    _stub_retrieval(monkeypatch, {"method": "vector", "top_score": 0.9, "kb_present": True,
+                                  "hits": [_hit(INSTALL, score=0.9)]})
+    question = "how fast do you install?"
+
+    _fake_answer(monkeypatch, text="Installation is usually done within 3 business days [1].")
+    backed = _run(_ctx(CID, cfg=ON, text=question))
+    assert backed["handoff"]["recommended"] is False, backed["handoff"]
+
+    _fake_answer(monkeypatch, text="We can install within 1 business day [1].")
+    invented = _run(_ctx(CID, cfg=ON, text=question))
+    assert invented["handoff"]["reason"] == "commitment:deadline"
+
+    # The strict behaviour is one hidden setting away.
+    _fake_answer(monkeypatch, text="Installation is usually done within 3 business days [1].")
+    strict = _run(_ctx(CID, cfg={**ON, "settings": {"handoff_on_kb_commitments": True}},
+                       text=question))
+    assert strict["handoff"]["reason"] == "commitment:deadline"
 
 
 # --------------------------------------------------------------------------- #
@@ -652,7 +904,7 @@ def test_tenant_a_bot_never_retrieves_tenant_b_chunks(seed, monkeypatch):
     the worst case — and B's document is `visibility='public'`, so publishability offers no
     accidental protection here. Only `client_id` does.
     """
-    calls = _no_model(monkeypatch)
+    calls = _fake_triage(monkeypatch, "business")
     a = seed["a"]["client_id"]
 
     events = _with_db(lambda: _collect(
@@ -662,7 +914,7 @@ def test_tenant_a_bot_never_retrieves_tenant_b_chunks(seed, monkeypatch):
     assert B_MARK not in body, "LEAK: tenant B's KB reached tenant A's public bot"
     assert seed["b"]["document_id"] not in body
     assert _done(events)["client_id"] == a
-    assert calls.total == 0
+    assert calls.stream == 0
 
     # One layer down, both filters, both directions.
     async def _probe():

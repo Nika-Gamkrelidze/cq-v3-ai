@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BOT_SOURCE, RUBRIC_SOURCE, checkKeyterms, defaultsPayload, formFromConfig, formFromDefaults,
-  formatIds, keyState, killListAfter, killRowState, languageCodes, parseKeyterms, parseOverrides,
-  payloadFromForm, sourcePill,
+  BOT_SOURCE, DAY_KEYS, RUBRIC_SOURCE, TIMEZONE_FALLBACK, builtinCopyOf, checkKeyterms, checkScope,
+  defaultsPayload, formFromConfig, formFromDefaults, formatIds, keyState, killListAfter,
+  killRowState, languageCodes, parseKeyterms, parseOverrides, payloadFromForm, sourcePill,
+  timezoneOptions,
 } from '../../app/console/logic.ts';
 
 /* The operator console's decisions. Every one of these was an inline expression inside a render
@@ -65,10 +66,18 @@ test('parseOverrides: a negative or unparseable cap fails the whole submit', () 
   assert.equal(parseOverrides({ max_audio_mb: 'lots' }).ok, false);
 });
 
-test('formFromConfig: the risky knob is off unless it is literally true', () => {
-  assert.equal(formFromConfig({}).allowGeneral, false);
-  assert.equal(formFromConfig({ settings: { allow_general_knowledge: 'yes' } }).allowGeneral, false);
-  assert.equal(formFromConfig({ settings: { allow_general_knowledge: true } }).allowGeneral, true);
+test('formFromConfig: the answer policy is documents-only unless something literally says general', () => {
+  const policy = (settings: Record<string, unknown>) => formFromConfig({ settings }).scope.answerPolicy;
+  assert.equal(formFromConfig({}).scope.answerPolicy, 'kb_only');
+  // A config saved before `answer_policy` existed: only a literal `true` reads as general.
+  assert.equal(policy({ allow_general_knowledge: 'yes' }), 'kb_only');
+  assert.equal(policy({ allow_general_knowledge: true }), 'general');
+  // The new key wins over the legacy one, in both directions…
+  assert.equal(policy({ answer_policy: 'kb_only', allow_general_knowledge: true }), 'kb_only');
+  assert.equal(policy({ answer_policy: 'general', allow_general_knowledge: false }), 'general');
+  // …but an unknown word is not a policy, so the legacy key decides again.
+  assert.equal(policy({ answer_policy: 'sometimes', allow_general_knowledge: true }), 'general');
+  assert.equal(policy({ answer_policy: 'sometimes' }), 'kb_only');
   // The mirror image: the handoff summary is on unless it is literally false.
   assert.equal(formFromConfig({}).handoffSummary, true);
   assert.equal(formFromConfig({ settings: { handoff_summary: false } }).handoffSummary, false);
@@ -137,6 +146,146 @@ test('payloadFromForm: canned snippets are carried through untouched', () => {
   const cfg = { canned: [{ q: 'hours', a: '9-5' }] };
   assert.deepEqual(payloadFromForm(formFromConfig(cfg), cfg).canned, [{ q: 'hours', a: '9-5' }]);
   assert.deepEqual(payloadFromForm(formFromConfig({}), {}).canned, []);
+});
+
+/* ------------------------------------- answer policy, opening hours, off-topic */
+
+test('payloadFromForm: writes answer_policy and drops the legacy key the spread would carry', () => {
+  const cfg = { settings: { allow_general_knowledge: true } };
+  const settings = payloadFromForm(formFromConfig(cfg), cfg).settings;
+  assert.equal(settings.answer_policy, 'general');
+  assert.equal('allow_general_knowledge' in settings, false);
+  // Narrowing it back is written just as explicitly.
+  const form = formFromConfig(cfg);
+  form.scope.answerPolicy = 'kb_only';
+  assert.equal(payloadFromForm(form, cfg).settings.answer_policy, 'kb_only');
+});
+
+test('payloadFromForm: the engine knobs with no UI survive a save', () => {
+  const cfg = { settings: { direct_min_score: 0.6, handoff_on_kb_commitments: true, emergency_number: '911' } };
+  const settings = payloadFromForm(formFromConfig(cfg), cfg).settings;
+  assert.equal(settings.direct_min_score, 0.6);
+  assert.equal(settings.handoff_on_kb_commitments, true);
+  assert.equal(settings.emergency_number, '911');
+});
+
+test('formFromConfig: scope defaults — Tbilisi, warn at 3, stop at 5, hours not configured', () => {
+  const s = formFromConfig({}).scope;
+  assert.equal(s.timezone, 'Asia/Tbilisi');
+  assert.equal(s.warnAfter, '3');
+  assert.equal(s.cutoffAfter, '5');
+  assert.equal(s.hoursOn, false);
+  // The week waiting behind the unticked box: Mon–Fri 09:00–18:00, the weekend closed.
+  assert.deepEqual(s.days.mon, { open: true, from: '09:00', to: '18:00', rest: [] });
+  assert.equal(s.days.fri.open, true);
+  assert.equal(s.days.sat.open, false);
+  assert.equal(s.days.sun.open, false);
+  // A stored 0 means "never" and must not be replaced by the default.
+  const zero = formFromConfig({ settings: { off_topic_warn_after: 0, off_topic_cutoff_after: 0 } }).scope;
+  assert.equal(zero.warnAfter, '0');
+  assert.equal(zero.cutoffAfter, '0');
+});
+
+test('payloadFromForm: hours off are null; on, all seven days with a closed day as []', () => {
+  const form = formFromConfig({});
+  assert.equal(payloadFromForm(form, null).settings.opening_hours, null);
+  form.scope.hoursOn = true;
+  const hours = payloadFromForm(form, null).settings.opening_hours as Record<string, unknown>;
+  assert.deepEqual(Object.keys(hours), [...DAY_KEYS]);
+  assert.deepEqual(hours.mon, [{ open: '09:00', close: '18:00' }]);
+  assert.deepEqual(hours.sat, []);
+  // Every day closed is still a configured week, not "not configured".
+  for (const d of DAY_KEYS) form.scope.days[d].open = false;
+  assert.deepEqual(payloadFromForm(form, null).settings.opening_hours,
+    Object.fromEntries(DAY_KEYS.map(d => [d, []])));
+});
+
+test('stored hours round-trip: extra intervals kept, a missing day closed, past midnight allowed', () => {
+  const cfg = { settings: { opening_hours: {
+    mon: [{ open: '09:00', close: '13:00' }, { open: '14:00', close: '18:00' }],
+    tue: [{ open: '9:30', close: '02:00' }],
+    sat: [],
+  } } };
+  const form = formFromConfig(cfg);
+  assert.equal(form.scope.hoursOn, true);
+  assert.deepEqual(form.scope.days.mon, {
+    open: true, from: '09:00', to: '13:00', rest: [{ open: '14:00', close: '18:00' }],
+  });
+  assert.equal(form.scope.days.tue.from, '09:30');       // padded, not shown as an empty box
+  assert.equal(form.scope.days.wed.open, false);         // absent from the object = closed
+  assert.equal(checkScope(form.scope), null);            // 09:30–02:00 is past midnight, not an error
+  const hours = payloadFromForm(form, cfg).settings.opening_hours as Record<string, unknown>;
+  assert.deepEqual(hours.mon, [{ open: '09:00', close: '13:00' }, { open: '14:00', close: '18:00' }]);
+  assert.deepEqual(hours.tue, [{ open: '09:30', close: '02:00' }]);
+  assert.deepEqual(hours.wed, []);
+  // Closing the day sends [] — the split shift goes with it.
+  form.scope.days.mon.open = false;
+  assert.deepEqual((payloadFromForm(form, cfg).settings.opening_hours as Record<string, unknown>).mon, []);
+});
+
+test('payloadFromForm: off-topic copy sends only the languages with text', () => {
+  const cfg = { settings: { off_topic_warning: { en: 'Let us stay on topic.', ka: '  ' } } };
+  const form = formFromConfig(cfg);
+  form.scope.offTopicCutoff.ru = ' Давайте вернёмся к теме. ';
+  const settings = payloadFromForm(form, cfg).settings;
+  assert.deepEqual(settings.off_topic_warning, { en: 'Let us stay on topic.' });
+  assert.deepEqual(settings.off_topic_cutoff, { ru: 'Давайте вернёмся к теме.' });
+  assert.equal(settings.off_topic_warn_after, 3);
+  assert.equal(settings.off_topic_cutoff_after, 5);
+});
+
+test('checkScope: stop must come after warn unless one is off, and numbers stay in range', () => {
+  const scope = () => formFromConfig({}).scope;
+  assert.equal(checkScope(scope()), null);
+  const s = scope();
+  s.warnAfter = '5'; s.cutoffAfter = '5';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.order' });
+  s.cutoffAfter = '4';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.order' });
+  s.cutoffAfter = '0';                                   // 0 = never stop
+  assert.equal(checkScope(s), null);
+  s.warnAfter = '0'; s.cutoffAfter = '2';                // 0 = never warn
+  assert.equal(checkScope(s), null);
+  s.warnAfter = '51';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.range' });
+  s.warnAfter = '2.5';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.range' });
+  s.warnAfter = '-1';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.range' });
+  s.warnAfter = '1'; s.cutoffAfter = '101';
+  assert.deepEqual(checkScope(s), { key: 'bot.offtopic.range' });
+});
+
+test('checkScope: an open day needs two different times, and only while hours are on', () => {
+  const s = formFromConfig({}).scope;
+  s.days.wed.to = '';
+  assert.equal(checkScope(s), null);                     // hours off: the week is not sent
+  s.hoursOn = true;
+  assert.deepEqual(checkScope(s), { key: 'bot.hours.invalid', day: 'wed' });
+  s.days.wed.to = s.days.wed.from;
+  assert.deepEqual(checkScope(s), { key: 'bot.hours.invalid', day: 'wed' });
+  s.days.wed.open = false;                               // a closed day's boxes do not matter
+  assert.equal(checkScope(s), null);
+  s.days.sun.open = true; s.days.sun.from = '22:00'; s.days.sun.to = '02:00';
+  assert.equal(checkScope(s), null);
+});
+
+test('timezoneOptions: the stored zone is always offered, and UTC is never missing', () => {
+  // No Intl list: the short fallback, as it is.
+  assert.deepEqual(timezoneOptions('Asia/Tbilisi', []), [...TIMEZONE_FALLBACK]);
+  // V8's list has no plain UTC; it is added, and a stored zone the list lacks is shown first.
+  const opts = timezoneOptions('Europe/Kiev', ['Europe/Berlin', 'Asia/Tbilisi']);
+  assert.equal(opts[0], 'Europe/Kiev');
+  assert.ok(opts.includes('UTC'));
+  assert.ok(opts.includes('Asia/Tbilisi'));
+  assert.equal(timezoneOptions('UTC', ['UTC', 'Asia/Tbilisi']).filter(z => z === 'UTC').length, 1);
+});
+
+test('builtinCopyOf: the engine wording per language, blank when a server does not send it', () => {
+  const b = builtinCopyOf({ builtin_copy: { refusal: { en: 'Sorry.', ka: 'ბოდიში.' }, off_topic_cutoff: 'nope' } });
+  assert.deepEqual(b.refusal, { en: 'Sorry.', ka: 'ბოდიში.', ru: '' });
+  assert.deepEqual(b.offTopicCutoff, { en: '', ka: '', ru: '' });
+  assert.deepEqual(builtinCopyOf(null).offTopicWarning, { en: '', ka: '', ru: '' });
 });
 
 /* ------------------------------------------------------- the transcription defaults */

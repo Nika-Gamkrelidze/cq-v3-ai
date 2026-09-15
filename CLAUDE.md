@@ -185,7 +185,7 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   operator. Per-tenant settings live in the portal's **BOT** tab (`/chat/config`), the inherited
   baseline in the console's **Default bot** tab (`/admin/chat/default-config`), and the operator
   brake in *Bot control* (kill switch). Token usage is metered per tenant in `llm_usage`
-  (`feature = autopilot | copilot | handoff`). Contract for the chat-side team:
+  (`feature = autopilot | triage | copilot | handoff`). Contract for the chat-side team:
   `docs/CHAT_INTEGRATION.md`; paste-ready Claude Code prompt for their repo: `docs/CHAT_SIDE_PROMPT.md`.
   **The consumer is Swift Chat ("CQ Chat")** — `swiftchat-server` (Express + Prisma + Socket.IO,
   `src/services/cq/*`, `src/routes/cqRouter.ts`) and `swiftchat-suite` (React dashboards + the
@@ -197,6 +197,15 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `closed`. Customer socket events: `session:ai-state`, `session:request-human`. Inline `[n]`
   citation markers are **stripped** from bot replies on every channel; operators get citations in
   the copilot panel.
+  **What the bot answers (2026-09-14):** a message whose own words strongly match the shared
+  documents goes straight to the grounded answer; anything else gets one small **triage** call
+  (no passages) that sorts it into business (→ documents or refusal + colleague) / related
+  (→ a labelled general answer under `answer_policy: general`, refusal + colleague under
+  `kb_only`) / chitchat incl. today's date, time and opening hours / off_topic (one-line
+  redirect, counted per conversation: warning at `off_topic_warn_after`, then the **cut-off** at
+  `off_topic_cutoff_after` — canned copy, no model call, **no handoff**) / risky (emergency number
+  first + colleague). Set per workspace in the BOT tab (policy, "about the business", time zone +
+  weekly hours, off-topic thresholds and copy) and inherited from *Default bot*.
 - **KB curation loop** (`routers/curation.py`, `services/curation/{miner,cluster,propose,apply,
   runner}.py`, `db/curation.sql`, run by `cq-worker`): nightly, per tenant (staggered 02:00–05:00
   UTC), chat turns + call transcripts are mined → clustered → turned into KB **add / update /
@@ -335,6 +344,35 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (`app_settings.default_chat_config`) ← the tenant's active `chat_configs` row; `is_default` in
   the response tells the UI which layer it is looking at. Keep the default free of raw SQL in
   `chat_store.py` — `tests/test_chat_store_sql.py` fails any statement there without `client_id`.
+- **The public bot's scope decisions (`chat.run_answer`, 2026-09-14) — do not undo these:**
+  - **Never decide "grounded enough to answer" from the fused `top_score` alone.** The follow-up
+    window prepends the bot's last line, which names the company, so an unrelated question fuses
+    to a good score (the pilot's "list the planets"). `direct_match` uses the customer's OWN score
+    (`retrieval.query_top_scores[0]`) ≥ max(`min_score`, `direct_min_score` 0.5). Most stored
+    configs carry `min_score: 0.35`, which equals retrieval's floor and therefore filters nothing.
+  - **Zero-token exits are only:** kill switch, autopilot off, nothing published (`kb_present`
+    false/null), and the off-topic cut-off. Every other refusal spends ONE `triage` call (forced
+    tool-use, `chat_prompts.TRIAGE_TOOL`) and never the answer model. `answer_policy` changes only
+    the `related` row; the legacy `allow_general_knowledge: true` reads as `general`.
+  - **The off-topic count lives in `chat_conversations.metadata.off_topic_count`**, read in the
+    router's `_build_context` and written by `_record_off_topic` beside `_persist` (the engine
+    still owns no persistence). It is a per-conversation total; the cut-off never hands off and
+    never blocks a message that matches the documents directly.
+  - **A commitment a given passage states does not hand off** (`detect_commitment(text,
+    passages)`: numbers + a same-kind unit near them, or the matched words); `assurance` always
+    does; `settings.handoff_on_kb_commitments: true` restores "every commitment to a human".
+    General/chitchat replies are checked with no passages, so any figure in them hands off.
+  - **Business clock:** `chat_hours.clock_text` goes into the USER block of every autopilot call
+    (the system prompt must stay cacheable). `settings.timezone` defaults to `Asia/Tbilisi`;
+    `tzdata` is in `requirements.txt` so zoneinfo never depends on the image's OS package.
+  - **Customer copy:** built-in wording is in `services/chat_copy.py` (refusal, handoff notice,
+    safety notice with `{number}` = `settings.emergency_number` default 112, off-topic redirect /
+    warning / cut-off). Escalations send the handoff or safety notice, not the refusal copy.
+    `GET /v1/chat/config` carries `handoff_notice`, which Swift Chat sends on its own failure
+    handoffs; config reads carry `builtin_copy` for the console placeholders.
+  - **Envelope:** `turn.scope` (policy, source, kind, answered, off_topic); `state` is `ready`
+    when grounded OR `scope.answered`. New handoff reasons `risky`, `related_not_in_kb`; new
+    grounding reason `weak_match`; `ungrounded_answer` is no longer produced.
 
 ---
 
@@ -403,7 +441,8 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   5. Console → *Tenants*: copy the pilot tenant's `client_id` uuid in **lower case** (Swift Chat
      rejects slugs).
   6. Pilot workspace → KB tab: share at least one document with the bot (`visibility=public`).
-  7. Pilot workspace → BOT tab: languages, refusal copy per language, escalation keywords, tick
+  7. Pilot workspace → BOT tab: languages, refusal copy per language, escalation keywords, answer
+     policy, "about the business", time zone + opening hours, off-topic thresholds, tick
      Autopilot, Save (a 409 means no public document yet).
   8. Console → *Bot control* → *Chat connections* → New: **all four scopes** (`chat:turn`,
      `chat:suggest`, `chat:answer`, `chat:sync` — the GDPR purge needs `chat:sync`), tick the
@@ -415,15 +454,18 @@ One principal resolver produces `superadmin | tenant | anonymous`:
       import), base URL `https://ai.communiq.ge/api` → Test connection. Admin dashboard → *AI
       Assistant (CQ)*: paste the `client_id` → Save → Test connection (health ok +
       `autopilot_enabled: true`) → switch on *Let the bot answer first*.
-  11. Probe from the widget: grounded question → bot answer with the disclosure line; off-KB
-      question → refusal + handoff, session in the operator queue with the summary in the copilot
-      panel; "I want a human" → handoff; an operator reply after handoff → a copilot draft in ~1 s.
+  11. Probe from the widget: grounded question → bot answer with the disclosure line; "what day
+      is it?" → the date, no handoff; an unrelated question → one-line redirect, no handoff (a
+      warning on the 3rd, the cut-off copy from the 5th); a business question the documents do
+      not cover → refusal + handoff, session in the operator queue with the summary in the
+      copilot panel; "I want a human" → handoff notice + handoff; an operator reply after
+      handoff → a copilot draft in ~1 s.
   12. Kill-switch drill: *Stop* on the pilot row → next customer message gets `503
       autopilot_disabled`, `[cq] circuit opened` in the Swift Chat log, refusal copy sent, new
       conversations go straight to humans; *Resume* → the half-open `GET /config` probe closes
       the circuit within 45 s. Separately flip the tenant's Autopilot toggle → expect `409
       autopilot_not_enabled` (bot paused, no circuit open).
-  13. Confirm metering (`llm_usage.feature` in `autopilot | copilot | handoff`) for the pilot
+  13. Confirm metering (`llm_usage.feature` in `autopilot | triage | copilot | handoff`) for the pilot
       tenant, and run Swift Chat's `scripts/validate-cq.ts` locally and record the real pass count.
 - **2026-09-10 — Gemini speech-to-text, live and verified.** Google's dedicated ASR model
   `gemini-3.5-transcribe` (GA 2026-08-26) lives on the **Interactions API**, not
@@ -451,6 +493,17 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   shows it to the workspace with who can fix it. Production currently reports **ok**, so a
   recording with no voice tone is failing downstream of the model — most often
   `no_timestamps`, i.e. a transcript with no per-turn timings.
+- **2026-09-14 — the bot learns what is and is not its business.** From the first real pilot
+  conversation (Swift Chat widget, an ISP knowledge base): the bot refused "what day is today?",
+  spent a full answer on "list the planets" (follow-up window + a 0.35 `min_score`), and handed
+  the customer to a human because it quoted the tenant's own "within 3 business days". Fixed
+  together (§3, §4): own-score direct match, the triage call, `answer_policy`, business clock,
+  per-conversation off-topic warning + cut-off, KB-backed commitments, symbol-first prices,
+  escalation notices, `handoff_notice` for Swift Chat (whose failure handoffs are no longer
+  silent). BOT tab + Default bot tab carry the new settings. **Deploy needs the image rebuild**
+  (`tzdata`), which the webhook does. **Not done:** the thresholds (0.5 direct, 3/5 off-topic)
+  are starting points, not measured; no Georgian conversation has been run through triage yet;
+  a hospital-specific medical rule set is being decided separately.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.

@@ -35,7 +35,7 @@ import { placeTip } from '@/lib/tipPlace';
      comes and goes together.
 
    The one difference from the legacy version: the sentence arrives as a PROP that the caller
-   has already translated (`<Tip text={t('bot.general.risk')} />`), so there is no `data-i18n`
+   has already translated (`<Tip text={t('bot.policy.general.hint')} />`), so there is no `data-i18n`
    span for `applyI18n` to rewrite and no `cq:lang` listener. A language switch re-renders the
    caller, the prop changes, and the effect below repaints an open bubble. */
 

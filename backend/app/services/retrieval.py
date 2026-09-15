@@ -347,27 +347,35 @@ async def _retrieve_ranked(client_id: str, query: str, top_k: int, min_score: fl
         log.warning("ranked embed failed (client=%s): %s", client_id, exc)
         vecs, encoder_down = [], True
 
+    # Best raw cosine per query string, in `queries` order (index 0 is always `query` itself),
+    # measured BEFORE fusion and before any floor. Fusion keeps each chunk's best score across
+    # the queries and so forgets which query earned it — and the public bot needs exactly that:
+    # a follow-up window that prepends the bot's own last line (which names the company) scores
+    # well against the company's KB whatever the customer actually asked. ADDITIVE: no hit and
+    # no existing key changes.
+    query_tops: list[float | None] = []
     async with pool().acquire() as conn:
         if vecs:
             ranked = [await _vector_ranked(conn, client_id, to_pgvector(v), top_k, visibility)
                       for v in vecs]
+            query_tops = [_top_score(r) for r in ranked]
             hits = ranked[0] if len(ranked) == 1 else _fuse(ranked)
             hits = _gate(hits, min_score, relative_gate)[:top_k]
             if hits:
-                return _ranked("vector", hits, True)
+                return {**_ranked("vector", hits, True), "query_top_scores": query_tops}
 
         # Graceful degradation. Callers that treat keyword-only as ungrounded (the public
         # autopilot does) can still see it, because `method` survives to the caller.
         hits = await _keyword_ranked(conn, client_id, queries[0], top_k, visibility,
                                      keyword_min_score)
         if hits:
-            return _ranked("keyword", hits, True)
+            return {**_ranked("keyword", hits, True), "query_top_scores": query_tops}
     if encoder_down:
         # Nothing came back AND the encoder never answered. "Nothing matched — try other
         # words" would be advice about a KB we never actually searched; the KB is fine and
         # the box is broken, which is an operator's problem, not the tenant's.
         return unavailable_ranked(True)
-    return _empty_ranked(True)
+    return {**_empty_ranked(True), "query_top_scores": query_tops}
 
 
 async def _vector_ranked(conn, client_id: str, qv: str, top_k: int,

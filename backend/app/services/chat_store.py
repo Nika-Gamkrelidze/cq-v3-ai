@@ -21,6 +21,7 @@ settings_store._load_key), so this module decodes on read and json.dumps on writ
 import copy
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ from datetime import datetime, timezone
 import asyncpg
 
 from ..db import pool
-from . import settings_store
+from . import chat_copy, chat_hours, settings_store
 
 log = logging.getLogger("cq")
 
@@ -273,6 +274,59 @@ async def recent_turns(client_id: str, conversation_id: str, limit: int = 8) -> 
     ]
     out.reverse()
     return out
+
+
+async def get_conversation_context(client_id: str, conversation_id: str) -> dict:
+    """What the public bot needs about one conversation beyond its turns: the off-topic count
+    so far, and the tenant's name and industry for the triage prompt.
+
+    One statement, filtered on the conversation's client_id; `clients` is reached only through
+    that same column, so the JOIN cannot land on another tenant's row. A missing conversation
+    is not an error — it reads as a fresh conversation of an unnamed business.
+    """
+    out = {"off_topic_count": 0, "business_name": None, "industry": None}
+    if not client_id or not conversation_id:
+        return out
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT cv.metadata, cl.name, cl.industry
+            FROM chat_conversations cv JOIN clients cl ON cl.id = cv.client_id
+            WHERE cv.client_id = $1 AND cv.id = $2
+            """,
+            client_id, conversation_id)
+    if not row:
+        return out
+    meta = _json(row["metadata"]) or {}
+    try:
+        out["off_topic_count"] = max(0, int(meta.get("off_topic_count") or 0))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    out["business_name"] = row["name"]
+    out["industry"] = row["industry"]
+    return out
+
+
+async def set_off_topic_count(client_id: str, conversation_id: str, count: int) -> None:
+    """Record a conversation's off-topic count in `chat_conversations.metadata`.
+
+    The absolute value the engine computed rather than an increment: the chat site serialises
+    turns per conversation, and a replayed answer hands back its stored envelope without running
+    the engine again, so a turn is counted once either way. `upsert_conversation` merges metadata
+    with `||` and never writes this key, so an inbound message cannot reset it.
+    """
+    if not client_id or not conversation_id:
+        return
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE chat_conversations
+               SET metadata = COALESCE(metadata, '{}'::jsonb)
+                              || jsonb_build_object('off_topic_count', $3::integer),
+                   updated_at = now()
+             WHERE client_id = $1 AND id = $2
+            """,
+            client_id, conversation_id, max(0, int(count)))
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +669,81 @@ def _validated_default_settings(settings) -> dict:
         if not isinstance(kws, list) or not all(isinstance(k, str) for k in kws):
             raise ValueError("settings.escalation_keywords must be a list of strings")
         out["escalation_keywords"] = [k.strip() for k in kws if k.strip()]
+    return _validated_scope_settings(out)
+
+
+ANSWER_POLICIES = ("kb_only", "general")
+_EMERGENCY_NUMBER_RE = re.compile(r"\+?\d[\d \-]{0,14}")
+_COPY_LIMIT = 500
+
+
+def _validated_scope_settings(settings) -> dict:
+    """The answer-policy, business-hours and off-topic knobs — checked on EVERY save, the
+    tenant's included.
+
+    The rest of a tenant's settings blob has always been free-form. These are not allowed to be,
+    because each reaches the public bot on its next message with nothing in between: an unknown
+    time zone would put a wrong clock in every prompt, a cut-off at or below the warning would
+    stop the bot before it ever warned, and an unknown policy would silently read as kb_only.
+    Returns a copy; keys this function does not know pass through untouched.
+    """
+    if settings is None:
+        return {}
+    if not isinstance(settings, dict):
+        raise ValueError("settings must be an object")
+    out = dict(settings)
+
+    if out.get("answer_policy") is not None:
+        policy = str(out["answer_policy"]).strip().lower()
+        if policy not in ANSWER_POLICIES:
+            raise ValueError("settings.answer_policy must be one of kb_only, general")
+        out["answer_policy"] = policy
+
+    for key, limit in (("business_scope", 1000), ("hours_note", chat_hours.MAX_NOTE_CHARS)):
+        if out.get(key) is not None:
+            if not isinstance(out[key], str):
+                raise ValueError(f"settings.{key} must be text")
+            if len(out[key].strip()) > limit:
+                raise ValueError(f"settings.{key} must be at most {limit} characters")
+            out[key] = out[key].strip()
+
+    if out.get("timezone") is not None:
+        out["timezone"] = chat_hours.validate_timezone(out["timezone"])
+    if out.get("opening_hours") is not None:
+        out["opening_hours"] = chat_hours.validate_opening_hours(out["opening_hours"])
+
+    warn = cutoff = None
+    if out.get("off_topic_warn_after") is not None:
+        warn = out["off_topic_warn_after"] = _as_int(
+            out["off_topic_warn_after"], "settings.off_topic_warn_after", 0, 50)
+    if out.get("off_topic_cutoff_after") is not None:
+        cutoff = out["off_topic_cutoff_after"] = _as_int(
+            out["off_topic_cutoff_after"], "settings.off_topic_cutoff_after", 0, 100)
+    if warn and cutoff and cutoff <= warn:
+        raise ValueError("settings.off_topic_cutoff_after must be larger than "
+                         "settings.off_topic_warn_after (or 0 to never stop)")
+    for key in ("off_topic_warning", "off_topic_cutoff"):
+        if out.get(key) is not None:
+            copy_map = _lang_map(out[key], f"settings.{key}")
+            for lang, text in copy_map.items():
+                if len(text) > _COPY_LIMIT:
+                    raise ValueError(f"settings.{key}.{lang} must be at most {_COPY_LIMIT} "
+                                     "characters")
+            out[key] = copy_map
+
+    if out.get("direct_min_score") is not None:
+        v = out["direct_min_score"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= float(v) <= 1:
+            raise ValueError("settings.direct_min_score must be a number between 0 and 1")
+        out["direct_min_score"] = float(v)
+    if (out.get("handoff_on_kb_commitments") is not None
+            and not isinstance(out["handoff_on_kb_commitments"], bool)):
+        raise ValueError("settings.handoff_on_kb_commitments must be true or false")
+    if out.get("emergency_number") is not None:
+        number = str(out["emergency_number"]).strip()
+        if not _EMERGENCY_NUMBER_RE.fullmatch(number):
+            raise ValueError("settings.emergency_number must be a phone number such as 112")
+        out["emergency_number"] = number
     return out
 
 
@@ -650,6 +779,9 @@ def _default_config_from(stored: dict) -> dict:
         "updated_by": stored.get("updated_by"),
         "source": "stored" if stored else "builtin",
         "is_default": True,
+        # What a customer reads when a copy box is left empty — the console shows it as the
+        # placeholder, so "empty" never looks like "silent". Rides along on tenant configs too.
+        "builtin_copy": chat_copy.builtin_copy(),
     })
     for knob in _LIFTED_KNOBS:
         if settings_blob.get(knob) is not None:
@@ -736,7 +868,9 @@ def _merge_settings(default: dict, tenant: dict) -> dict:
     A tenant's explicit None is "unset", as everywhere in settings_store, not a shadow."""
     tenant = {k: v for k, v in (tenant or {}).items() if v is not None}
     out = {**(default or {}), **tenant}
-    for key in ("limits", "disclosure"):
+    # The off-topic copy merges per language like the disclosure; `opening_hours` deliberately
+    # does not — a week is replaced whole, never stitched from two businesses' timetables.
+    for key in ("limits", "disclosure", "off_topic_warning", "off_topic_cutoff"):
         base, over = (default or {}).get(key), tenant.get(key)
         if isinstance(base, dict) and isinstance(over, dict):
             out[key] = {**base, **over}
@@ -825,6 +959,9 @@ async def save_chat_config(
     if not client_id:
         raise ValueError("client_id is required")
     langs = [str(x).strip().lower() for x in (languages or []) if str(x).strip()]
+    # The knobs a bad value would break on the very next customer message get the default's
+    # checks here too; everything else in a tenant's blob stays as free-form as it always was.
+    settings = _validated_scope_settings(settings)
     for _attempt in range(3):
         try:
             async with pool().acquire() as conn:
