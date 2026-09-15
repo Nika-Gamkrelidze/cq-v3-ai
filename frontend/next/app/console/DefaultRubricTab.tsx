@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { isMeasured, MeasuredBadge, MeasuredNote } from '@/components/rubric/Measured';
 import { toast } from '@/components/ui/Toast';
 import { useAutogrow } from '@/lib/autogrow';
 import { dateTime } from '@/lib/format';
@@ -29,6 +30,10 @@ import { Msg, type Note } from './parts';
 interface Dim extends RubricDimension {
   description: string;
   guidance: string;
+  /* A MEASURED dimension (`factcheck` | `sentiment`). The default rubric is what every owner
+     without a rubric of their own inherits, so it must lock these rows exactly as the
+     workspace editor does: weight editable, name read-only, no delete. */
+  source?: string;
 }
 
 interface DefaultRubric {
@@ -60,6 +65,7 @@ export default function DefaultRubricTab() {
       weight: (x.weight as number) || 0,
       description: (x.description as string) || '',
       guidance: (x.guidance as string) || '',
+      source: (x.source as string) || undefined,
     })));
     setRubric(d.rubric || '');
     setMeta({ source: d.source || '', updated_at: d.updated_at || null, updated_by: d.updated_by || '' });
@@ -130,9 +136,10 @@ export default function DefaultRubricTab() {
 
       <div>
         {!dims.length ? <div className="empty">{t('sc.nodims')}</div> : dims.map((d, i) => (
-          <div className="sc-edit" key={d.key || `i${i}`}>
+          <div className={`sc-edit${isMeasured(d.source) ? ' sc-measured' : ''}`} key={d.key || `i${i}`}>
             <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
               <span className="sc-edit-num">{i + 1}</span>
+              {isMeasured(d.source) ? <MeasuredBadge source={d.source} t={t} /> : (
               <button
                 className="act danger"
                 type="button"
@@ -142,6 +149,7 @@ export default function DefaultRubricTab() {
               >
                 🗑
               </button>
+              )}
             </div>
             <div className="row">
               <div style={{ flex: 2 }}>
@@ -149,6 +157,7 @@ export default function DefaultRubricTab() {
                 <input
                   value={d.name}
                   placeholder={t('sc.dname.ph')}
+                  disabled={isMeasured(d.source)}
                   onChange={e => edit(i, { name: e.target.value })}
                 />
               </div>
@@ -163,6 +172,8 @@ export default function DefaultRubricTab() {
                 />
               </div>
             </div>
+            {isMeasured(d.source) ? <MeasuredNote source={d.source} t={t} /> : (
+            <>
             <label>{t('sc.ddesc')}</label>
             <input value={d.description} onChange={e => edit(i, { description: e.target.value })} />
             <label>{t('sc.dguide')}</label>
@@ -171,6 +182,8 @@ export default function DefaultRubricTab() {
               placeholder={t('sc.dguide.ph')}
               onChange={v => edit(i, { guidance: v })}
             />
+            </>
+            )}
           </div>
         ))}
       </div>

@@ -13,6 +13,7 @@
    band boundary. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isMeasured, MeasuredBadge, MeasuredNote } from '@/components/rubric/Measured';
 import { showModal } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { useAutogrow } from '@/lib/autogrow';
@@ -30,10 +31,13 @@ interface EditDim {
   weight: string;
   description: string;
   guidance: string;
+  /* A MEASURED dimension (`factcheck` | `sentiment`): weight editable, everything else the
+     product's. Locked here exactly as in the workspace and console editors. */
+  source?: string;
 }
 
 interface ConfigResponse {
-  dimensions?: { key?: string; name?: string; weight?: number; description?: string; guidance?: string }[];
+  dimensions?: { key?: string; name?: string; weight?: number; description?: string; guidance?: string; source?: string }[];
   rubric?: string;
   version?: number;
   is_default?: boolean;
@@ -66,6 +70,7 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
       weight: String(d.weight ?? 0),
       description: d.description || '',
       guidance: d.guidance || '',
+      source: d.source,
     })));
     setRubric(cfg.rubric || '');
     setVersion(cfg.version || null);
@@ -116,6 +121,9 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
           weight: num(d.weight),
           description: d.description.trim(),
           guidance: d.guidance.trim(),
+          // Sent back so the marker round-trips; the server would recover it from the key, but a
+          // save should not depend on being rescued.
+          source: d.source,
         })),
         rubric,
       }, { scope: 'user' }));
@@ -168,9 +176,10 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
 
       <div>
         {dims.length ? dims.map((d, i) => (
-          <div className="sc-edit" key={i}>
+          <div className={`sc-edit${isMeasured(d.source) ? ' sc-measured' : ''}`} key={i}>
             <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
               <span className="sc-edit-num">{i + 1}</span>
+              {isMeasured(d.source) ? <MeasuredBadge source={d.source} t={t} /> : (
               <button
                 type="button" className="act danger"
                 title={t('sc.remove')} aria-label={t('sc.remove')}
@@ -178,12 +187,13 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
               >
                 🗑
               </button>
+              )}
             </div>
             <div className="row">
               <div style={{ flex: 2 }}>
                 <label>{t('sc.dname')}</label>
                 <input
-                  value={d.name} placeholder={t('sc.dname.ph')}
+                  value={d.name} placeholder={t('sc.dname.ph')} disabled={isMeasured(d.source)}
                   onChange={e => patch(i, { name: e.target.value })}
                 />
               </div>
@@ -195,6 +205,8 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
                 />
               </div>
             </div>
+            {isMeasured(d.source) ? <MeasuredNote source={d.source} t={t} /> : (
+              <>
             <label>{t('sc.ddesc')}</label>
             <input value={d.description} onChange={e => patch(i, { description: e.target.value })} />
             <label>{t('sc.dguide')}</label>
@@ -203,6 +215,8 @@ export function RubricPanel({ active, onUnauthorized }: RubricPanelProps) {
               placeholder={t('sc.dguide.ph')}
               onChange={v => patch(i, { guidance: v })}
             />
+              </>
+            )}
           </div>
         )) : <div className="empty">{t('sc.nodims')}</div>}
       </div>

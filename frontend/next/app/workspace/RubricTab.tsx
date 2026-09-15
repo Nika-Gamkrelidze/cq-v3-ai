@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { showModal } from '@/components/ui/Modal';
-import { Tip } from '@/components/ui/Tip';
+import { isMeasured, MeasuredBadge, MeasuredNote } from '@/components/rubric/Measured';
 import { toast } from '@/components/ui/Toast';
 import { useAutogrow } from '@/lib/autogrow';
 import {
@@ -160,16 +160,11 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
 
         <div>
           {dims.length ? dims.map((d, i) => (
-            <div className={`sc-edit${d.source ? ' sc-measured' : ''}`} key={i}>
+            <div className={`sc-edit${isMeasured(d.source) ? ' sc-measured' : ''}`} key={i}>
               <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
                 <span className="sc-edit-num">{i + 1}</span>
-                {d.source ? (
-                  <span className="inline" style={{ gap: 6 }}>
-                    <span className="pill ready">{t(`sc.measured.${d.source}`)}</span>
-                    <Tip text={t(`sc.measured.${d.source}.hint`)} />
-                  </span>
-                ) : null}
-                {canEdit && !d.source ? (
+                {isMeasured(d.source) ? <MeasuredBadge source={d.source} t={t} /> : null}
+                {canEdit && !isMeasured(d.source) ? (
                   <button
                     type="button" className="act danger" title={t('sc.remove')} aria-label={t('sc.remove')}
                     onClick={() => setDims(prev => prev.filter((_, j) => j !== i))}
@@ -181,7 +176,7 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
                   <label>{t('sc.dname')}</label>
                   <input
                     value={d.name} placeholder={t('sc.dname.ph')}
-                    disabled={readonly || !!d.source}
+                    disabled={readonly || isMeasured(d.source)}
                     onChange={e => patch(i, { name: e.target.value })}
                   />
                 </div>
@@ -197,8 +192,8 @@ export function RubricTab({ on, gen }: { on: boolean; gen: number }) {
                   description and guidance boxes. Those two exist to steer a model, and no
                   model reads this row — leaving them editable would invite a workspace to
                   write scoring instructions that nothing obeys. */}
-              {d.source ? (
-                <p className="hint" style={{ margin: '4px 0 0' }}>{t(`sc.measured.${d.source}.desc`)}</p>
+              {isMeasured(d.source) ? (
+                <MeasuredNote source={d.source} t={t} />
               ) : (
                 <>
                   <label>{t('sc.ddesc')}</label>
