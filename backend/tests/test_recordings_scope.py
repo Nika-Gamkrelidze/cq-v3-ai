@@ -376,3 +376,91 @@ def test_summaries_are_scoped_like_recordings(api, users, tenant):
     assert api.get(f"/summaries/{ZERO}", headers=a["headers"]).status_code == 404
     assert api.get("/summaries/not-a-uuid", headers=a["headers"]).status_code == 400
     assert api.get(f"/summaries/{summary_id}", headers=ADMIN).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Summarising recordings that already exist: no re-upload, no second transcription
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def fake_summarise(monkeypatch):
+    """The model call and the key lookup, stubbed. Records what the summariser was handed, so a
+    refused request can be shown never to have reached it."""
+    from app.routers import recordings
+    seen: dict = {}
+
+    async def _settings(*needs):
+        return {"anthropic_api_key": "test-key", "llm_model": "test-model"}
+
+    async def _summarise(calls, *, api_key, model, client_id=None, user_id=None):
+        seen["calls"] = calls
+        return {"language": "en", "short_summary": "One call about a wire fee.",
+                "key_points": [], "action_items": [], "participants": [], "stages": 1,
+                "calls": [{"index": i, "job_id": c["job_id"], "filename": c["filename"],
+                           "title": "Wire fee", "summary": "s", "outcome": "answered"}
+                          for i, c in enumerate(calls)]}
+
+    monkeypatch.setattr(recordings, "_settings", _settings)
+    monkeypatch.setattr(recordings.summarise, "summarise", _summarise)
+    return seen
+
+
+def _recording_count(user_id: str) -> int:
+    return sql(lambda c: c.fetchval(
+        "SELECT count(*) FROM audio_jobs WHERE user_id = $1", uuid.UUID(user_id)))
+
+
+def test_summarising_existing_recordings_transcribes_nothing_and_creates_no_row(
+        api, users, fake_summarise):
+    """THE POINT OF THE ROUTE. POST /summaries re-transcribes every file into a new History row;
+    this reads the transcript the recording already has, and a repeated id is summarised once."""
+    a = users["a"]
+    rec = _paste(api, a["headers"]).json()["id"]
+    before = _recording_count(a["id"])
+
+    r = api.post("/summaries/from-recordings", json={"job_ids": [rec, rec]}, headers=a["headers"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["summary"]["short_summary"] == "One call about a wire fee."
+    assert [c["job_id"] for c in body["calls"]] == [rec]
+    assert body["calls"][0]["transcript"] == TRANSCRIPT and body["calls"][0]["audio_url"] is None
+    assert [c["transcript"] for c in fake_summarise["calls"]] == [TRANSCRIPT]
+    assert _recording_count(a["id"]) == before, "no recording may be created by summarising"
+
+    stored = sql(lambda c: c.fetchrow(
+        "SELECT user_id, client_id, job_ids FROM call_summaries WHERE id = $1",
+        uuid.UUID(body["id"])))
+    assert str(stored["user_id"]) == a["id"] and stored["client_id"] is None
+    assert [str(j) for j in stored["job_ids"]] == [rec]
+    # ...and it is an ordinary summary afterwards, readable through the existing route.
+    assert api.get(f"/summaries/{body['id']}", headers=a["headers"]).status_code == 200
+
+
+def test_summarising_existing_recordings_is_scoped_like_every_analyser(
+        api, users, tenant, fake_summarise):
+    """An id is not a capability: another owner's recording is a 404, and a refused request
+    never reaches the model."""
+    a, b = users["a"], users["b"]
+    rec = _paste(api, a["headers"]).json()["id"]
+    url = "/summaries/from-recordings"
+
+    for headers in (b["headers"], tenant["apikey"], tenant["bearer"]):
+        assert api.post(url, json={"job_ids": [rec]}, headers=headers).status_code == 404
+    assert api.post(url, json={"job_ids": [rec]}, headers=_anon()).status_code in (401, 403)
+    assert api.post(url, json={"job_ids": [ZERO]}, headers=a["headers"]).status_code == 404
+    assert api.post(url, json={"job_ids": ["not-a-uuid"]}, headers=a["headers"]).status_code == 400
+    assert api.post(url, json={"job_ids": []}, headers=a["headers"]).status_code == 400
+    too_many = [str(uuid.uuid4()) for _ in range(11)]
+    assert api.post(url, json={"job_ids": too_many}, headers=a["headers"]).status_code == 413
+    assert "calls" not in fake_summarise, "a refused request must not reach the model"
+
+
+def test_the_same_recording_in_two_spellings_is_summarised_once(api, users, fake_summarise):
+    """Raw-string de-duplication let upper case or braces through as a second call in the
+    digest; ids are compared in canonical form."""
+    a = users["a"]
+    rec = _paste(api, a["headers"]).json()["id"]
+    r = api.post("/summaries/from-recordings",
+                 json={"job_ids": [rec, rec.upper(), "{" + rec + "}"]}, headers=a["headers"])
+    assert r.status_code == 200, r.text
+    assert [c["job_id"] for c in r.json()["calls"]] == [rec]
+    assert len(fake_summarise["calls"]) == 1

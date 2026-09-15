@@ -16,6 +16,7 @@ Routes (all resolve the principal; the kinds each one admits are stated on the h
   * `POST /recordings/{id}/semantic`       §6, `{"modes": ["text", "voice"]}`
   * `GET  /recordings[?limit=]`, `GET /recordings/{id}`, `GET /recordings/{id}/audio`
   * `POST /summaries[?stream=1]`           1..10 uploads → transcribe in order → §7
+  * `POST /summaries/from-recordings`    existing recordings by id -> digest (no upload, no re-transcription)
   * `GET  /summaries[?limit=]`, `GET /summaries/{id}`
 
 An anonymous visitor may CREATE a recording (and gets its transcript and timeline back in the
@@ -901,9 +902,17 @@ async def _run_summary(request: Request, principal: Principal, cfg: dict,
 
     if emit is not None:
         emit("stage", {"stage": "summarising"})
+    return await _summarise_and_record(principal, cfg, recs, actor)
+
+
+async def _summarise_and_record(principal: Principal, cfg: dict, recs: list[dict],
+                                actor: str | None) -> dict:
+    """The digest step, shared by an upload (`_run_summary`) and by recordings that already
+    exist (`summarise_recordings`): one model call over the calls in order, one call_summaries
+    row, and the response shape the workbench adopts. Raises `_Failed`."""
     # The summary spans the whole batch, so it belongs to no single recording. Without this the
     # tokens would be attributed to whichever one happened to be created last, which reads as a
-    # fact and is not one. `create_job` set it per recording during the loop above.
+    # fact and is not one. `create_job` and `_load` set it per recording before this point.
     attribution.set_job(None)
     try:
         summary = await summarise.summarise(
@@ -963,6 +972,58 @@ async def create_summary(request: Request, files: list[UploadFile] = File(...),
     try:
         return await _run_summary(request, principal, cfg, uploads,
                                   stt_settings=stt_settings)
+    except _Failed as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+
+
+class SummaryFromRecordings(BaseModel):
+    job_ids: list[str]
+
+
+@router.post("/summaries/from-recordings")
+async def summarise_recordings(body: SummaryFromRecordings,
+                               principal: Principal = Depends(resolve_principal)):
+    """tenant | user. A digest of recordings that ALREADY exist, by id. No upload.
+
+    POST /summaries takes files: it transcribes every one again and creates a new History row
+    for each, so summarising a call already on screen used to cost a second transcription and
+    a second unit and leave a duplicate recording behind, and a pasted transcript could not be
+    summarised at all for having no audio. This reads the transcripts the caller's own rows
+    already hold. It is also what lets the workbench's "All at once" start the summary IN
+    PARALLEL with the checks: a recording's id exists the moment its upload finishes, while
+    /summaries only names the recordings it created at the very end of its stream.
+
+    One `analyses` unit, like every other analyser run on a stored recording, taken after every
+    refusal that costs nothing: an unknown or foreign id, nothing transcribed, no model key.
+    """
+    _require(principal, ("tenant", "user"), "summarise recordings")
+    await limits.require_feature(principal, "summarise")
+    # Canonical ids, so one recording sent in two spellings (upper case, braces) is summarised
+    # once, not twice; a malformed id is refused here, before a single row is read.
+    try:
+        ids = list(dict.fromkeys(str(uuid.UUID(i.strip())) for i in body.job_ids if i and i.strip()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Every recording id must be a valid id.") from exc
+    if not ids:
+        raise HTTPException(status_code=400, detail="No recordings were given.")
+    if len(ids) > MAX_SUMMARY_FILES:
+        raise HTTPException(status_code=413, detail=(
+            f"Up to {MAX_SUMMARY_FILES} recordings per summary. You sent {len(ids)}."))
+    recs: list[dict] = []
+    for job_id in ids:
+        # `_load` IS the scope check: another owner's recording is a 404 here exactly as it is
+        # for every analyser, so an id cannot be used to read a transcript across workspaces.
+        row = await _load(job_id, principal,
+                          "id, filename, language, duration_s, transcript, segments, audio_path")
+        transcript, segs = _transcript_of(row)
+        recs.append(_recording(str(row["id"]), filename=row["filename"], language=row["language"],
+                               duration_s=row["duration_s"], transcript=transcript, segs=segs,
+                               has_audio=bool(row["audio_path"])))
+    cfg = await _settings("llm")
+    await _pay_for_run(principal)
+    actor = await _actor_name(principal)
+    try:
+        return await _summarise_and_record(principal, cfg, recs, actor)
     except _Failed as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 

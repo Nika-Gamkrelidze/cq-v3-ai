@@ -70,7 +70,7 @@ export const en: Dict = {
   'wb.tab.semantic': 'Sentiment',
   'wb.tab.summarise': 'Summarise',
   'wb.tab.all': 'All at once',
-  'wb.all.note': 'Runs every check on this recording in one go and reports them together. The fact-check and sentiment run first, side by side, then the score, so the rubric’s measured rows read their fresh results. Each check uses one analysis from your allowance. Summarise stays in its own tab because it covers several calls at once.',
+  'wb.all.note': 'Transcribes the queued recording if nothing is loaded yet, then runs every check at the same time and reports them together. Fact-check, sentiment and summarise start together; the score starts as soon as the fact-check and sentiment finish, because the rubric’s measured rows read their results. The transcription and each check or summary use one analysis from your allowance.',
   'wb.all.run': 'Run all checks',
   'wb.all.rerun': 'Run all checks again',
   'wb.all.done': 'All checks finished',
@@ -87,6 +87,9 @@ export const en: Dict = {
   'wb.all.h.score': 'Weighted score',
   'wb.all.na': 'Not measured',
   'wb.all.scored': 'on {pct}% of the rubric',
+  'wb.all.transcribe': 'Transcribe and run all checks',
+  'wb.all.onefile': 'All at once works on one recording. Queue a single file, or use Summarise for several related calls.',
+  'wb.all.h.summarise': 'Summary of the call',
 
   'wb.fc.note': 'Checks only the correctness of information in the call against your knowledge base.',
 
@@ -252,7 +255,7 @@ export const ka: Dict = {
   'wb.tab.semantic': 'სენტიმენტი',
   'wb.tab.summarise': 'შეჯამება',
   'wb.tab.all': 'ყველა ერთად',
-  'wb.all.note': 'ერთი დაჭერით ამ ჩანაწერზე ყველა შემოწმებას უშვებს და შედეგებს ერთად აჩვენებს. ჯერ ერთდროულად ფაქტების შემოწმება და სენტიმენტი, შემდეგ — შეფასება, რომ რუბრიკის გაზომილმა კრიტერიუმებმა ახალი შედეგები წაიკითხონ. თითო შემოწმება თქვენი ლიმიტიდან ერთ ანალიზს იყენებს. შეჯამება თავის ჩანართში რჩება, რადგან ის რამდენიმე ზარს ერთად მოიცავს.',
+  'wb.all.note': 'თუ ჩანაწერი ჯერ არ ჩაიტვირთა, ჯერ ტრანსკრიფცია კეთდება, შემდეგ ყველა შემოწმება ერთდროულად ეშვება და შედეგები ერთად ჩანს. ფაქტების შემოწმება, სენტიმენტი და შეჯამება ერთად იწყება; შეფასება იწყება, როგორც კი ფაქტების შემოწმება და სენტიმენტი დასრულდება, რადგან რუბრიკის გაზომილი კრიტერიუმები მათ შედეგებს კითხულობენ. ტრანსკრიფცია და თითო შემოწმება თუ შეჯამება თქვენი ლიმიტიდან ერთ ანალიზს იყენებს.',
   'wb.all.run': 'ყველა შემოწმების გაშვება',
   'wb.all.rerun': 'ყველა შემოწმების ხელახლა გაშვება',
   'wb.all.done': 'ყველა შემოწმება დასრულდა',
@@ -269,6 +272,9 @@ export const ka: Dict = {
   'wb.all.h.score': 'შეწონილი ქულა',
   'wb.all.na': 'არ გაიზომა',
   'wb.all.scored': 'რუბრიკის {pct}%-ზე',
+  'wb.all.transcribe': 'ტრანსკრიფცია და ყველა შემოწმება',
+  'wb.all.onefile': 'ყველა ერთად ერთ ჩანაწერზე მუშაობს. დაამატეთ ერთი ფაილი, ან რამდენიმე დაკავშირებული ზარისთვის გამოიყენეთ შეჯამება.',
+  'wb.all.h.summarise': 'ზარის შეჯამება',
 
   'wb.fc.note': 'ამოწმებს მხოლოდ ზარში გაცემული ინფორმაციის სისწორეს თქვენი ცოდნის ბაზის მიხედვით.',
 
@@ -434,7 +440,7 @@ export const ru: Dict = {
   'wb.tab.semantic': 'Сентимент',
   'wb.tab.summarise': 'Сводка',
   'wb.tab.all': 'Всё сразу',
-  'wb.all.note': 'Запускает все проверки этой записи одним нажатием и показывает результаты вместе. Сначала параллельно проверка фактов и сентимент, затем оценка — чтобы измеряемые критерии рубрики прочитали свежие результаты. Каждая проверка расходует один анализ из вашего лимита. Сводка остаётся на своей вкладке, потому что охватывает сразу несколько звонков.',
+  'wb.all.note': 'Если запись ещё не загружена, сначала расшифровывает её, затем запускает все проверки одновременно и показывает результаты вместе. Проверка фактов, сентимент и сводка стартуют вместе; оценка начинается, как только завершатся проверка фактов и сентимент, потому что измеряемые критерии рубрики читают их результаты. Расшифровка и каждая проверка или сводка расходуют один анализ из вашего лимита.',
   'wb.all.run': 'Запустить все проверки',
   'wb.all.rerun': 'Запустить все проверки снова',
   'wb.all.done': 'Все проверки завершены',
@@ -451,6 +457,9 @@ export const ru: Dict = {
   'wb.all.h.score': 'Взвешенная оценка',
   'wb.all.na': 'Не измерено',
   'wb.all.scored': 'по {pct}% рубрики',
+  'wb.all.transcribe': 'Расшифровать и запустить все проверки',
+  'wb.all.onefile': 'Всё сразу работает с одной записью. Добавьте один файл или используйте сводку для нескольких связанных звонков.',
+  'wb.all.h.summarise': 'Сводка звонка',
 
   'wb.fc.note': 'Проверяет только правильность сведений, прозвучавших в звонке, по вашей базе знаний.',
 

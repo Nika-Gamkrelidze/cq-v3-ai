@@ -660,10 +660,10 @@ export function firstResultTab(
 
 /* ------------------------------------------------------------------ all at once */
 
-/** The checks "All at once" runs on one recording. Summarise is deliberately not one of them:
-    it re-uploads every call's audio and digests a whole THREAD, where these three judge the
-    recording on screen, and folding a multi-call upload into a one-click run would spend far
-    more than the button suggests. */
+/** The checks "All at once" runs in WAVES on one recording. Summarise runs beside the waves,
+    not in one: nothing it produces is read by a check and it reads nothing a check stores, so it
+    starts with the first wave and never holds up the score. It summarises by recording id, so the
+    one-click run transcribes the audio once (see `summariseCalls` in index.tsx). */
 export const ALL_CHECKS = ['factcheck', 'semantic', 'score'] as const;
 export type Check = (typeof ALL_CHECKS)[number];
 

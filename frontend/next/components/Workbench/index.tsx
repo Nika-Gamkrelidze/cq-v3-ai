@@ -48,7 +48,7 @@ import {
   marksOf, numOrNull, overTotalSize, queueFiles, rolesWithSpeakers, sortLanes,
   type Call, type Check, type Feature, type Lane, type RecordingRow, type ScoreResult,
   type SemanticResult,
-  type Span, type SummaryResult,
+  type Span, type SummaryBody, type SummaryResult,
 } from './logic';
 import { ScoreBar } from './parts';
 import { Scorecard } from './Scorecard';
@@ -95,6 +95,8 @@ export interface WorkbenchProps {
 type RunOutcome = 'ok' | 'err' | 'skip';
 /** A check's place in an "All at once" run. */
 type CheckStatus = 'wait' | 'run' | RunOutcome;
+/** Everything one "All at once" run reports on: the checks, and the summary beside them. */
+type AllKey = Check | 'summarise';
 
 interface SourceState {
   kind: 'recording' | 'summary';
@@ -129,9 +131,30 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
   const [running, setRunning] = useState<Partial<Record<Feature, boolean>>>({});
   /** Where each check stands in the current "All at once" run. Empty until one is started, so a
       check that ran on its own earlier reads from the call's stored result instead. */
-  const [allStatus, setAllStatus] = useState<Partial<Record<Check, CheckStatus>>>({});
+  const [allStatus, setAllStatus] = useState<Partial<Record<AllKey, CheckStatus>>>({});
   const [allRunning, setAllRunning] = useState(false);
   const [allErr, setAllErr] = useState('');
+  /** Set synchronously at the start of a one-click run. `busy`/`posting` are state and only turn
+      true once a request is under way, so two clicks inside one frame would otherwise start two
+      uploads and two sets of paid checks. */
+  const allBusy = useRef(false);
+  /** Which recording the statuses on screen belong to. The run transcribes first, so its own
+      recording replaces the empty one mid-run; resetting on every change of recording would
+      wipe the statuses it had just set. */
+  const allFor = useRef<string | null>(null);
+  /** The same owner as `allFor`, as STATE: the per-tab lock is read while rendering, and a ref
+      change alone never re-renders the buttons. */
+  const [allTarget, setAllTarget] = useState<string | null>(null);
+  /** A check run on its own tab supersedes whatever a one-click run said about it, so its row
+      falls back to the stored result instead of showing a stale failure next to a new result. */
+  const forgetAllStatus = useCallback((k: AllKey) => {
+    setAllStatus(prev => {
+      if (!(k in prev)) return prev;
+      const next = { ...prev };
+      delete next[k];
+      return next;
+    });
+  }, []);
   const [progress, setProgress] = useState<{ label: string; value: number | null } | null>(null);
   const [srcErr, setSrcErr] = useState<{ text: string; isError: boolean }>({ text: '', isError: true });
   const [paneErr, setPaneErr] = useState<Partial<Record<Feature, string>>>({});
@@ -329,12 +352,15 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     if (first) setTabState(first);
   }, [order]);
 
-  const adoptRecording = useCallback((row: RecordingRow, file: File | null, text?: string) => {
+  const adoptRecording = useCallback((row: RecordingRow, file: File | null, text?: string): Call => {
     clearSource();
     setFiles([]);
     const call = callFromRow(row, { blob: file, source: file ? 'audio' : 'text', text });
     setSource({ kind: 'recording', calls: [call], active: 0, noteKey: '' });
     openTab(call, false);
+    // Returned, not only set: state commits after this returns, so a caller that goes on to run
+    // checks in the same click must be HANDED the call rather than read it back from state.
+    return call;
   }, [clearSource, openTab]);
 
   const adoptSummary = useCallback((sum: SummaryResult, sent: File[]) => {
@@ -362,7 +388,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     body: FormData,
     where: 'src' | Feature,
     o: { onStage: (d: SseData) => void; onDone: (data: T) => void; onSettle?: () => void },
-  ) => {
+  ): Promise<T | null> => {
     showError(where, '');
     const call = xhrStream<T>({
       url: `${API}${path}`,
@@ -381,6 +407,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     try {
       const { data } = await call.result;
       o.onDone(data);
+      return data;
     } catch (e) {
       // A cancel is the person's own decision: a quiet line, never a toast.
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -391,6 +418,9 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
         toast(m, 'err');
         if (isUnauthorized(e)) onUnauthorized?.();
       }
+      // Every failure and a cancel resolve to null rather than throwing: a caller about to
+      // spend units on the result checks for it; fire-and-forget callers keep their `void`.
+      return null;
     } finally {
       abortRef.current = null;
       setBusy(false);
@@ -435,54 +465,77 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     });
   }, [stream, t, showError, adoptSummary, trPatch]);
 
-  const uploadRecording = useCallback(async (file: File) => {
+  const uploadRecording = useCallback(async (file: File, opts?: { quiet?: boolean }): Promise<Call | null> => {
     const fd = new FormData();
     fd.append('file', file);
     appendTranscription(fd, trPatch);
+    let adopted: Call | null = null;
     await stream<RecordingRow>('/recordings?stream=1', fd, 'src', {
       onStage: () => setProgress({ label: t('wb.stage.transcribing'), value: null }),
-      onDone: rec => { adoptRecording(rec, file); toast(t('stt.done'), 'ok'); },
+      onDone: rec => {
+        adopted = adoptRecording(rec, file);
+        // Quiet inside a one-click run: "Transcript ready" followed by the run's own report is
+        // two toasts about one click, and the second may say that something failed.
+        if (!opts?.quiet) toast(t('stt.done'), 'ok');
+      },
     });
+    return adopted;
   }, [stream, t, adoptRecording, trPatch]);
 
-  const submitText = useCallback(async () => {
+  const submitText = useCallback(async (opts?: { quiet?: boolean }): Promise<Call | null> => {
     const text = paste.trim();
-    if (!text) { showError('src', t('wb.needtext')); return; }
+    if (!text) { showError('src', t('wb.needtext')); return null; }
     setPosting(true);
     try {
       const rec = await apiSend<RecordingRow>('POST', '/recordings/text', { text }, { scope });
-      adoptRecording(rec, null, text);
-      toast(t('stt.done'), 'ok');
+      const call = adoptRecording(rec, null, text);
+      if (!opts?.quiet) toast(t('stt.done'), 'ok');
+      return call;
     } catch (e) {
       const m = apiMessage(e, t);
       showError('src', m);
       toast(m, 'err');
       if (isUnauthorized(e)) onUnauthorized?.();
+      return null;
     } finally {
       setPosting(false);
     }
   }, [paste, scope, t, showError, adoptRecording, onUnauthorized]);
 
+  /** Why the source cannot be sent yet, or null. ONE set of rules for the source card's button
+      and the one-click "All at once" run, so they cannot drift: a paste must not be empty, a
+      file must be queued, and a key term the API would refuse stops the upload HERE, not after
+      40 MB have gone up and a minute of model time has been paid for. */
+  const sourceProblem = useCallback((): string | null => {
+    if (mode === 'text') return paste.trim() ? null : t('wb.needtext');
+    if (!files.length) return t('wb.needsource');
+    if (trError) return t(trError.key, trError.vars);
+    return null;
+  }, [mode, paste, files, trError, t]);
+
   const go = useCallback(() => {
     showError('src', '');
     if (busy || posting) return;
+    const problem = sourceProblem();
+    if (problem) { showError('src', problem); return; }
     if (mode === 'text') { void submitText(); return; }
-    if (!files.length) { showError('src', t('wb.needsource')); return; }
-    /* A key term the API would refuse stops the upload HERE, not after 40 MB have gone up and
-       a minute of model time has been paid for. The panel already shows the same sentence
-       beside the offending field; this is the half that keeps the button honest. */
-    if (trError) { showError('src', t(trError.key, trError.vars)); return; }
     if (files.length > 1 || tab === 'summarise') { void uploadSummary(files.slice(), 'src'); return; }
     void uploadRecording(files[0]);
-  }, [busy, posting, mode, files, tab, t, trError, showError, submitText, uploadSummary, uploadRecording]);
+  }, [busy, posting, mode, files, tab, showError, sourceProblem, submitText, uploadSummary, uploadRecording]);
 
   /* ------------------------------------------------------------------ analysers */
 
-  const run = useCallback(async (kind: Feature, opts?: { quiet?: boolean }): Promise<RunOutcome> => {
+  const run = useCallback(async (
+    kind: Feature,
+    opts?: { quiet?: boolean; call?: Call; index?: number },
+  ): Promise<RunOutcome> => {
     if (kind === 'summarise') return 'skip';
     showError(kind, '');
-    const index = activeIndex;
-    const call = activeCall;
+    if (!opts?.quiet) forgetAllStatus(kind);
+    // An explicit call wins over the render's: a one-click run that has just transcribed a
+    // recording holds the new call before React has committed it as `activeCall`.
+    const index = opts?.index ?? activeIndex;
+    const call = opts?.call ?? activeCall;
     if (!call) { showError(kind, t('wb.needsource')); return 'skip'; }
 
     let body: unknown;
@@ -500,7 +553,10 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
       const data = await apiSend<Record<string, unknown>>(
         'POST', `/recordings/${encodeURIComponent(call.id)}/${kind}`, body, { scope },
       );
-      patchCall(index, c => ({
+      // Patched only onto the SAME recording. Change, or opening another recording from History,
+      // may have happened while this was in flight; writing the result onto whatever now sits at
+      // this index would show one recording's findings on another's timeline.
+      patchCall(index, c => (c.id !== call.id ? c : {
         ...c,
         results: { ...c.results, [kind]: data },
         // A sentiment run is the only thing that can tell an agent from a customer; the roles
@@ -522,48 +578,131 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     } finally {
       setRunning(prev => ({ ...prev, [kind]: false }));
     }
-  }, [activeCall, activeIndex, wantWords, voice, scope, t, showError, patchCall, onUnauthorized]);
+  }, [activeCall, activeIndex, wantWords, voice, scope, t, showError, patchCall, onUnauthorized, forgetAllStatus]);
 
-  /* ALL AT ONCE — every check on this recording, reported together.
-     Fact-check and sentiment run side by side; the SCORE WAITS for both. The rubric's measured
-     rows are scored server-side from the results those two store on the recording, so a score
-     fired at the same moment would read the previous run's numbers, or none, and the combined
-     report would show a fact-check that disagrees with the fact-check row on its own scorecard.
-     Each check keeps its own spinner and error line in its own tab; this adds one report and
-     ONE toast in place of three. A failure in one check never stops the others. */
+  /** Summarise calls that are already transcribed, BY ID (`POST /summaries/from-recordings`).
+      Never replaces the source: the calls and every check's results stay where they are and
+      only the summary is set, which is what lets it run beside the checks. A result that lands
+      after the person has moved to another recording is dropped. */
+  const summariseCalls = useCallback(async (calls: Call[], opts?: { quiet?: boolean }): Promise<RunOutcome> => {
+    showError('summarise', '');
+    if (!opts?.quiet) forgetAllStatus('summarise');
+    const ids = calls.map(c => c.id).filter(Boolean);
+    if (!ids.length) { showError('summarise', t('wb.needsource')); return 'skip'; }
+    const tk = token.current;
+    setRunning(prev => ({ ...prev, summarise: true }));
+    try {
+      const sum = await apiSend<SummaryResult>('POST', '/summaries/from-recordings', { job_ids: ids }, { scope });
+      if (token.current !== tk) return 'skip';
+      setSummary(sum);
+      if (!opts?.quiet) toast(t('wb.sum.done'), 'ok');
+      return 'ok';
+    } catch (e) {
+      if (token.current !== tk) return 'skip';
+      const m = apiMessage(e, t);
+      showError('summarise', m);
+      if (!opts?.quiet) toast(m, 'err');
+      if (isUnauthorized(e)) onUnauthorized?.();
+      return 'err';
+    } finally {
+      setRunning(prev => ({ ...prev, summarise: false }));
+    }
+  }, [scope, t, showError, onUnauthorized, forgetAllStatus]);
+
+  /* ALL AT ONCE — transcribe if nothing is loaded, then every check and the summary, together.
+     Order is the substance:
+       1. TRANSCRIBE first when needed. Every check reads the transcript, so nothing can start
+          before it; the upload hands back its call so the rest never reads stale state.
+       2. Fact-check, sentiment and SUMMARISE start at the same moment. The summary is taken by
+          recording id, so the audio is transcribed once, and nothing it produces is read by a
+          check, so it never holds anything up.
+       3. The SCORE starts the moment fact-check and sentiment both finish. The rubric's measured
+          rows are scored server-side from the results those two STORE on the recording; fired
+          with them, the score would read the previous run's numbers or none.
+     Each check keeps its own spinner and error line in its own tab. A failure in one never stops
+     the others. One toast for the whole click. */
   const runAll = useCallback(async () => {
+    if (allBusy.current || busy || posting) return;
     setAllErr('');
-    if (!activeCall) { setAllErr(t('wb.needsource')); return; }
     const plan = allAtOncePlan(order);
+    const wantSummary = order.includes('summarise');
     const checks: Check[] = [...plan.first, ...plan.then];
-    if (!checks.length) return;
-    const initial: Partial<Record<Check, CheckStatus>> = {};
-    for (const k of plan.first) initial[k] = 'run';
-    for (const k of plan.then) initial[k] = 'wait';
-    setAllStatus(initial);
+    if (!checks.length && !wantSummary) return;
+    allBusy.current = true;
     setAllRunning(true);
     const outcomes: RunOutcome[] = [];
-    const settle = (k: Check, r: RunOutcome) => {
-      outcomes.push(r);
-      setAllStatus(prev => ({ ...prev, [k]: r }));
-    };
+    let total = 0;
+    let ownId: string | null = null;
     try {
-      await Promise.all(plan.first.map(async k => settle(k, await run(k, { quiet: true }))));
-      for (const k of plan.then) {
-        setAllStatus(prev => ({ ...prev, [k]: 'run' }));
-        settle(k, await run(k, { quiet: true }));
+      const loadedBefore = !!activeCall;
+      let call = activeCall;
+      let index = activeIndex;
+      if (!call) {
+        const problem = sourceProblem();
+        if (problem) { setAllErr(problem); return; }
+        if (mode === 'audio' && files.length > 1) { setAllErr(t('wb.all.onefile')); return; }
+        call = mode === 'text' ? await submitText({ quiet: true }) : await uploadRecording(files[0], { quiet: true });
+        index = 0;
+        // Failed or cancelled: the reason is already on the source card, and not one unit is
+        // spent on checks that would have nothing to read.
+        if (!call) return;
       }
+      const target = call;
+      ownId = target.id;
+      allFor.current = target.id;
+      setAllTarget(target.id);
+      const initial: Partial<Record<AllKey, CheckStatus>> = {};
+      for (const k of plan.first) initial[k] = 'run';
+      for (const k of plan.then) initial[k] = 'wait';
+      if (wantSummary) initial.summarise = 'run';
+      setAllStatus(initial);
+      total = checks.length + (wantSummary ? 1 : 0);
+      // Statuses belong to THIS run's recording. Opening another recording from History,
+      // pressing Change or switching calls mid-run replaces it; the run carries on (run() and
+      // summariseCalls already refuse to put its results on the new recording), but its
+      // statuses must not paint onto the report of the recording now on screen.
+      const paint = (k: AllKey, st: CheckStatus) => {
+        if (allFor.current === target.id) setAllStatus(prev => ({ ...prev, [k]: st }));
+      };
+      const settle = (k: AllKey, r: RunOutcome) => {
+        outcomes.push(r);
+        paint(k, r);
+      };
+      // Several calls on screen are summarised together; otherwise the one being checked.
+      const sumCalls = loadedBefore && source?.kind === 'summary' ? source.calls : [target];
+      const summarising = wantSummary
+        ? summariseCalls(sumCalls, { quiet: true }).then(r => settle('summarise', r))
+        : Promise.resolve();
+      await Promise.all(plan.first.map(async k => settle(k, await run(k, { quiet: true, call: target, index }))));
+      for (const k of plan.then) {
+        paint(k, 'run');
+        settle(k, await run(k, { quiet: true, call: target, index }));
+      }
+      await summarising;
     } finally {
+      allBusy.current = false;
       setAllRunning(false);
     }
+    // No toast for a run whose recording is no longer on screen: it would report on a call the
+    // person has already left, next to a report that (correctly) no longer shows it.
+    if (!total || allFor.current !== ownId) return;
     const ok = outcomes.filter(r => r === 'ok').length;
     const err = outcomes.filter(r => r === 'err').length;
-    if (err) toast(t('wb.all.partial', { ok, total: checks.length, err }), 'err');
+    if (err) toast(t('wb.all.partial', { ok, total, err }), 'err');
     else toast(t('wb.all.done'), 'ok');
-  }, [activeCall, order, run, t]);
+  }, [busy, posting, order, activeCall, activeIndex, source, mode, files, t,
+    sourceProblem, submitText, uploadRecording, summariseCalls, run]);
 
-  // A different recording on screen: the previous run's statuses describe a call that is gone.
-  useEffect(() => { setAllStatus({}); setAllErr(''); }, [activeCall?.id]);
+  // A different recording on screen: its statuses describe a call that is gone. The run's own
+  // recording is exempt, because it arrives MID-run and must keep the statuses set for it.
+  useEffect(() => {
+    if (activeCall?.id !== allFor.current) {
+      allFor.current = null;
+      setAllTarget(null);
+      setAllStatus({});
+      setAllErr('');
+    }
+  }, [activeCall?.id]);
 
   const runSummarise = useCallback(async () => {
     showError('summarise', '');
@@ -577,29 +716,13 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
     const s = sourceRef.current;
     const calls = s ? s.calls : [];
     if (!calls.length) { showError('summarise', t('wb.needsource')); return; }
-
-    setRunning(prev => ({ ...prev, summarise: true }));
-    const tk = token.current;
-    try {
-      const loaded: Call[] = [];
-      const batch: File[] = [];
-      for (const c of calls) {
-        const withIt = await withAudio(c);
-        if (!withIt.blob) throw new Error(t('wb.sum.needaudio'));
-        loaded.push(withIt);
-        batch.push(withIt.blob instanceof File
-          ? withIt.blob
-          : new File([withIt.blob], withIt.filename || 'call.bin', { type: withIt.blob.type || '' }));
-      }
-      if (token.current !== tk) { setRunning(prev => ({ ...prev, summarise: false })); return; }
-      // Keep the bytes that were just fetched, so a second re-run does not download them again.
-      setSource(prev => (prev && prev.calls.length === loaded.length ? { ...prev, calls: loaded } : prev));
-      await uploadSummary(batch, 'summarise', true);
-    } catch (e) {
-      setRunning(prev => ({ ...prev, summarise: false }));
-      showError('summarise', e instanceof Error ? e.message : t('wb.fail'));
-    }
-  }, [busy, files, mode, t, showError, uploadSummary, withAudio]);
+    /* The calls on screen are already transcribed, so they are summarised BY ID. This used to
+       re-upload every call's audio to POST /summaries, which transcribed each one a second time,
+       charged a second unit, left a duplicate recording in History, and refused a pasted
+       transcript for having no audio. It no longer rewrites the calls either, so a check that
+       lands meanwhile keeps its result. */
+    await summariseCalls(calls);
+  }, [busy, files, mode, t, showError, uploadSummary, summariseCalls]);
 
   /* ------------------------------------------------------------------ the handle */
 
@@ -665,18 +788,28 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
 
   const allPlan = useMemo(() => allAtOncePlan(order), [order]);
   const allChecks: Check[] = [...allPlan.first, ...allPlan.then];
+  const allRows: AllKey[] = order.includes('summarise') ? [...allChecks, 'summarise'] : allChecks;
   // One check is not "all at once"; with fewer than two available the tab would only repeat one.
-  const showAll = allChecks.length >= 2;
+  const showAll = allRows.length >= 2;
+  /** A one-click run can start from nothing loaded: exactly one queued file, or a pasted transcript. */
+  const canStartAll = !!activeCall || (mode === 'audio' ? files.length === 1 : paste.trim().length > 0);
+  const summaryBody: SummaryBody | null = summary
+    ? (summary.summary && typeof summary.summary === 'object' ? summary.summary : summary)
+    : null;
 
   const runState = (k: Feature) => {
     const has = k === 'summarise' ? !!summary : !!(activeCall && activeCall.results[k]);
-    const can = k === 'summarise'
-      ? (files.length > 0 || !!(activeCall && (activeCall.blob || activeCall.hasAudio)))
-      : !!activeCall;
+    // Summarise works from the transcripts now, so any loaded recording can be summarised,
+    // including a pasted one with no audio.
+    const can = k === 'summarise' ? (files.length > 0 || !!activeCall) : !!activeCall;
     return {
       spinning: !!running[k],
       label: running[k] ? t('wb.running') : t(has ? 'wb.rerun' : `wb.run.${k}`),
-      disabled: !can || busy || !!running[k],
+      // Locked during a one-click run: a Score pressed while the run's score is still waiting
+      // would be charged twice, and would read fact-check and sentiment before they are stored.
+      // ...and only while the running recording is the one on screen: an orphaned run finishing
+      // in the background must not keep another recording's buttons locked.
+      disabled: !can || busy || !!running[k] || (allRunning && allTarget === (activeCall?.id ?? null)),
     };
   };
 
@@ -879,22 +1012,26 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
             <div className="actions wb-run-row">
               <button
                 type="button" className="primary wb-run"
-                disabled={!activeCall || busy || allRunning || allChecks.some(k => running[k])}
+                disabled={!canStartAll || busy || posting || allRunning || allRows.some(k => running[k])}
                 onClick={() => void runAll()}
               >
                 {allRunning
                   ? <><span className="spinner" />{t('wb.running')}</>
-                  : t(activeCall && allChecks.some(k => activeCall.results[k]) ? 'wb.all.rerun' : 'wb.all.run')}
+                  : t(!activeCall ? 'wb.all.transcribe'
+                    : (allChecks.some(k => activeCall.results[k]) || summary) ? 'wb.all.rerun' : 'wb.all.run')}
               </button>
             </div>
             <div className="msg err wb-err" aria-live="polite">{allErr}</div>
+            {/* The transcription step while it runs: the report below needs a recording first. */}
+            {allRunning && !activeCall ? progressNode : null}
             {activeCall ? (
               <div className="wb-result">
-                {allChecks.map(k => {
-                  const status: CheckStatus | 'idle' = allStatus[k] ?? (activeCall.results[k] ? 'ok' : 'idle');
+                {allRows.map(k => {
+                  const hasResult = k === 'summarise' ? !!summary : !!activeCall.results[k];
+                  const status: CheckStatus | 'idle' = allStatus[k] ?? (hasResult ? 'ok' : 'idle');
                   const value = k === 'factcheck' ? numOrNull(activeCall.results.factcheck?.accuracy_score)
                     : k === 'semantic' ? agentPoliteness(activeCall.results.semantic)
-                      : numOrNull(activeCall.results.score?.weighted_total);
+                      : k === 'score' ? numOrNull(activeCall.results.score?.weighted_total) : null;
                   const scored = k === 'score' ? numOrNull(activeCall.results.score?.scored_weight) : null;
                   const pill = status === 'ok' ? 'ready' : status === 'err' ? 'error' : status === 'idle' ? '' : 'notinkb';
                   return (
@@ -914,15 +1051,15 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
                           {t(`wb.all.h.${k}`)}
                           {scored !== null && scored < 100 ? ` · ${t('wb.all.scored', { pct: scored })}` : ''}
                         </div>
-                        {value === null
-                          ? <span className="muted">{t('wb.all.na')}</span>
-                          : <><b>{value}</b><ScoreBar value={value} bands={bands} /></>}
+                        {k === 'summarise'
+                          ? (summaryBody?.short_summary
+                            ? <p style={{ margin: '4px 0 0' }}>{summaryBody.short_summary}</p>
+                            : <span className="muted">—</span>)
+                          : value === null
+                            ? <span className="muted">{t('wb.all.na')}</span>
+                            : <><b>{value}</b><ScoreBar value={value} bands={bands} /></>}
                       </div>
-                      <button
-                        type="button" className="ghost"
-                        disabled={!activeCall.results[k]}
-                        onClick={() => setTab(k)}
-                      >
+                      <button type="button" className="ghost" disabled={!hasResult} onClick={() => setTab(k)}>
                         {t('wb.all.open')}
                       </button>
                     </div>

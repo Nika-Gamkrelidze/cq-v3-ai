@@ -336,8 +336,8 @@ test('all at once: the score waits for the fact-check and sentiment it reads', (
   assert.deepEqual(plan.then, ['score']);
 });
 
-test('all at once never includes summarise', () => {
-  // It re-uploads every call's audio and digests a thread; a one-click run must not spend that.
+test('summarise is never a wave the score waits on', () => {
+  // It runs beside the waves: the score must not wait for a summary it never reads.
   const plan = allAtOncePlan(['factcheck', 'score', 'semantic', 'summarise']);
   assert.ok(![...plan.first, ...plan.then].includes('summarise' as never));
 });

@@ -157,6 +157,18 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   voice sidecar's live state. Note the coupling — that same `guidance` also steers the tone
   analyser (`routers/recordings.py::_guidance`), which now scores the rubric's courtesy
   dimension, so editing it moves a number on future scorecards.
+- **Analyse a call: "All at once"** (`components/Workbench/index.tsx::runAll`). One click
+  transcribes a queued file or a pasted transcript when nothing is loaded, then starts
+  fact-check, sentiment and summarise TOGETHER; the score starts as soon as fact-check and
+  sentiment finish, because the rubric's measured rows read their STORED results. Summarise runs
+  by recording id through `POST /summaries/from-recordings` (`routers/recordings.py::
+  summarise_recordings`), which reads the transcripts the caller's rows already hold: no second
+  transcription, no duplicate History row, one `analyses` unit, scoped by `_load`. The Summarise
+  tab's own re-run uses the same route (it used to re-upload and re-transcribe every call). A
+  full click costs 1 transcription + 1 unit per check + 1 for the summary. Two rules that must
+  not regress: the upload helpers RETURN the adopted call (state has not committed when the run
+  continues, so `activeCall` is stale), and `run` patches a result only onto a matching recording
+  id (Change or History may replace the recording mid-run).
 - **One brand-styled trilingual Next.js frontend** (EN/KA/RU, light/dark, custom dropdowns,
   toasts, confirm modals — no native browser dialogs; shared React components in
   `frontend/next/components/ui/*`, dictionaries in `lib/i18n/`). Pages: `/` (public
@@ -504,6 +516,12 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (`tzdata`), which the webhook does. **Not done:** the thresholds (0.5 direct, 3/5 off-topic)
   are starting points, not measured; no Georgian conversation has been run through triage yet;
   a hospital-specific medical rule set is being decided separately.
+- **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
+  when nothing is loaded and runs summarise alongside the checks, with the score after
+  fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST
+  /summaries` still takes files. **Not done:** the one-click flow handles one recording (a
+  multi-file queue is refused with a pointer to Summarise), and a transcription that fails or is
+  cancelled keeps its reserved unit, as every upload always has.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.
