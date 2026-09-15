@@ -1,12 +1,12 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { confirmDialog } from '@/components/ui/Modal';
 import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
 import { copyText } from '@/lib/clipboard';
-import { ApiError } from '@/lib/session';
+import { ApiError, setActingTenant } from '@/lib/session';
 import { useI18n } from '@/lib/useI18n';
-import { SessionExpired, adminGet, adminSend } from './api';
+import { SessionExpired, adminGet, adminSend, errText } from './api';
 import type { Tenant } from './api';
 import ChatConnections from './ChatConnections';
 import { killListAfter, killRowState, type KillRow, type KillState } from './logic';
@@ -19,6 +19,20 @@ import { Msg, type Note } from './parts';
    workspace's OWN chat config, so this page shows the two facts an operator needs at 3am — is it
    allowed to answer, and is it stopped — with no third place to look.
 
+   TWO SWITCHES PER ROW, and they are not the same thing. The Autopilot checkbox is the
+   workspace's own `autopilot_enabled` — whether its bot answers customers at all — and Stop /
+   Resume is the operator brake that silences a bot which is on without touching that setting.
+   They are worded, placed and styled apart on purpose: confusing them at 3am either leaves a bot
+   talking or silently rewrites a customer's configuration.
+
+   The checkbox calls `PUT /admin/chat/{id}/autopilot`, never `PUT /admin/chat/{id}/config`. The
+   config route INSERTs a whole new version from the body, so a body carrying only the flag would
+   wipe the tenant's persona, greeting, refusal copy and canned replies; and reading the MERGED
+   config back to send it whole would freeze whatever the tenant currently inherits from the
+   default bot into its own row, so later default-bot edits would stop reaching it. The dedicated
+   route copies the tenant's raw row and flips one field, which is the only write that can do
+   neither.
+
    N+1 BY DESIGN: one request per workspace for its `autopilot_enabled`. The tenant list is tens
    of rows, not thousands, and a workspace whose config cannot be read is shown, flagged and
    still stoppable rather than dropped from the table. */
@@ -30,6 +44,12 @@ export default function BotControlTab() {
   const [reachable, setReachable] = useState(true);
   const [overviewFailed, setOverviewFailed] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
+  /* One in-flight flag PER ROW, not one for the page: a slow write for one workspace must not
+     freeze every other row's switch, and a double click on the same row must not send two. */
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  /* The row whose "share a document first" note is open. One at a time — two open notes would
+     read as two different problems. */
+  const [needPublic, setNeedPublic] = useState<string | null>(null);
 
   const loadTenants = useCallback(async () => {
     setOverviewFailed(false);
@@ -109,6 +129,50 @@ export default function BotControlTab() {
     await put({ disabled_clients: killListAfter(state, row.id, stop) });
   };
 
+  const flipAutopilot = async (row: KillRow, enabled: boolean) => {
+    if (busy[row.id]) return;
+    setNeedPublic(null);
+    /* ON points a model at that workspace's customers, so it is confirmed and says so. OFF only
+       ever makes the bot quieter and is not worth a dialog. */
+    if (enabled && !(await confirmDialog(
+      t('kill.confirm.autopilot.on', { name: row.name || '' }),
+      { ok: t('kill.autopilot.on') },
+    ))) return;
+    setBusy(b => ({ ...b, [row.id]: true }));
+    try {
+      const r = await adminSend<{ autopilot_enabled?: boolean }>(
+        'PUT', `/admin/chat/${row.id}/autopilot`, { enabled });
+      const now = !!r?.autopilot_enabled;
+      // Only this row, from the server's answer: the other rows did not change, and re-reading
+      // every workspace's config for one checkbox would be the N+1 above for no reason.
+      setRows(rs => rs.map(x => (x.id === row.id ? { ...x, autopilot: now, reachable: true } : x)));
+      toast(t(now ? 'kill.autopilot.saved.on' : 'kill.autopilot.saved.off', { name: row.name || '' }), 'ok');
+    } catch (e) {
+      if (e instanceof SessionExpired) return;
+      /* A 409 from THIS route is the gate — no document shared with the bot — and nothing else.
+         Matched on the status because `ApiError` keeps only `detail`, not the body's `code`. A
+         toggle that only fails is the difference between a broken product and one that
+         teaches, so the row explains the reason and offers the fix. */
+      if (e instanceof ApiError && e.status === 409) setNeedPublic(row.id);
+      else toast(errText(e, t), 'err');
+    } finally {
+      setBusy(b => {
+        const next = { ...b };
+        delete next[row.id];
+        return next;
+      });
+    }
+  };
+
+  /* Into that workspace's KB tab as its operator. `?tenant=` wins over the stored selection on
+     /workspace and `#kb` picks the tab (see app/workspace/page.tsx); setting the acting tenant as
+     well keeps the two in agreement. Same tab, not a new one: the admin token lives in this
+     tab's sessionStorage, and a fresh tab would open the sign-in gate instead. */
+  const openKb = (id: string) => {
+    setActingTenant(id);
+    location.assign(`/workspace?tenant=${encodeURIComponent(id)}#kb`);
+  };
+
   return (
     <>
       <div className="card">
@@ -155,7 +219,10 @@ export default function BotControlTab() {
                         <span>{t('th.selector')}</span>
                         <Tip text={t('kill.selector.hint')} />
                       </th>
-                      <th>{t('th.autopilot')}</th>
+                      <th>
+                        <span>{t('th.autopilot')}</span>
+                        <Tip text={t('kill.autopilot.hint')} />
+                      </th>
                       <th>{t('th.status')}</th>
                       <th />
                     </tr>
@@ -165,41 +232,70 @@ export default function BotControlTab() {
                       const st = killRowState(x, state);
                       const stopped = state.disabled_clients.includes(x.id);
                       return (
-                        <tr key={x.id}>
-                          <td>
-                            {x.name}
-                            {x.reachable ? null : <span className="hint"> {t('kill.overviewfail')}</span>}
-                          </td>
-                          {/* The value a chat service sends as X-CQ-Tenant. Every request on this
-                              page already used it and none displayed it, so operators pasted the
-                              name, the slug, the integration id or the tenant API key into the chat
-                              product instead. No await before copyText: production copies through
-                              the gesture-bound fallback, see lib/clipboard.ts. */}
-                          <td className="inline" style={{ gap: 8 }}>
-                            <code style={{ fontSize: 12 }}>{x.id}</code>
-                            <button
-                              className="ghost"
-                              type="button"
-                              onClick={() => {
-                                copyText(x.id).then(ok => toast(
-                                  ok ? t('pb.copied') : t('kill.selector.copyfail'), ok ? 'ok' : 'err'));
-                              }}
-                            >
-                              {t('pb.copy')}
-                            </button>
-                          </td>
-                          <td><span className={`pill ${x.autopilot ? 'on' : 'off'}`}>{x.autopilot ? '●' : '○'}</span></td>
-                          <td><span className={`pill ${st.cls}`}>{t(st.key)}</span></td>
-                          <td className="inline">
-                            <button
-                              className={stopped ? 'primary' : 'danger'}
-                              type="button"
-                              onClick={() => flipTenant(x, !stopped)}
-                            >
-                              {stopped ? t('kill.resume') : t('kill.stop')}
-                            </button>
-                          </td>
-                        </tr>
+                        <Fragment key={x.id}>
+                          <tr>
+                            <td>
+                              {x.name}
+                              {x.reachable ? null : <span className="hint"> {t('kill.overviewfail')}</span>}
+                            </td>
+                            {/* The value a chat service sends as X-CQ-Tenant. Every request on this
+                                page already used it and none displayed it, so operators pasted the
+                                name, the slug, the integration id or the tenant API key into the chat
+                                product instead. No await before copyText: production copies through
+                                the gesture-bound fallback, see lib/clipboard.ts. */}
+                            <td className="inline" style={{ gap: 8 }}>
+                              <code style={{ fontSize: 12 }}>{x.id}</code>
+                              <button
+                                className="ghost"
+                                type="button"
+                                onClick={() => {
+                                  copyText(x.id).then(ok => toast(
+                                    ok ? t('pb.copied') : t('kill.selector.copyfail'), ok ? 'ok' : 'err'));
+                                }}
+                              >
+                                {t('pb.copy')}
+                              </button>
+                            </td>
+                            {/* Controlled by the server's answer, not the click: the box moves only
+                                once the write lands, so a declined confirm or a 409 leaves it where
+                                the workspace really is. */}
+                            <td>
+                              <input
+                                type="checkbox"
+                                style={{ width: 'auto' }}
+                                checked={x.autopilot}
+                                disabled={!!busy[x.id]}
+                                aria-label={t('kill.autopilot.aria', { name: x.name || '' })}
+                                onChange={e => void flipAutopilot(x, e.target.checked)}
+                              />
+                            </td>
+                            <td><span className={`pill ${st.cls}`}>{t(st.key)}</span></td>
+                            <td className="inline">
+                              <button
+                                className={stopped ? 'primary' : 'danger'}
+                                type="button"
+                                onClick={() => flipTenant(x, !stopped)}
+                              >
+                                {stopped ? t('kill.resume') : t('kill.stop')}
+                              </button>
+                            </td>
+                          </tr>
+                          {needPublic === x.id ? (
+                            <tr>
+                              <td colSpan={5}>
+                                <div className="msg err">
+                                  <b>{t('bot.needpublic.title')}</b>
+                                  <div style={{ marginTop: 6 }}>{t('bot.needpublic.body')}</div>
+                                  <div className="actions">
+                                    <button type="button" className="ghost" onClick={() => openKb(x.id)}>
+                                      {t('bot.needpublic.link')}
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
                       );
                     })}
                   </tbody>

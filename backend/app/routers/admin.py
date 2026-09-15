@@ -14,8 +14,8 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import pool
-from ..services import (ai_config, chat_credentials, chat_store, claude, health_metrics, limits,
-                        sentiment, settings_store, usage, voice)
+from ..services import (ai_config, ai_registry, chat_credentials, chat_store, claude,
+                        health_metrics, limits, sentiment, settings_store, usage, voice)
 from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
@@ -792,6 +792,49 @@ async def put_chat_config(tenant_id: str, body: ChatConfigBody):
             updated_by="superadmin")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class AutopilotBody(BaseModel):
+    enabled: bool
+
+
+@router.put("/chat/{tenant_id}/autopilot", dependencies=[Depends(require_admin)])
+async def put_chat_autopilot(tenant_id: str, body: AutopilotBody):
+    """The Bot control switch: turn one workspace's autopilot on or off, and nothing else.
+
+    Not a thin wrapper over put_chat_config above, because that route writes a whole version
+    from its body — a console switch sending only the flag would erase the tenant's persona and
+    refusal copy. `chat_store.set_autopilot` copies the stored row instead (its docstring has
+    both traps).
+
+    Errors are JSONResponses with a top-level `code`, not HTTPException(detail={...}), which
+    would nest the dict under `detail`: the console branches on the code. `tenant_not_found`
+    because a stale row in an open console is a real case, and `no_public_documents` because
+    the same gate as put_chat_config applies and the operator has to be told what to publish,
+    not merely that it failed. `public_documents` rides on every answer so the switch can show
+    why it is (or would be) refused without a second request.
+    """
+    if not await ai_registry.tenant_exists(tenant_id):
+        return JSONResponse(status_code=404, content={
+            "detail": "Tenant not found", "code": "tenant_not_found"})
+    public = await count_public_documents(tenant_id)
+    # Only switching ON is gated: turning a public bot off is the safe direction and must
+    # never be blocked by the state of the knowledge base.
+    if body.enabled and not public:
+        return JSONResponse(status_code=409, content={
+            # Word for word the sentence put_chat_config and the tenant route raise.
+            "detail": "Cannot enable autopilot: this tenant has no public knowledge-base "
+                      "documents. Publish at least one document (visibility='public') first.",
+            "code": "no_public_documents",
+            "public_documents": 0,
+        })
+    cfg = await chat_store.set_autopilot(tenant_id, body.enabled, updated_by="superadmin")
+    return {
+        "autopilot_enabled": cfg["autopilot_enabled"],
+        "version": cfg.get("version"),
+        "is_default": cfg.get("is_default", False),
+        "public_documents": public,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -854,3 +854,91 @@ async def save_chat_config(
             if _attempt == 2:
                 raise
     return await get_chat_config(client_id)
+
+
+async def set_autopilot(client_id: str, enabled: bool, *, updated_by: str = "superadmin") -> dict:
+    """Flip ONLY `autopilot_enabled` on a tenant, as a new active version, and return the
+    merged effective config.
+
+    This exists so the console's Bot control switch has a writer. Calling save_chat_config
+    with just `autopilot_enabled` looks the same and is not, because of two traps:
+
+      T1. save_chat_config writes a WHOLE version from its arguments. Whatever the caller does
+          not send becomes the body model's default (persona None, greeting {}, refusal copy
+          {}, canned [], settings {}), so a switch that sends one field erases the tenant's
+          persona, lawyer-reviewed refusal copy, canned replies and tuning knobs.
+      T2. Reading get_chat_config and writing it back is no fix either. That read is MERGED:
+          an empty persona, an empty language, empty canned/languages or an absent settings
+          key mean "inherit the default bot", and the merge fills them in. Writing the merged
+          values back freezes today's default into the tenant's row, so the next Default bot
+          edit silently stops reaching this tenant. save_chat_config also cannot store an
+          empty `languages` array at all (it substitutes the code defaults).
+
+    So the new version is copied from the tenant's RAW active row, in SQL, column for column —
+    an empty array stays empty and a NULL persona stays NULL — and only the switch changes.
+    A tenant with no row gets one whose every field is the inherit value, so switching the
+    bot on does not also detach the tenant from the default.
+
+    A switch already in the requested position writes nothing: a double click (or two
+    operators) must not mint versions that make "what changed last Tuesday" harder to read.
+    Same transaction shape and UniqueViolation retry as save_chat_config.
+    """
+    if not client_id:
+        raise ValueError("client_id is required")
+    enabled = bool(enabled)
+    for _attempt in range(3):
+        try:
+            async with pool().acquire() as conn:
+                async with conn.transaction():
+                    current = await conn.fetchrow(
+                        "SELECT version, autopilot_enabled FROM chat_configs "
+                        "WHERE client_id = $1 AND is_active "
+                        "ORDER BY version DESC LIMIT 1", client_id)
+                    if current is not None and bool(current["autopilot_enabled"]) == enabled:
+                        break
+                    next_ver = await conn.fetchval(
+                        "SELECT COALESCE(MAX(version), 0) + 1 FROM chat_configs "
+                        "WHERE client_id = $1", client_id)
+                    # The copy source is the row THIS UPDATE deactivated (and therefore holds
+                    # locked), not the row the SELECT above saw. If another save committed in
+                    # between, copying the SELECT's row would quietly undo it; this way we copy
+                    # the newest committed version, or — if the other writer's row was never
+                    # in our scan — deactivate nothing, and the INSERT below collides with its
+                    # active row on uq_chat_configs_active and goes round the retry instead.
+                    source_ver = await conn.fetchval(
+                        "UPDATE chat_configs SET is_active = false, updated_at = now() "
+                        "WHERE client_id = $1 AND is_active RETURNING version", client_id)
+                    if source_ver is not None:
+                        # INSERT ... SELECT rather than a Python round trip: no jsonb decode and
+                        # re-encode, no `or default` substitution — the stored values move as-is.
+                        await conn.execute(
+                            """
+                            INSERT INTO chat_configs
+                                (client_id, version, persona, greeting, refusal_copy, languages,
+                                 canned, autopilot_enabled, settings, is_active,
+                                 updated_at, updated_by)
+                            SELECT client_id, $2::integer, persona, greeting, refusal_copy,
+                                   languages, canned, $3::boolean, settings, true,
+                                   now(), $4::text
+                            FROM chat_configs
+                            WHERE client_id = $1 AND version = $5::integer
+                            """,
+                            client_id, next_ver, enabled, updated_by, source_ver)
+                    else:
+                        # Every field at its inherit value (see get_chat_config): NULL persona,
+                        # empty copy maps, EMPTY languages, empty canned, empty settings.
+                        await conn.execute(
+                            """
+                            INSERT INTO chat_configs
+                                (client_id, version, persona, greeting, refusal_copy, languages,
+                                 canned, autopilot_enabled, settings, is_active,
+                                 updated_at, updated_by)
+                            VALUES ($1, $2, NULL, '{}'::jsonb, '{}'::jsonb, '{}'::text[],
+                                    '[]'::jsonb, $3, '{}'::jsonb, true, now(), $4)
+                            """,
+                            client_id, next_ver, enabled, updated_by)
+            break
+        except asyncpg.UniqueViolationError:
+            if _attempt == 2:
+                raise
+    return await get_chat_config(client_id)

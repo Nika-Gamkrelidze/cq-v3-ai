@@ -290,6 +290,13 @@ export const en: Dict = {
   'kill.unavailable': 'The kill switch is not deployed on this server yet.',
   'kill.overviewfail': 'Could not read the per-tenant autopilot state.',
 
+  'kill.autopilot.hint': 'The workspace’s own switch: whether its bot answers customers at all. Turning it on needs at least one knowledge-base document shared with the bot. Stop is a different control — the operator brake that silences a bot that is on, without changing this switch.',
+  'kill.autopilot.aria': 'Autopilot for “{name}”',
+  'kill.autopilot.on': 'Turn on',
+  'kill.confirm.autopilot.on': 'Turn autopilot on for “{name}”? Its bot will start answering that workspace’s customers from the knowledge-base documents shared with it.',
+  'kill.autopilot.saved.on': 'Autopilot turned on for “{name}”',
+  'kill.autopilot.saved.off': 'Autopilot turned off for “{name}”',
+
   'adm.retention': 'Keep anonymous data (days)',
   'adm.retention.hint': 'How long an unregistered visitor’s IP, audio and text are kept before the worker deletes them. 0 keeps them indefinitely.',
 
@@ -635,6 +642,13 @@ export const ka: Dict = {
   'kill.unavailable': 'ავარიული გამორთვა ამ სერვერზე ჯერ არ არის განთავსებული.',
   'kill.overviewfail': 'ორგანიზაციების ავტოპილოტის მდგომარეობის წაკითხვა ვერ მოხერხდა.',
 
+  'kill.autopilot.hint': 'სამუშაო სივრცის საკუთარი გადამრთველი: პასუხობს თუ არა მისი ბოტი კლიენტებს საერთოდ. ჩართვისთვის საჭიროა ცოდნის ბაზის მინიმუმ ერთი ბოტისთვის დაშვებული დოკუმენტი. „შეჩერება“ სხვა ელემენტია — ოპერატორის მუხრუჭი, რომელიც ჩართულ ბოტს აჩუმებს ისე, რომ ეს გადამრთველი არ იცვლება.',
+  'kill.autopilot.aria': 'ავტოპილოტი „{name}“-სთვის',
+  'kill.autopilot.on': 'ჩართვა',
+  'kill.confirm.autopilot.on': 'ჩავრთო ავტოპილოტი „{name}“-სთვის? ბოტი დაიწყებს ამ სამუშაო სივრცის კლიენტებისთვის პასუხის გაცემას ბოტისთვის დაშვებული ცოდნის ბაზის დოკუმენტების საფუძველზე.',
+  'kill.autopilot.saved.on': 'ავტოპილოტი ჩაირთა „{name}“-სთვის',
+  'kill.autopilot.saved.off': 'ავტოპილოტი გამოირთა „{name}“-სთვის',
+
   'adm.retention': 'ანონიმური მონაცემების შენახვა (დღე)',
   'adm.retention.hint': 'რამდენ ხანს ინახება არარეგისტრირებული მომხმარებლის IP, აუდიო და ტექსტი, სანამ წაიშლება. 0 — უვადოდ.',
 
@@ -979,6 +993,13 @@ export const ru: Dict = {
   'kill.loadfail': 'Не удалось прочитать состояние выключателя.',
   'kill.unavailable': 'Аварийный выключатель ещё не развёрнут на этом сервере.',
   'kill.overviewfail': 'Не удалось прочитать состояние автопилота по клиентам.',
+
+  'kill.autopilot.hint': 'Собственный переключатель рабочего пространства: отвечает ли его бот клиентам вообще. Для включения нужен хотя бы один документ базы знаний, открытый боту. «Остановить» — другой элемент: тормоз оператора, который заглушает включённого бота, не меняя этот переключатель.',
+  'kill.autopilot.aria': 'Автопилот для «{name}»',
+  'kill.autopilot.on': 'Включить',
+  'kill.confirm.autopilot.on': 'Включить автопилот для «{name}»? Бот начнёт отвечать клиентам этого рабочего пространства по документам базы знаний, открытым для него.',
+  'kill.autopilot.saved.on': 'Автопилот включён для «{name}»',
+  'kill.autopilot.saved.off': 'Автопилот выключен для «{name}»',
 
   'adm.retention': 'Хранить анонимные данные (дней)',
   'adm.retention.hint': 'Сколько хранятся IP, аудио и текст незарегистрированного посетителя до удаления. 0 — бессрочно.',
