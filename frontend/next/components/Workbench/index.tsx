@@ -43,11 +43,14 @@ import { xhrStream } from '@/lib/xhrStream';
 import { isUnauthorized } from './api';
 import { Factcheck } from './Factcheck';
 import {
-  asArray, callFromRow, featureOrder, firstResultTab, laneDrawable, lanesFor, LANE_KINDS,
+  agentPoliteness, allAtOncePlan, asArray, callFromRow, featureOrder, firstResultTab, laneDrawable,
+  lanesFor, LANE_KINDS,
   marksOf, numOrNull, overTotalSize, queueFiles, rolesWithSpeakers, sortLanes,
-  type Call, type Feature, type Lane, type RecordingRow, type ScoreResult, type SemanticResult,
+  type Call, type Check, type Feature, type Lane, type RecordingRow, type ScoreResult,
+  type SemanticResult,
   type Span, type SummaryResult,
 } from './logic';
+import { ScoreBar } from './parts';
 import { Scorecard } from './Scorecard';
 import { Sentiment } from './Sentiment';
 import { DoneCard, Progress, SourceCard } from './Source';
@@ -88,6 +91,11 @@ export interface WorkbenchProps {
   onUnauthorized?: () => void;
 }
 
+/** How one analyser run ended. `skip` = nothing was sent (no source, or no mode picked). */
+type RunOutcome = 'ok' | 'err' | 'skip';
+/** A check's place in an "All at once" run. */
+type CheckStatus = 'wait' | 'run' | RunOutcome;
+
 interface SourceState {
   kind: 'recording' | 'summary';
   calls: Call[];
@@ -106,7 +114,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
   const [mode, setMode] = useState<'audio' | 'text'>('audio');
   const [files, setFiles] = useState<File[]>([]);
   const [paste, setPaste] = useState('');
-  const [tab, setTabState] = useState<Feature>(order[0] || 'score');
+  const [tab, setTabState] = useState<Feature | 'all'>(order[0] || 'score');
   const [source, setSource] = useState<SourceState | null>(null);
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [bands, setBands] = useState<ScoreBands>(DEFAULT_BANDS);
@@ -119,6 +127,11 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
   const [busy, setBusy] = useState(false);          // an XHR upload is in flight
   const [posting, setPosting] = useState(false);    // the pasted-transcript POST is in flight
   const [running, setRunning] = useState<Partial<Record<Feature, boolean>>>({});
+  /** Where each check stands in the current "All at once" run. Empty until one is started, so a
+      check that ran on its own earlier reads from the call's stored result instead. */
+  const [allStatus, setAllStatus] = useState<Partial<Record<Check, CheckStatus>>>({});
+  const [allRunning, setAllRunning] = useState(false);
+  const [allErr, setAllErr] = useState('');
   const [progress, setProgress] = useState<{ label: string; value: number | null } | null>(null);
   const [srcErr, setSrcErr] = useState<{ text: string; isError: boolean }>({ text: '', isError: true });
   const [paneErr, setPaneErr] = useState<Partial<Record<Feature, string>>>({});
@@ -465,12 +478,12 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
 
   /* ------------------------------------------------------------------ analysers */
 
-  const run = useCallback(async (kind: Feature) => {
-    if (kind === 'summarise') return;
+  const run = useCallback(async (kind: Feature, opts?: { quiet?: boolean }): Promise<RunOutcome> => {
+    if (kind === 'summarise') return 'skip';
     showError(kind, '');
     const index = activeIndex;
     const call = activeCall;
-    if (!call) { showError(kind, t('wb.needsource')); return; }
+    if (!call) { showError(kind, t('wb.needsource')); return 'skip'; }
 
     let body: unknown;
     if (kind === 'semantic') {
@@ -478,7 +491,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
       const modes: string[] = [];
       if (wantWords) modes.push('text');
       if (audio && (voice.touched ? voice.on : true)) modes.push('voice');
-      if (!modes.length) { showError(kind, t('wb.sem.pickone')); return; }
+      if (!modes.length) { showError(kind, t('wb.sem.pickone')); return 'skip'; }
       body = { modes };
     }
 
@@ -494,16 +507,63 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
         // it finds relabel the chips, the timeline and the transcript.
         roles: kind === 'semantic' ? rolesWithSpeakers(c.roles, data as SemanticResult) : c.roles,
       }));
-      toast(t(kind === 'score' ? 'pg.done' : kind === 'factcheck' ? 'wb.fc.done' : 'wb.sem.done'), 'ok');
+      if (!opts?.quiet) {
+        toast(t(kind === 'score' ? 'pg.done' : kind === 'factcheck' ? 'wb.fc.done' : 'wb.sem.done'), 'ok');
+      }
+      return 'ok';
     } catch (e) {
       const m = apiMessage(e, t);
+      // The pane's own error line is kept even when quiet: it is where the reason lives when
+      // someone opens that tab from the combined report.
       showError(kind, m);
-      toast(m, 'err');
+      if (!opts?.quiet) toast(m, 'err');
       if (isUnauthorized(e)) onUnauthorized?.();
+      return 'err';
     } finally {
       setRunning(prev => ({ ...prev, [kind]: false }));
     }
   }, [activeCall, activeIndex, wantWords, voice, scope, t, showError, patchCall, onUnauthorized]);
+
+  /* ALL AT ONCE — every check on this recording, reported together.
+     Fact-check and sentiment run side by side; the SCORE WAITS for both. The rubric's measured
+     rows are scored server-side from the results those two store on the recording, so a score
+     fired at the same moment would read the previous run's numbers, or none, and the combined
+     report would show a fact-check that disagrees with the fact-check row on its own scorecard.
+     Each check keeps its own spinner and error line in its own tab; this adds one report and
+     ONE toast in place of three. A failure in one check never stops the others. */
+  const runAll = useCallback(async () => {
+    setAllErr('');
+    if (!activeCall) { setAllErr(t('wb.needsource')); return; }
+    const plan = allAtOncePlan(order);
+    const checks: Check[] = [...plan.first, ...plan.then];
+    if (!checks.length) return;
+    const initial: Partial<Record<Check, CheckStatus>> = {};
+    for (const k of plan.first) initial[k] = 'run';
+    for (const k of plan.then) initial[k] = 'wait';
+    setAllStatus(initial);
+    setAllRunning(true);
+    const outcomes: RunOutcome[] = [];
+    const settle = (k: Check, r: RunOutcome) => {
+      outcomes.push(r);
+      setAllStatus(prev => ({ ...prev, [k]: r }));
+    };
+    try {
+      await Promise.all(plan.first.map(async k => settle(k, await run(k, { quiet: true }))));
+      for (const k of plan.then) {
+        setAllStatus(prev => ({ ...prev, [k]: 'run' }));
+        settle(k, await run(k, { quiet: true }));
+      }
+    } finally {
+      setAllRunning(false);
+    }
+    const ok = outcomes.filter(r => r === 'ok').length;
+    const err = outcomes.filter(r => r === 'err').length;
+    if (err) toast(t('wb.all.partial', { ok, total: checks.length, err }), 'err');
+    else toast(t('wb.all.done'), 'ok');
+  }, [activeCall, order, run, t]);
+
+  // A different recording on screen: the previous run's statuses describe a call that is gone.
+  useEffect(() => { setAllStatus({}); setAllErr(''); }, [activeCall?.id]);
 
   const runSummarise = useCallback(async () => {
     showError('summarise', '');
@@ -602,6 +662,11 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
 
   const audioAvailable = !!(activeCall && activeCall.source === 'audio' && (activeCall.blob || activeCall.hasAudio));
   const voiceChecked = audioAvailable && (voice.touched ? voice.on : true);
+
+  const allPlan = useMemo(() => allAtOncePlan(order), [order]);
+  const allChecks: Check[] = [...allPlan.first, ...allPlan.then];
+  // One check is not "all at once"; with fewer than two available the tab would only repeat one.
+  const showAll = allChecks.length >= 2;
 
   const runState = (k: Feature) => {
     const has = k === 'summarise' ? !!summary : !!(activeCall && activeCall.results[k]);
@@ -712,6 +777,16 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
               {t(`wb.tab.${k}`)}
             </button>
           ))}
+          {showAll ? (
+            <button
+              type="button" role="tab"
+              className={`subtab${tab === 'all' ? ' active' : ''}`}
+              aria-selected={tab === 'all'}
+              onClick={() => setTabState('all')}
+            >
+              {t('wb.tab.all')}
+            </button>
+          ) : null}
         </div>
 
         {order.map(k => {
@@ -797,6 +872,66 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
             </div>
           );
         })}
+
+        {showAll ? (
+          <div className={`wb-pane${tab === 'all' ? ' active' : ''}`} data-an="all" role="tabpanel">
+            <p className="hint wb-note">{t('wb.all.note')}</p>
+            <div className="actions wb-run-row">
+              <button
+                type="button" className="primary wb-run"
+                disabled={!activeCall || busy || allRunning || allChecks.some(k => running[k])}
+                onClick={() => void runAll()}
+              >
+                {allRunning
+                  ? <><span className="spinner" />{t('wb.running')}</>
+                  : t(activeCall && allChecks.some(k => activeCall.results[k]) ? 'wb.all.rerun' : 'wb.all.run')}
+              </button>
+            </div>
+            <div className="msg err wb-err" aria-live="polite">{allErr}</div>
+            {activeCall ? (
+              <div className="wb-result">
+                {allChecks.map(k => {
+                  const status: CheckStatus | 'idle' = allStatus[k] ?? (activeCall.results[k] ? 'ok' : 'idle');
+                  const value = k === 'factcheck' ? numOrNull(activeCall.results.factcheck?.accuracy_score)
+                    : k === 'semantic' ? agentPoliteness(activeCall.results.semantic)
+                      : numOrNull(activeCall.results.score?.weighted_total);
+                  const scored = k === 'score' ? numOrNull(activeCall.results.score?.scored_weight) : null;
+                  const pill = status === 'ok' ? 'ready' : status === 'err' ? 'error' : status === 'idle' ? '' : 'notinkb';
+                  return (
+                    <div
+                      key={k}
+                      style={{
+                        display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12,
+                        alignItems: 'center', padding: '12px 0', borderTop: '1px solid var(--hairline)',
+                      }}
+                    >
+                      <div>
+                        <div className="inline" style={{ gap: 8, flexWrap: 'wrap' }}>
+                          <b>{t(`wb.tab.${k}`)}</b>
+                          <span className={`pill ${pill}`.trim()}>{t(`wb.all.st.${status}`)}</span>
+                        </div>
+                        <div className="hint">
+                          {t(`wb.all.h.${k}`)}
+                          {scored !== null && scored < 100 ? ` · ${t('wb.all.scored', { pct: scored })}` : ''}
+                        </div>
+                        {value === null
+                          ? <span className="muted">{t('wb.all.na')}</span>
+                          : <><b>{value}</b><ScoreBar value={value} bands={bands} /></>}
+                      </div>
+                      <button
+                        type="button" className="ghost"
+                        disabled={!activeCall.results[k]}
+                        onClick={() => setTab(k)}
+                      >
+                        {t('wb.all.open')}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </div>
   );

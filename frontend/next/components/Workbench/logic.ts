@@ -132,6 +132,11 @@ export interface ScoreResult {
   is_default?: boolean;
   manually_edited?: boolean;
   edited_by?: string | null;
+  /** How much of the rubric the total was computed from. Below 100 when a measured dimension
+      (no knowledge base, no tone pass) dropped out and the rest were renormalised — so an 82
+      on two thirds of the rubric is not mistaken for an 82 on all of it. */
+  scored_weight?: number | null;
+  unscored?: string[] | null;
 }
 
 export interface ScoreRevision {
@@ -648,6 +653,42 @@ export function firstResultTab(
 ): Feature | null {
   for (const k of order) {
     if (k === 'summarise' ? hasSummary : !!(call && call.results[k])) return k;
+  }
+  return null;
+}
+
+
+/* ------------------------------------------------------------------ all at once */
+
+/** The checks "All at once" runs on one recording. Summarise is deliberately not one of them:
+    it re-uploads every call's audio and digests a whole THREAD, where these three judge the
+    recording on screen, and folding a multi-call upload into a one-click run would spend far
+    more than the button suggests. */
+export const ALL_CHECKS = ['factcheck', 'semantic', 'score'] as const;
+export type Check = (typeof ALL_CHECKS)[number];
+
+/** Which checks this workbench offers, split into the order that makes them AGREE.
+
+    The score is not independent of the other two: the rubric's measured dimensions are scored
+    server-side from the fact-check and tone results STORED on the recording. Fired all at once,
+    the score would race them and read the previous run's numbers, or none. So fact-check and
+    sentiment run side by side, and the score waits for both. */
+export function allAtOncePlan(order: readonly Feature[]): { first: Check[]; then: Check[] } {
+  const has = (k: Check) => order.includes(k);
+  return {
+    first: (['factcheck', 'semantic'] as const).filter(has),
+    then: has('score') ? ['score'] : [],
+  };
+}
+
+/** The tone analyser's politeness for the AGENT, 0-100, or null — the same number the rubric's
+    courtesy dimension reads (`scoring.agent_politeness` on the server). The customer's
+    politeness is ignored on purpose: a difficult caller must not read as a discourteous agent. */
+export function agentPoliteness(sem: SemanticResult | null | undefined): number | null {
+  for (const sp of sem?.speakers || []) {
+    if ((sp?.role || '').trim().toLowerCase() !== 'agent') continue;
+    const n = numOrNull(sp?.text?.politeness);
+    return n === null ? null : Math.max(0, Math.min(100, Math.round(n)));
   }
   return null;
 }

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  callFromRow, featureOrder, firstResultTab, lanesFor, levelOf, LIMITS, noVoiceKey, numOrNull,
+  agentPoliteness, allAtOncePlan, callFromRow, featureOrder, firstResultTab, lanesFor, levelOf,
+  LIMITS, noVoiceKey, numOrNull,
   overTotalSize, pct, queueFiles, rolesWithSpeakers, sortLanes, toneLevel, VERDICT_LABEL_KEY,
   voiceVerdictLevel, worstLevel,
   type Call, type Lane, type Level,
@@ -322,4 +323,40 @@ test('pct clamps a bar to something drawable', () => {
   assert.equal(pct(140), 100);
   assert.equal(pct(null), 0);
   assert.equal(pct('not a number'), 0);
+});
+
+
+/* ------------------------------------------------------------------ all at once */
+
+test('all at once: the score waits for the fact-check and sentiment it reads', () => {
+  // The rubric's measured rows are scored from the results those two STORE on the recording.
+  // Fired in parallel, the score reads the previous run's numbers — this ordering is the fix.
+  const plan = allAtOncePlan(['factcheck', 'score', 'semantic', 'summarise']);
+  assert.deepEqual(plan.first, ['factcheck', 'semantic']);
+  assert.deepEqual(plan.then, ['score']);
+});
+
+test('all at once never includes summarise', () => {
+  // It re-uploads every call's audio and digests a thread; a one-click run must not spend that.
+  const plan = allAtOncePlan(['factcheck', 'score', 'semantic', 'summarise']);
+  assert.ok(![...plan.first, ...plan.then].includes('summarise' as never));
+});
+
+test('all at once only plans the checks this workbench offers', () => {
+  assert.deepEqual(allAtOncePlan(['score', 'summarise']), { first: [], then: ['score'] });
+  assert.deepEqual(allAtOncePlan(['factcheck', 'semantic']), { first: ['factcheck', 'semantic'], then: [] });
+  assert.deepEqual(allAtOncePlan([]), { first: [], then: [] });
+});
+
+test('the courtesy headline reads the agent, never the customer', () => {
+  // The same rule as the rubric's courtesy dimension: a furious caller is not a rude agent.
+  const sem = { speakers: [
+    { speaker: 'speaker_1', role: 'customer', text: { politeness: 8 } },
+    { speaker: 'speaker_0', role: 'agent', text: { politeness: 94.4 } },
+  ] };
+  assert.equal(agentPoliteness(sem), 94);
+  assert.equal(agentPoliteness({ speakers: [{ role: 'customer', text: { politeness: 90 } }] }), null);
+  assert.equal(agentPoliteness({ speakers: [{ role: 'agent', text: { politeness: null } }] }), null);
+  assert.equal(agentPoliteness({ speakers: [{ role: 'agent', text: { politeness: 140 } }] }), 100);
+  assert.equal(agentPoliteness(null), null);
 });
