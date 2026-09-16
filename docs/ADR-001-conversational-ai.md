@@ -763,3 +763,23 @@ notice. A failure handoff is never silent.
   business is open; there is still no after-hours fallback message or routing.
 - **The new thresholds are guesses** — a warning after 3 off-topic turns, a cut-off after 5,
   `direct_min_score` 0.5 — exactly as the curation thresholds were. Only real traffic sets them.
+
+### Note — 2026-09-16: a third policy, `open`
+
+The owner's first test of `general` asked "how many planets are there?" and got the one-sentence
+redirect — correct under the decision above, and not what had been asked for. The request was a
+bot with world knowledge that answers **any** question, where a customer who keeps asking unrelated
+ones is warned and then stopped. `general` only widens the `related` row; nothing above let an
+off-topic question be answered.
+
+`answer_policy: open` (*Answer any question*) adds that and changes nothing else. `related` is
+handled as under `general`. An `off_topic` message gets a short answer from general knowledge,
+written by the same triage call (no second call), and is **still counted**: the warning and the
+cut-off, not the policy, limit the spend, and the cut-off stays a zero-token exit. An answer that
+comes back empty, or that makes a commitment, is replaced by the built-in redirect and **does not
+hand off** — prices, deadlines and promises still come only from the documents, and an unrelated
+question is not a reason to wake a colleague. Off-topic still never hands off, under any policy.
+`kb_only` and `general` behave exactly as decided above, so "the two policies differ only on this
+row" still holds between those two; the legacy `allow_general_knowledge: true` reads as `general`,
+never `open`. Switching a workspace to `general` or `open` asks for confirmation in the UI;
+switching back to `kb_only` never does.

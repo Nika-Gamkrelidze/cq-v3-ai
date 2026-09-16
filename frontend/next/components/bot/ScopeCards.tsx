@@ -17,7 +17,7 @@ import { confirmDialog } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { Tip } from '@/components/ui/Tip';
 import {
-  BOT_LANGS, DAY_KEYS, SCOPE_LIMITS, timezoneOptions,
+  ANSWER_POLICIES, BOT_LANGS, DAY_KEYS, SCOPE_LIMITS, isAnswerPolicy, timezoneOptions,
   type AnswerPolicy, type BuiltinCopy, type DayForm, type DayKey, type ScopeError, type ScopeForm,
 } from '@/app/console/logic';
 
@@ -42,13 +42,16 @@ export function scopeErrorText(err: ScopeError, t: T): string {
 /** The policy picker, as the card's heading. The ⓘ explains the option currently chosen. */
 export function AnswerPolicyField({ form, update, t, readonly, idPrefix }: ScopeProps): JSX.Element {
   const choose = async (value: string) => {
-    const next: AnswerPolicy = value === 'general' ? 'general' : 'kb_only';
+    const next: AnswerPolicy = isAnswerPolicy(value) ? value : 'kb_only';
     if (next === form.answerPolicy) return;
     // Letting the bot say things nobody at the company wrote is a deliberate risk decision, so
-    // it costs a confirmation. Narrowing back to the documents never does — the safe direction
-    // is always one click.
-    if (next === 'general'
-      && !(await confirmDialog(t('bot.policy.confirm'), { ok: t('bot.policy.confirm.ok') }))) return;
+    // choosing either general-knowledge policy costs a confirmation — `open` with its own text,
+    // because it also answers unrelated questions and spends tokens on them until the stop.
+    // Going back to the documents only never does: the safe direction is always one click.
+    if (next !== 'kb_only') {
+      const key = next === 'open' ? 'bot.policy.open.confirm' : 'bot.policy.confirm';
+      if (!(await confirmDialog(t(key), { ok: t(`${key}.ok`) }))) return;
+    }
     update(s => ({ ...s, answerPolicy: next }));
   };
   return (
@@ -60,10 +63,7 @@ export function AnswerPolicyField({ form, update, t, readonly, idPrefix }: Scope
         onChange={v => void choose(v)}
         disabled={readonly}
         ariaLabel={t('bot.policy')}
-        options={[
-          { value: 'kb_only', label: t('bot.policy.kb_only') },
-          { value: 'general', label: t('bot.policy.general') },
-        ]}
+        options={ANSWER_POLICIES.map(p => ({ value: p, label: t(`bot.policy.${p}`) }))}
       />
     </>
   );

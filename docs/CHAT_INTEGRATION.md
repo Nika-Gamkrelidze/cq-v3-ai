@@ -3,7 +3,8 @@
 **Audience:** engineers building the chat service's backend integration with CQ.
 **Source of truth:** `backend/app/routers/chat.py`, `services/chat.py`, `services/auth.py`,
 `services/chat_credentials.py` on `main` as of 2026-09-08; the bot's answer policy, off-topic
-handling and business hours (§5.1 `handoff_notice`, §5.2, §6 `scope`) as of 2026-09-14. Where
+handling and business hours (§5.1 `handoff_notice`, §5.2, §6 `scope`) as of 2026-09-14, and the
+third answer policy, `open`, as of 2026-09-16. Where
 `docs/ADR-001` and the code differ, this document follows the **code** and says so in a one-line
 *ADR note*.
 
@@ -27,7 +28,7 @@ Over one prefix, `/v1/chat/`, CQ offers three things:
 
 | Layer | Endpoint | What it does |
 |---|---|---|
-| **Autopilot (the bot)** | `POST /v1/chat/answer` | Given the customer's message, returns a reply — an answer grounded in the tenant's *published* KB documents, a short small-talk reply, an off-topic redirect, a general answer (only for a tenant on `answer_policy: general`), or the tenant's refusal copy — and, in every case, a `handoff` block saying whether a human should take over (§5.2). **CQ appends the AI-disclosure line itself; do not add another.** |
+| **Autopilot (the bot)** | `POST /v1/chat/answer` | Given the customer's message, returns a reply — an answer grounded in the tenant's *published* KB documents, a short small-talk reply, an off-topic redirect, a general answer (only for a tenant on `answer_policy: general` or `open`; under `open`, unrelated questions get one too), or the tenant's refusal copy — and, in every case, a `handoff` block saying whether a human should take over (§5.2). **CQ appends the AI-disclosure line itself; do not add another.** |
 | **Copilot (drafts for an operator)** | `POST /v1/chat/turns` → `GET /v1/chat/suggestions/{suggest_ref}` | Every customer message is ingested (202, ~15 ms); drafts are generated in the background and read back with one indexed SELECT — or streamed over SSE. `POST /v1/chat/feedback` records what the operator did with a draft. |
 | **Mirror** | `POST /v1/chat/conversations:sync`, `DELETE /v1/chat/conversations/{external_ref}` | Bulk-mirror threads CQ never served; purge one thread on GDPR erasure. |
 
@@ -353,10 +354,12 @@ customer's message **was** mirrored.
 - `state` is `"ready"` when `turn.grounding.grounded` **or** `turn.scope.answered` is true, and
   `"refused"` otherwise — so a small-talk or general answer is `ready`. **Make the routing decision
   on `turn.handoff.recommended`, not on `state`** — an escalation is `refused` + handoff, a grounded
-  answer that promises money the KB never stated is `ready` + handoff, and an off-topic redirect or
-  the cut-off copy is `refused` with **no** handoff (the conversation stays in bot mode).
+  answer that promises money the KB never stated is `ready` + handoff, an off-topic redirect or
+  the cut-off copy is `refused` with **no** handoff (the conversation stays in bot mode), and an
+  off-topic general answer under `open` is `ready` with **no** handoff.
 - `turn.reply.text` is **never empty** on a 200: it is the answer, a small-talk or general reply, an
-  off-topic redirect (carrying the warning or the cut-off copy when a threshold is reached), the
+  off-topic redirect or — under `open` — an off-topic general answer (the warning appended at the
+  warn threshold, the cut-off copy in its place at the cut-off threshold), the
   tenant's refusal copy, or a built-in handoff or safety notice — with the disclosure line appended
   by CQ. Live `[n]` markers stay in the text and index `citations`; strip them for channels where
   they look odd, or render them as footnotes.
@@ -367,16 +370,20 @@ customer's message **was** mirrored.
 
 **Answer policy.** Each tenant's chat config carries `answer_policy` (the CQ workspace's BOT tab,
 inherited from the console's *Default bot* tab). It replaces the older `allow_general_knowledge`
-flag, which CQ honours only when `answer_policy` is absent. Both policies run the same flow and
-differ in **one** case only:
+flag, which CQ honours only when `answer_policy` is absent (`true` reads as `general`, never as
+`open`). The three policies run the same flow and differ in **two** cases only — and `kb_only` and
+`general` still differ only in the first:
 
-| `answer_policy` | A question related to the business that the KB does not cover (`scope.kind: "related"`) |
-|---|---|
-| `kb_only` **(default)** | Refusal copy + handoff `related_not_in_kb`. |
-| `general` | A general answer, labelled as not coming from the tenant's KB, with no promises and no handoff. |
+| `answer_policy` | A question related to the business that the KB does not cover (`scope.kind: "related"`) | A question unrelated to the business (`scope.kind: "off_topic"`) |
+|---|---|---|
+| `kb_only` **(default)** | Refusal copy + handoff `related_not_in_kb`. | A one-sentence redirect, no handoff. |
+| `general` | A general answer, labelled as not coming from the tenant's KB, with no promises and no handoff. | A one-sentence redirect, no handoff. |
+| `open` (*Answer any question*, added 2026-09-16) | As `general`. | A short answer from general knowledge — a few sentences at most — with no handoff. |
 
-Everything else — small talk, off-topic and risky messages, questions about the business — is
-handled identically under both.
+Under `open` an unrelated question is still **counted** as off-topic, so the warning and the cut-off
+below are what limit how many a conversation gets. Everything else — small talk, risky messages,
+questions about the business, the off-topic count and its thresholds — is handled identically under
+all three.
 
 **The order CQ decides in** — the first step that applies wins, and `scope.source` names it:
 
@@ -390,15 +397,15 @@ handled identically under both.
    (best vector score ≥ the higher of `min_score` and `direct_min_score`, 0.5 by default) → the
    KB-grounded answer, no triage → `direct`.
 5. The conversation is **cut off** for off-topic turns (below) → cut-off copy, no handoff → `cutoff`.
-6. Everything else, under **both** policies → one small **triage** call classifies the message
+6. Everything else, under **every** policy → one small **triage** call classifies the message
    against the tenant's business description → `triage`, with `scope.kind`:
 
 | Customer message | `scope.kind` | Reply | `handoff` |
 |---|---|---|---|
 | A question about the business | `business` | Gate passed: the KB-grounded answer. Gate failed: refusal copy. | Grounded answer: no, unless it makes an invented commitment (below). Refusal: yes, `reason` = the gate reason (`no_hits` \| `low_score` \| `keyword_only`). |
-| Related to the business, but the KB does not cover it | `related` | `general`: a labelled general answer. `kb_only`: refusal copy. | `general`: no, unless it makes a commitment. `kb_only`: yes, `related_not_in_kb`. |
+| Related to the business, but the KB does not cover it | `related` | `general` or `open`: a labelled general answer. `kb_only`: refusal copy. | `general` or `open`: no, unless it makes a commitment. `kb_only`: yes, `related_not_in_kb`. |
 | Small talk — hello, thanks, what day or time it is, are you open, are you a bot | `chitchat` | A short answer, using the business's local date, time and opening hours. | No, unless it makes a commitment. |
-| Unrelated to the business ("list the planets") | `off_topic` | A one-sentence redirect to what the business does; the warning or cut-off copy when a threshold is reached. | **Never.** |
+| Unrelated to the business ("list the planets") | `off_topic` | `kb_only` or `general`: a one-sentence redirect to what the business does. `open`: a short general answer — or the built-in redirect when the model wrote nothing or the answer makes a commitment. Under every policy: the warning appended when the count reaches the warn threshold, the cut-off copy instead when it reaches the cut-off threshold. | **Never** — not even for a commitment under `open`. |
 | A possible risk to someone's safety | `risky` | A safety reply, emergency number first. | Yes, `risky`, with a model-written summary. |
 
 A failed triage call (model error, busy, truncated output) is refusal copy + handoff `llm_error`,
@@ -416,12 +423,17 @@ answer, as before. Everything else costs one small triage call — metered on it
 `llm_usage.feature = "triage"`, with no KB passages in it — and that is the whole cost of a
 refusal: a gate refusal or a `related_not_in_kb` spends the triage call and **never** an answer
 call. A `business` question that passed the gate adds the grounded answer. Escalation, commitment
-and `risky` handoffs add the handoff summary, as before.
+and `risky` handoffs add the handoff summary, as before. An off-topic message costs the triage call
+under every policy and nothing more: under `open` the answer **is** triage's own reply — a few
+sentences instead of one, so more output tokens, but no second call. The cut-off is what bounds that
+spend: a conversation pays for at most `off_topic_cutoff_after` off-topic triage calls, after which
+everything the KB does not clearly cover is free (`0` removes the bound).
 
 **Off-topic warning and cut-off.** CQ counts each conversation's off-topic turns
-(`scope.off_topic`). On the turn the count reaches the tenant's `off_topic_warn_after` (default 3)
-the redirect carries the warning copy; on the turn it reaches `off_topic_cutoff_after` (default 5)
-the reply is the cut-off copy and the conversation is cut off. **Neither hands off, and the bot
+(`scope.off_topic`), under every policy — an `open` off-topic answer counts exactly like a
+redirect. On the turn the count reaches the tenant's `off_topic_warn_after` (default 3) the
+redirect (under `open`, the answer) carries the warning copy; on the turn it reaches
+`off_topic_cutoff_after` (default 5) the reply is the cut-off copy and the conversation is cut off. **Neither hands off, and the bot
 stays on:** after the cut-off only a question the KB clearly covers (step 4) reaches the model;
 everything else gets the cut-off copy again, at zero tokens. `0` disables either threshold. Keep a
 cut-off conversation in bot mode.
@@ -431,8 +443,11 @@ states no longer forces a handoff: when the figure (a number with its unit or cu
 keyword appears in a passage the model was given, the answer goes out as it is — "installation
 within 3 business days", quoted from the KB, stays with the bot. An invented one still hands off
 with `commitment:<label>`, `commitment:assurance` always does, and small-talk and general replies
-have no passages, so any commitment in them hands off. Symbol-first prices ("$29.99", "₾29",
-"GEL 29") are caught too. The CQ operator can restore "every commitment hands off" per tenant.
+have no passages, so any commitment in them hands off. The one exception is an off-topic answer
+under `open`: one that makes a commitment is **not sent and does not hand off** — the customer gets
+the built-in redirect instead (`scope.answered: false`), since prices, deadlines and promises come
+only from the documents and an unrelated question is no reason to hand the customer to a colleague.
+Symbol-first prices ("$29.99", "₾29", "GEL 29") are caught too. The CQ operator can restore "every commitment hands off" per tenant.
 
 **Date, time and opening hours.** Every autopilot model call — triage and the grounded answer — is
 given the business's current local date and time (in the tenant's timezone, `Asia/Tbilisi` by
@@ -731,10 +746,10 @@ One object, produced by one function, carried byte-identically by the blocking `
 | `handoff.summary` | string \| null | What to show the operator: a model-written summary (≤ 600 chars) on escalation, commitment and `risky` handoffs, otherwise the last customer message (≤ 400 chars). |
 | `handoff.goal` | string | Present only when a model summary ran: the customer's goal in ≤ 120 chars. |
 | `scope` | object \| null | What the bot did with this message and why (§5.2). **null on copilot envelopes.** Log it; route on `handoff.recommended`, never on `scope`. |
-| `scope.policy` | `kb_only`\|`general` | The tenant's answer policy for this turn. |
+| `scope.policy` | `kb_only`\|`general`\|`open` | The tenant's answer policy for this turn (`open` since 2026-09-16). |
 | `scope.source` | `direct`\|`triage`\|`cutoff`\|`refusal`\|`escalation`\|`off` | The step that produced the reply: `direct` — the message alone matched the KB strongly enough to answer without triage; `triage` — the triage call ran (see `kind`), and every refusal other than `kb_empty` comes from here; `cutoff` — the conversation is cut off for off-topic turns (zero tokens); `refusal` — the zero-token refusal for an empty or unavailable KB (`kb_empty`); `escalation` — an escalation marker; `off` — kill switch or autopilot off, caught inside the engine. |
 | `scope.kind` | `business`\|`related`\|`chitchat`\|`off_topic`\|`risky`\|null | Triage's classification; `null` when triage did not run, or failed (`source: "triage"`, `kind: null`, `llm_error`). |
-| `scope.answered` | bool | The customer got a real answer — from the KB, from general knowledge, or small talk. `false` for refusals, handoff and safety notices, safety replies, off-topic redirects and cut-off copy. With `grounding.grounded` it decides the response's `state`. |
+| `scope.answered` | bool | The customer got a real answer — from the KB, from general knowledge (a `related` question under `general` or `open`, or an `off_topic` question under `open`), or small talk. `false` for refusals, handoff and safety notices, safety replies, off-topic redirects — including the built-in redirect `open` sends in place of an empty answer or one that makes a commitment — and cut-off copy. With `grounding.grounded` it decides the response's `state`. |
 | `scope.off_topic.count` | int | The conversation's running total of off-topic turns, as of this turn. An on-topic turn does **not** reset it. |
 | `scope.off_topic.warn_after`, `scope.off_topic.cutoff_after` | int | The tenant's thresholds in force; `0` = never. |
 | `scope.off_topic.state` | `ok`\|`warned`\|`cut_off` | `cut_off`: anything the KB does not clearly cover gets the cut-off copy — the conversation is still in bot mode, with no handoff. |
@@ -894,7 +909,8 @@ answered from your side without CQ access.
    published documents, and CQ refuses to enable the bot while none are published.
 4. **Configure the bot in CQ:** persona, greeting (ka/ru/en), refusal copy, disclosure copy and
    mode, escalation keywords, languages, caps — and the answer policy (`kb_only` unless the tenant
-   has agreed in writing to general answers), the business description triage uses to tell a
+   has agreed in writing to general answers: `general` for business-related questions, `open` for
+   any question), the business description triage uses to tell a
    related question from an off-topic one, timezone, opening hours and hours note, and the
    off-topic warning and cut-off thresholds and copy. Per tenant in the workspace's BOT tab, or
    once for every tenant in the console's *Default bot* tab. Leave `autopilot_enabled` **off** for
@@ -905,9 +921,10 @@ answered from your side without CQ access.
    `/answer` with a test end user: a grounded question (`state: ready`, `handoff.recommended: false`,
    disclosure appended once); a question the KB does not cover (under `kb_only`: `refused`, handoff
    true, `reason` a gate reason — `no_hits|low_score|keyword_only` — or `related_not_in_kb`; under
-   `general` a related question instead gets a labelled general answer, `ready`, no handoff);
-   "what day is it today?" (`scope.kind: chitchat`, today's date in the tenant's timezone, `ready`,
-   no handoff, under either policy); an off-topic question, repeated (a redirect, the warning at the
+   `general` or `open` a related question instead gets a labelled general answer, `ready`, no
+   handoff); "what day is it today?" (`scope.kind: chitchat`, today's date in the tenant's
+   timezone, `ready`, no handoff, under any policy); an off-topic question, repeated (a redirect —
+   under `open` a short general answer, `ready` — the warning at the
    warn threshold, the cut-off copy at the cut-off threshold, `handoff.recommended: false`
    throughout — and afterwards a question the KB clearly covers is still answered); "I want to
    talk to a person" (`escalation:complaint`, the `handoff_notice` text, model summary present).

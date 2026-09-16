@@ -672,7 +672,7 @@ def _validated_default_settings(settings) -> dict:
     return _validated_scope_settings(out)
 
 
-ANSWER_POLICIES = ("kb_only", "general")
+ANSWER_POLICIES = ("kb_only", "general", "open")
 _EMERGENCY_NUMBER_RE = re.compile(r"\+?\d[\d \-]{0,14}")
 _COPY_LIMIT = 500
 
@@ -696,7 +696,7 @@ def _validated_scope_settings(settings) -> dict:
     if out.get("answer_policy") is not None:
         policy = str(out["answer_policy"]).strip().lower()
         if policy not in ANSWER_POLICIES:
-            raise ValueError("settings.answer_policy must be one of kb_only, general")
+            raise ValueError("settings.answer_policy must be one of kb_only, general, open")
         out["answer_policy"] = policy
 
     for key, limit in (("business_scope", 1000), ("hours_note", chat_hours.MAX_NOTE_CHARS)):

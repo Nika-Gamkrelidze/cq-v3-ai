@@ -75,7 +75,8 @@ DEFAULTS = {
     "max_reply_chars": chat_safety.DEFAULT_MAX_REPLY_CHARS,
     # ADR-001 open decision #1, resolved as configuration: `kb_only` (the default) gives a
     # question inside the business's field that the documents do not answer the refusal and a
-    # colleague; `general` lets triage answer it from general knowledge. `chat_prompts.
+    # colleague; `general` lets triage answer it from general knowledge; `open` also answers an
+    # off-topic question briefly, still counted toward the warning and cut-off. `chat_prompts.
     # answer_policy` also reads the legacy `allow_general_knowledge` boolean for older rows.
     "answer_policy": "kb_only",
     "handoff_summary": True,
@@ -714,9 +715,10 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         see a passage. That is what lets the bot say what day it is, redirect a question about
         planets instead of spending a full answer on it (and warn, then stop, a conversation
         that keeps doing it), give an emergency the emergency number first, and — only under
-        the `general` policy — tell a hospital's patient which kind of doctor treats a broken
-        leg. The exits that still cost zero tokens: both off switches, a KB with nothing
-        published, and the off-topic cut-off.
+        the `general` and `open` policies — tell a hospital's patient which kind of doctor
+        treats a broken leg (`open` answers the planets too, briefly, and still counts them).
+        The exits that still cost zero tokens: both off switches, a KB with nothing published,
+        and the off-topic cut-off.
       * **The answer streams.** `llm.stream_text`, `opts=llm.ANSWER`, because a customer-facing
         answer is long enough that time-to-first-token is a product property (the copilot's
         short variants are not). Forced tool-use and token streaming do not combine, so the
@@ -905,11 +907,12 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         return
 
     # 8. Triage: one small call, no passages, decides what kind of message this is — under
-    #    BOTH policies. `kb_only` differs only in what a related question gets (the refusal and a
-    #    colleague instead of a general answer). So a refusal now costs one small call where it
-    #    used to cost none: that is the price of telling "what day is it?" from "what are your
-    #    prices?", and a joke from a customer. The free exits that remain are the two off
-    #    switches, an empty KB and the off-topic cut-off.
+    #    EVERY policy. `kb_only` differs only in what a related question gets (the refusal and a
+    #    colleague instead of a general answer), `open` only in what an off-topic one gets (a
+    #    short general answer instead of the redirect). So a refusal now costs one small call
+    #    where it used to cost none: that is the price of telling "what day is it?" from "what
+    #    are your prices?", and a joke from a customer. The free exits that remain are the two
+    #    off switches, an empty KB and the off-topic cut-off.
     t = time.monotonic()
     try:
         raw = await llm.call_tool(
@@ -961,22 +964,37 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
 
     if kind == KIND_OFF_TOPIC:
         count = ctx.off_topic_count + 1
-        text = model_text or chat_prompts.off_topic_redirect_text(ctx.locale)
+        answered = False
         if cutoff_after and count >= cutoff_after:
             text = chat_prompts.off_topic_cutoff_text(ctx.cfg, ctx.locale)
-        elif warn_after and count == warn_after:
-            text = f"{text}\n\n{chat_prompts.off_topic_warning_text(ctx.cfg, ctx.locale)}"
+        else:
+            text = model_text
+            if policy == "open" and text:
+                # Under `open` the model's reply is an ANSWER, not a redirect, and it was written
+                # without the documents — so a price, deadline or promise in it is unbacked by
+                # definition. Nor is it worth a colleague's time (the customer asked about
+                # something else entirely), so it is withheld rather than handed off.
+                commitment = chat_safety.detect_commitment(text)
+                if commitment:
+                    log.info("autopilot off-topic answer withheld: commitment:%s (client=%s)",
+                             commitment, ctx.client_id)
+                    text = ""
+                answered = bool(text)
+            text = text or chat_prompts.off_topic_redirect_text(ctx.locale)
+            if warn_after and count == warn_after:
+                text = f"{text}\n\n{chat_prompts.off_topic_warning_text(ctx.cfg, ctx.locale)}"
         yield _done(retrieval=r, reason=weak_reason, text=text, handoff=_no_handoff(),
-                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind, count=count))
+                    scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind, answered=answered,
+                                 count=count))
         return
 
-    if kind == KIND_RELATED and policy != "general":
+    if kind == KIND_RELATED and policy not in ("general", "open"):
         yield _done(retrieval=r, reason=weak_reason, text=refusal,
                     handoff=_handoff(REASON_RELATED_NOT_IN_KB, ctx),
                     scope=_scope(ctx, source=SCOPE_TRIAGE, kind=kind))
         return
 
-    # Chitchat, or a related question under the `general` policy: the model's own short reply.
+    # Chitchat, or a related question under `general` or `open`: the model's own short reply.
     if not model_text:
         yield _done(retrieval=r, reason=REASON_LLM_ERROR, text=refusal,
                     handoff=_handoff(REASON_LLM_ERROR, ctx),

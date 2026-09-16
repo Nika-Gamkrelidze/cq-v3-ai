@@ -664,6 +664,9 @@ def test_answer_policy_defaults_to_kb_only_and_reads_the_legacy_flag():
         {"settings": {"answer_policy": "kb_only", "allow_general_knowledge": True}}) == "kb_only"
     assert chat_prompts.answer_policy({"settings": {"answer_policy": "general"}}) == "general"
     assert chat_prompts.answer_policy({"settings": {"answer_policy": "anything"}}) == "kb_only"
+    # `open` (2026-09-16) is only ever chosen on purpose: the legacy flag never reads as it.
+    assert chat_prompts.answer_policy({"settings": {"answer_policy": " Open "}}) == "open"
+    assert chat_prompts.general_knowledge_allowed({"settings": {"answer_policy": "open"}})
 
 
 def test_what_day_is_it_is_answered_from_the_business_clock(monkeypatch):
@@ -765,6 +768,91 @@ def test_off_topic_is_redirected_then_warned_then_cut_off_without_a_handoff(monk
     assert answer.stream == 1
 
 
+OPEN = {**ON, "settings": {"answer_policy": "open"}}
+PLANETS = "There are eight planets in the Solar System, Mercury to Neptune."
+
+
+def test_under_the_open_policy_an_off_topic_question_is_answered_then_warned_then_cut_off(
+        monkeypatch):
+    """What the owner asked for: a bot that answers anything, where a conversation that keeps
+    asking about something else is warned and then stopped. The count, the warning and the
+    cut-off are the redirect policy's, unchanged; only the reply before them is an answer."""
+    from app.services import chat_copy
+
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+    seen: dict = {}
+    calls = _fake_triage(monkeypatch, "off_topic", PLANETS, capture=seen)
+
+    first = _run(_ctx(CID, cfg=OPEN, text="how many planets are there?"))
+    assert first["reply"]["text"].startswith(PLANETS)
+    assert first["handoff"]["recommended"] is False
+    assert first["reply"]["answered_from_kb"] is False
+    assert first["scope"]["policy"] == "open" and first["scope"]["kind"] == "off_topic"
+    assert first["scope"]["answered"] is True
+    assert first["scope"]["off_topic"] == {"count": 1, "warn_after": 3, "cutoff_after": 5,
+                                           "state": "ok"}
+    assert (calls.tool, calls.stream) == (1, 0)
+    assert "a short, helpful answer from general knowledge" in seen["system"]
+    assert "without answering the question" not in seen["system"]
+
+    third = _run(dataclasses.replace(_ctx(CID, cfg=OPEN, text="and their moons?"),
+                                     off_topic_count=2))
+    assert third["reply"]["text"].startswith(PLANETS)
+    assert chat_copy.DEFAULT_OFF_TOPIC_WARNING["en"] in third["reply"]["text"]
+    assert third["scope"]["off_topic"]["state"] == "warned"
+    assert third["scope"]["answered"] is True
+
+    fifth = _run(dataclasses.replace(_ctx(CID, cfg=OPEN, text="write me a poem"),
+                                     off_topic_count=4))
+    assert fifth["reply"]["text"].startswith(chat_copy.DEFAULT_OFF_TOPIC_CUTOFF["en"])
+    assert PLANETS not in fifth["reply"]["text"]
+    assert fifth["scope"]["off_topic"]["state"] == "cut_off"
+    assert fifth["scope"]["answered"] is False
+    assert fifth["handoff"]["recommended"] is False
+    assert calls.tool == 3
+
+    # Past the cut-off the zero-token exit holds under `open` too.
+    silent = _no_model(monkeypatch)
+    after = _run(dataclasses.replace(_ctx(CID, cfg=OPEN, text="one more"), off_topic_count=5))
+    assert after["scope"]["source"] == "cutoff"
+    assert silent.total == 0
+
+    # `general` still redirects: its prompt asks for the one sentence, and nothing is answered.
+    seen_general: dict = {}
+    _fake_triage(monkeypatch, "off_topic", "I can only help with our services.",
+                 capture=seen_general)
+    general = _run(_ctx(CID, cfg={**ON, "settings": {"answer_policy": "general"}},
+                        text="how many planets are there?"))
+    assert "without answering the question" in seen_general["system"]
+    assert "a short, helpful answer from general knowledge" not in seen_general["system"]
+    assert general["scope"]["answered"] is False
+
+
+def test_under_the_open_policy_a_priced_off_topic_answer_becomes_the_redirect_not_a_handoff(
+        monkeypatch):
+    """Written without the documents, so a figure in it is unbacked — but the customer asked
+    about something else, so it is not a colleague's problem either. The redirect goes out, the
+    question still counts, and nobody is paged. An empty answer gets the same redirect."""
+    redirect = chat_prompts.off_topic_redirect_text("en")
+    _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
+    _stub_kill_switch(monkeypatch)
+
+    _fake_triage(monkeypatch, "off_topic", "Tickets cost $25.")
+    priced = _run(_ctx(CID, cfg=OPEN, text="how much is a cinema ticket?"))
+    assert priced["reply"]["text"].startswith(redirect)
+    assert "$25" not in priced["reply"]["text"]
+    assert priced["handoff"]["recommended"] is False
+    assert priced["scope"]["answered"] is False
+    assert priced["scope"]["off_topic"]["count"] == 1
+
+    _fake_triage(monkeypatch, "off_topic", "")
+    empty = _run(_ctx(CID, cfg=OPEN, text="tell me a joke"))
+    assert empty["reply"]["text"].startswith(redirect)
+    assert empty["handoff"]["recommended"] is False
+    assert empty["scope"]["answered"] is False
+
+
 def test_the_free_exits_spend_nothing(monkeypatch):
     """What still costs zero tokens: a KB with nothing published (and both off switches, and
     the cut-off above)."""
@@ -800,7 +888,7 @@ def test_a_business_question_goes_to_the_documents_or_to_a_colleague(monkeypatch
     assert done["reply"]["answered_from_kb"] is True
 
 
-def test_a_related_question_gets_general_knowledge_only_under_the_general_policy(monkeypatch):
+def test_a_related_question_gets_general_knowledge_only_under_general_or_open(monkeypatch):
     _stub_retrieval(monkeypatch, UNGROUNDED_RESULT)
     _stub_kill_switch(monkeypatch)
     question = "which doctor should i book for a broken leg?"
@@ -820,10 +908,23 @@ def test_a_related_question_gets_general_knowledge_only_under_the_general_policy
     assert general["scope"]["policy"] == "general" and general["scope"]["answered"] is True
     assert "a short, helpful general answer" in seen["system"]
 
-    # Written without the documents, so any price in it is unbacked by definition.
-    _fake_triage(monkeypatch, "related", "It usually costs about $50 elsewhere.")
-    priced = _run(_ctx(CID, cfg={**ON, "settings": {"answer_policy": "general"}}, text=question))
-    assert priced["handoff"]["reason"] == "commitment:money"
+    # `open` answers a related question exactly as `general` does.
+    seen_open: dict = {}
+    _fake_triage(monkeypatch, "related", general_reply, capture=seen_open)
+    opened = _run(_ctx(CID, cfg=OPEN, text=question))
+    assert opened["reply"]["text"].startswith(general_reply)
+    assert opened["handoff"]["recommended"] is False
+    assert opened["scope"]["policy"] == "open" and opened["scope"]["answered"] is True
+    assert opened["scope"]["off_topic"]["count"] == 0
+    assert "a short, helpful general answer" in seen_open["system"]
+
+    # Written without the documents, so any price in it is unbacked by definition — and a
+    # related question is the company's business, so under either policy it goes to a human.
+    for policy in ("general", "open"):
+        _fake_triage(monkeypatch, "related", "It usually costs about $50 elsewhere.")
+        priced = _run(_ctx(CID, cfg={**ON, "settings": {"answer_policy": policy}},
+                           text=question))
+        assert priced["handoff"]["reason"] == "commitment:money", policy
 
 
 def test_a_risky_message_gets_the_emergency_number_first_and_a_colleague(monkeypatch):

@@ -177,6 +177,15 @@ def test_invalid_default_is_400_and_names_the_field(api, patch, needle):
     assert api.get(DEFAULT_URL, headers=ADMIN).json()["source"] == "builtin"
 
 
+def test_the_answer_policy_accepts_open_and_lists_every_policy_when_it_refuses():
+    """`open` (2026-09-16) is the third policy. The refusal is the sentence the operator reads,
+    so it names every word the field accepts."""
+    checked = chat_store._validated_scope_settings({"answer_policy": " OPEN "})
+    assert checked["answer_policy"] == "open"
+    with pytest.raises(ValueError, match="kb_only, general, open"):
+        chat_store._validated_scope_settings({"answer_policy": "everything"})
+
+
 def test_admin_token_is_required(api):
     assert api.get(DEFAULT_URL).status_code == 401
     assert api.put(DEFAULT_URL, json=STORED).status_code == 401

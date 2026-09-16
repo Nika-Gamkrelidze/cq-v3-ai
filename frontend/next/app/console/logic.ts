@@ -181,9 +181,10 @@ const numText = (v: unknown, fallback: number): string =>
     Four defaults here are safe-direction choices, not conveniences:
 
       * an UNKNOWN disclosure mode falls back to disclosing (`first`), never to silence;
-      * the answer policy is `kb_only` unless `answer_policy` says `general` or — on a config
-        saved before that key existed — `allow_general_knowledge` is literally `true`; a missing
-        or unknown value must never switch the wider behaviour on (`answerPolicyOf`, below);
+      * the answer policy is `kb_only` unless `answer_policy` says `general` or `open` or — on a
+        config saved before that key existed — `allow_general_knowledge` is literally `true`
+        (which reads as `general`, never `open`); a missing or unknown value must never switch a
+        wider behaviour on (`answerPolicyOf`, below);
       * `handoff_summary` is the mirror image: on unless it is literally `false`;
       * a cap that is not set stays an EMPTY string, which is what "use the built-in" looks like
         in the box, rather than a zero that would read as "none allowed".
@@ -305,9 +306,10 @@ export function payloadFromForm(form: BotForm, cfg: BotConfig | null | undefined
 
    Safe-direction rules, again:
 
-     * THE POLICY FALLS BACK TO `kb_only`. `answer_policy` wins when it is one of the two known
-       words; otherwise the legacy `allow_general_knowledge` decides, and only a literal `true`
-       reads as `general`. A save writes `answer_policy` and DROPS the legacy key.
+     * THE POLICY FALLS BACK TO `kb_only`. `answer_policy` wins when it is one of the three
+       known words (`ANSWER_POLICIES`); otherwise the legacy `allow_general_knowledge` decides,
+       and only a literal `true` reads as `general` — the boolean predates `open`, so it never
+       widens that far. A save writes `answer_policy` and DROPS the legacy key.
      * HOURS OFF IS `null`, not an empty week. Seven closed days is a valid configured week;
        "the bot has not been told" is the absence of the object.
      * A DAY WITH SEVERAL INTERVALS keeps the ones the form cannot show. The UI edits the first
@@ -315,7 +317,19 @@ export function payloadFromForm(form: BotForm, cfg: BotConfig | null | undefined
        while the day stays open, and closing the day is the one way to drop them.
      * AN EMPTY COPY BOX MEANS THE BUILT-IN WORDING, so only languages with text are sent. */
 
-export type AnswerPolicy = 'kb_only' | 'general';
+/** Narrowest first, and the server's words exactly (`chat_store` refuses any other):
+      * `kb_only` — the shared documents only; a related question they do not answer is
+        refused and handed to a colleague;
+      * `general` — documents first, a labelled general answer for RELATED questions; an
+        unrelated one is still steered back on topic and counted;
+      * `open` — as `general`, and an UNRELATED question gets a short general answer too. It is
+        still counted, so the off-topic warning and stop thresholds are what bound it. */
+export const ANSWER_POLICIES = ['kb_only', 'general', 'open'] as const;
+export type AnswerPolicy = (typeof ANSWER_POLICIES)[number];
+
+export function isAnswerPolicy(v: unknown): v is AnswerPolicy {
+  return (ANSWER_POLICIES as readonly unknown[]).includes(v);
+}
 
 export const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type DayKey = (typeof DAY_KEYS)[number];
@@ -399,7 +413,8 @@ function nonEmptyLang(src: LangText): LangText {
 
 export function answerPolicyOf(settings: unknown): AnswerPolicy {
   const s = obj(settings);
-  if (s.answer_policy === 'kb_only' || s.answer_policy === 'general') return s.answer_policy;
+  if (isAnswerPolicy(s.answer_policy)) return s.answer_policy;
+  // The legacy boolean predates `open`: at its widest it reads as `general`.
   return s.allow_general_knowledge === true ? 'general' : 'kb_only';
 }
 
@@ -502,7 +517,8 @@ export function scopeSettings(form: ScopeForm): Record<string, unknown> {
     return Number.isInteger(v) ? v : fallback;
   };
   return {
-    answer_policy: form.answerPolicy === 'general' ? 'general' : 'kb_only',
+    // A word the server does not know is written as the narrowest policy, never passed through.
+    answer_policy: isAnswerPolicy(form.answerPolicy) ? form.answerPolicy : 'kb_only',
     business_scope: form.businessScope.trim(),
     timezone: form.timezone.trim() || DEFAULT_TIMEZONE,
     opening_hours: form.hoursOn

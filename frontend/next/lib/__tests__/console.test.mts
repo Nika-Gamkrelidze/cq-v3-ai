@@ -75,6 +75,7 @@ test('formFromConfig: the answer policy is documents-only unless something liter
   // The new key wins over the legacy one, in both directions…
   assert.equal(policy({ answer_policy: 'kb_only', allow_general_knowledge: true }), 'kb_only');
   assert.equal(policy({ answer_policy: 'general', allow_general_knowledge: false }), 'general');
+  assert.equal(policy({ answer_policy: 'open', allow_general_knowledge: false }), 'open');
   // …but an unknown word is not a policy, so the legacy key decides again.
   assert.equal(policy({ answer_policy: 'sometimes', allow_general_knowledge: true }), 'general');
   assert.equal(policy({ answer_policy: 'sometimes' }), 'kb_only');
@@ -159,6 +160,33 @@ test('payloadFromForm: writes answer_policy and drops the legacy key the spread 
   const form = formFromConfig(cfg);
   form.scope.answerPolicy = 'kb_only';
   assert.equal(payloadFromForm(form, cfg).settings.answer_policy, 'kb_only');
+});
+
+test('answer policy: `open` round-trips, and nothing unknown ever reads or writes as it', () => {
+  const policy = (settings: Record<string, unknown>) => formFromConfig({ settings }).scope.answerPolicy;
+  const cfg = { settings: { answer_policy: 'open' } };
+  const form = formFromConfig(cfg);
+  assert.equal(form.scope.answerPolicy, 'open');
+  const settings = payloadFromForm(form, cfg).settings;
+  assert.equal(settings.answer_policy, 'open');
+  // Read back what was written: still `open`.
+  assert.equal(formFromConfig({ settings }).scope.answerPolicy, 'open');
+  // The legacy boolean predates `open`, so at its widest it is `general`.
+  assert.equal(policy({ allow_general_knowledge: true }), 'general');
+  // Near-misses are not the word: they fall back to documents-only, not to the widest policy.
+  for (const word of ['Open', 'OPEN', ' open', 'any', 'all', '', null, 1, true]) {
+    assert.equal(policy({ answer_policy: word }), 'kb_only', `answer_policy: ${JSON.stringify(word)}`);
+  }
+  // A form holding a word the server would refuse is written as the narrowest policy.
+  const bogus = formFromConfig(cfg);
+  (bogus.scope as { answerPolicy: string }).answerPolicy = 'everything';
+  assert.equal(payloadFromForm(bogus, cfg).settings.answer_policy, 'kb_only');
+  // Narrowing from `open` is written explicitly, both steps down.
+  const narrowed = formFromConfig(cfg);
+  narrowed.scope.answerPolicy = 'general';
+  assert.equal(payloadFromForm(narrowed, cfg).settings.answer_policy, 'general');
+  narrowed.scope.answerPolicy = 'kb_only';
+  assert.equal(payloadFromForm(narrowed, cfg).settings.answer_policy, 'kb_only');
 });
 
 test('payloadFromForm: the engine knobs with no UI survive a save', () => {

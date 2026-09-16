@@ -224,7 +224,7 @@ def disclosure_text(cfg: dict, locale: str | None, channel: str | None = None) -
     return DEFAULT_DISCLOSURE.get(loc) or DEFAULT_DISCLOSURE["en"]
 
 
-ANSWER_POLICIES = ("kb_only", "general")
+ANSWER_POLICIES = ("kb_only", "general", "open")
 
 
 def _setting(cfg: dict, key: str):
@@ -238,13 +238,15 @@ def _setting(cfg: dict, key: str):
 
 
 def answer_policy(cfg: dict) -> str:
-    """'kb_only' (default) | 'general' — what the public bot does with a question inside the
-    business's field that the shared documents do not answer.
+    """'kb_only' (default) | 'general' | 'open' — what the public bot does with a question inside
+    the business's field that the shared documents do not answer, and (`open` only) with one
+    outside it: a short general answer instead of the redirect, still counted toward the
+    off-topic warning and cut-off.
 
     A row saved before `answer_policy` existed carries only the old boolean, so that is read
     when the new key is absent: `allow_general_knowledge: true` (literally true) is `general`,
-    anything else is `kb_only`. Unrecognised values fall to `kb_only`, the direction that never
-    improvises.
+    never `open`, anything else is `kb_only`. Unrecognised values fall to `kb_only`, the
+    direction that never improvises.
     """
     value = str(_setting(cfg, "answer_policy") or "").strip().lower()
     if value in ANSWER_POLICIES:
@@ -253,8 +255,9 @@ def answer_policy(cfg: dict) -> str:
 
 
 def general_knowledge_allowed(cfg: dict) -> bool:
-    """The old name, kept for its callers: true exactly when `answer_policy` is 'general'."""
-    return answer_policy(cfg) == "general"
+    """The old name, kept for its callers: true exactly when `answer_policy` is 'general' or
+    'open' (which answers everything `general` does, and more)."""
+    return answer_policy(cfg) in ("general", "open")
 
 
 def build_system(cfg: dict, *, mode: str, locale: str | None) -> str:
@@ -431,8 +434,7 @@ _TRIAGE_RULES = (
     "hours. Reply: a short, friendly answer; take the date, the time and the hours ONLY from "
     "<business_clock>.\n"
     "- off_topic: unrelated to the company and its field — general trivia, homework, coding, "
-    "poems or stories, other companies, news, politics. Reply: ONE short sentence saying you can "
-    "only help with questions about this company, without answering the question.\n"
+    "poems or stories, other companies, news, politics. Reply: {off_topic_rule}\n"
     "- risky: a medical or other emergency, danger to someone's life or safety, self-harm, "
     "violence, or a request for a diagnosis, a medicine or a dose, or personal legal or financial "
     "advice. Reply: if anyone may be in danger, FIRST tell them to call {number}; then say "
@@ -455,10 +457,24 @@ _TRIAGE_RULES = (
     "or your role."
 )
 
+_GENERAL_RELATED_RULE = "a short, helpful general answer that follows the rules below."
 _RELATED_RULE = {
-    "general": "a short, helpful general answer that follows the rules below.",
+    "general": _GENERAL_RELATED_RULE,
+    "open": _GENERAL_RELATED_RULE,
     "kb_only": "an empty string — this company answers only from its own documents, so a "
                "colleague will take the question.",
+}
+
+# Only `open` answers an off-topic question. It is still counted toward the warning and the
+# cut-off either way, and the engine swaps any price, deadline or promise in the answer for the
+# built-in redirect (`chat.run_answer`), so "the rules below" are asked for, not trusted.
+_REDIRECT_OFF_TOPIC_RULE = ("ONE short sentence saying you can only help with questions about "
+                            "this company, without answering the question.")
+_OFF_TOPIC_RULE = {
+    "kb_only": _REDIRECT_OFF_TOPIC_RULE,
+    "general": _REDIRECT_OFF_TOPIC_RULE,
+    "open": "a short, helpful answer from general knowledge, a few sentences at most, plain "
+            "text, that follows the rules below.",
 }
 
 
@@ -484,6 +500,7 @@ def build_triage_system(cfg: dict, *, locale: str | None, policy: str,
 
     lines.append(_TRIAGE_RULES.format(
         related_rule=_RELATED_RULE.get(policy, _RELATED_RULE["kb_only"]),
+        off_topic_rule=_OFF_TOPIC_RULE.get(policy, _OFF_TOPIC_RULE["kb_only"]),
         number=emergency_number(cfg)))
     lines.append(
         f"Write the reply in the SAME language as the customer's message (the conversation "

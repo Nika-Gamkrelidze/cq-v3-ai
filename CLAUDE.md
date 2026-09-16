@@ -212,12 +212,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   **What the bot answers (2026-09-14):** a message whose own words strongly match the shared
   documents goes straight to the grounded answer; anything else gets one small **triage** call
   (no passages) that sorts it into business (→ documents or refusal + colleague) / related
-  (→ a labelled general answer under `answer_policy: general`, refusal + colleague under
-  `kb_only`) / chitchat incl. today's date, time and opening hours / off_topic (one-line
-  redirect, counted per conversation: warning at `off_topic_warn_after`, then the **cut-off** at
-  `off_topic_cutoff_after` — canned copy, no model call, **no handoff**) / risky (emergency number
-  first + colleague). Set per workspace in the BOT tab (policy, "about the business", time zone +
-  weekly hours, off-topic thresholds and copy) and inherited from *Default bot*.
+  (→ a labelled general answer under `answer_policy: general` or `open`, refusal + colleague
+  under `kb_only`) / chitchat incl. today's date, time and opening hours / off_topic (one-line
+  redirect — under **`open`** (2026-09-16, *Answer any question*) a short general answer instead —
+  counted per conversation under every policy: warning at `off_topic_warn_after`, then the
+  **cut-off** at `off_topic_cutoff_after` — canned copy, no model call, **no handoff**) / risky
+  (emergency number first + colleague). Set per workspace in the BOT tab (policy, "about the
+  business", time zone + weekly hours, off-topic thresholds and copy) and inherited from
+  *Default bot*; switching to `general` or `open` asks for confirmation, back to `kb_only` never.
 - **KB curation loop** (`routers/curation.py`, `services/curation/{miner,cluster,propose,apply,
   runner}.py`, `db/curation.sql`, run by `cq-worker`): nightly, per tenant (staggered 02:00–05:00
   UTC), chat turns + call transcripts are mined → clustered → turned into KB **add / update /
@@ -364,8 +366,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
     configs carry `min_score: 0.35`, which equals retrieval's floor and therefore filters nothing.
   - **Zero-token exits are only:** kill switch, autopilot off, nothing published (`kb_present`
     false/null), and the off-topic cut-off. Every other refusal spends ONE `triage` call (forced
-    tool-use, `chat_prompts.TRIAGE_TOOL`) and never the answer model. `answer_policy` changes only
-    the `related` row; the legacy `allow_general_knowledge: true` reads as `general`.
+    tool-use, `chat_prompts.TRIAGE_TOOL`) and never the answer model. `answer_policy` is
+    `kb_only` | `general` | `open`: `general` changes only the `related` row; `open` also turns
+    the `off_topic` redirect into a short general answer — the same triage call's reply, still
+    counted, so the warning and the cut-off (still a zero-token exit) are what cap it. An `open`
+    off-topic answer that is empty or trips `detect_commitment(text)` (no passages) is swapped
+    for the built-in redirect (`answered: false`), logged, and **never** hands off — off_topic
+    hands off under no policy. The legacy `allow_general_knowledge: true` reads as `general`,
+    never `open`.
   - **The off-topic count lives in `chat_conversations.metadata.off_topic_count`**, read in the
     router's `_build_context` and written by `_record_off_topic` beside `_persist` (the engine
     still owns no persistence). It is a per-conversation total; the cut-off never hands off and
@@ -516,6 +524,13 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (`tzdata`), which the webhook does. **Not done:** the thresholds (0.5 direct, 3/5 off-topic)
   are starting points, not measured; no Georgian conversation has been run through triage yet;
   a hospital-specific medical rule set is being decided separately.
+- **2026-09-16 — a third answer policy, `open` ("Answer any question").** The owner switched a
+  workspace to `general`, asked "how many planets are there?" and got the redirect — `general`
+  only ever widened the `related` row, and what had been asked for was world knowledge with an
+  off-topic limit. Under `open` an unrelated question gets a short general answer from the triage
+  call and still counts toward the warning and the cut-off; `kb_only` and `general` are
+  unchanged (§3, §4; contract `docs/CHAT_INTEGRATION.md` §5.2/§6, note in ADR-001's 2026-09-14
+  addendum). **Not done:** no thresholds tuned for `open`, where the cut-off is now the spend cap.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST
