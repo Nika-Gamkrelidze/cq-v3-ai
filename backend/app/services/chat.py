@@ -141,6 +141,9 @@ class ChatContext:
     # nothing upstream is required to supply it.
     channel: str = "web"
     turn_ref: str | None = None
+    # `chat_turns.id` of the message this generation answers. Only for usage attribution: every
+    # model call below names it, so a token bill can be traced to the question that caused it.
+    turn_id: str | None = None
     conversation_ref: str | None = None
     # The raw inbound envelope (display_name, attachment, channel, text). Quarantined
     # wholesale by chat_prompts.wrap_untrusted — see that module for why it is not just text.
@@ -379,7 +382,9 @@ async def _handoff_with_summary(reason: str, ctx: ChatContext, stages: dict) -> 
             api_key=ctx.api_key, model=ctx.model,
             system=chat_prompts.build_handoff_system(ctx.locale),
             user=chat_prompts.build_handoff_user(messages, reason),
-            tool=chat_prompts.HANDOFF_TOOL, opts=llm.ANSWER, max_tokens=400)
+            tool=chat_prompts.HANDOFF_TOOL, opts=llm.ANSWER, max_tokens=400,
+            conversation_id=ctx.conversation_id, turn_id=ctx.turn_id,
+            suggest_ref=ctx.suggest_ref)
         summary = str(raw.get("summary") or "").strip()
         goal = str(raw.get("customer_goal") or "").strip()
         # The summary is model output derived from untrusted text and is read by a human in a
@@ -526,7 +531,9 @@ async def run_suggest(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
             max_tokens=int(_num(_cfg(ctx.cfg, "max_tokens"), DEFAULTS["max_tokens"])),
             # The system prompt is tenant-stable across every turn, so it caches; the user
             # block is per-turn and never does.
-            cache_system=True)
+            cache_system=True,
+            conversation_id=ctx.conversation_id, turn_id=ctx.turn_id,
+            suggest_ref=ctx.suggest_ref)
     except llm.LLMError as exc:
         stages["llm"] = _ms(t)
         stages["total"] = _ms(started)
@@ -834,7 +841,9 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
             async for delta in llm.stream_text(
                     feature="autopilot", client_id=ctx.client_id,
                     integration_id=ctx.integration_id, api_key=ctx.api_key, model=ctx.model,
-                    system=system, user=user, opts=llm.ANSWER, max_tokens=max_tokens):
+                    system=system, user=user, opts=llm.ANSWER, max_tokens=max_tokens,
+                    conversation_id=ctx.conversation_id, turn_id=ctx.turn_id,
+                    suggest_ref=ctx.suggest_ref):
                 chunks.append(delta)
                 # Deltas are RAW model text — unsanitized, uncited, untruncated. They are a
                 # progressive-rendering nicety; the authoritative text is the one on `done`, and
@@ -927,7 +936,9 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
                 doc_titles=[h.get("title") for h in hits], max_chars=max_chars),
             tool=chat_prompts.TRIAGE_TOOL, opts=llm.ANSWER, max_tokens=max_tokens,
             # The system prompt is tenant-stable (the clock is in the user block), so it caches.
-            cache_system=True)
+            cache_system=True,
+            conversation_id=ctx.conversation_id, turn_id=ctx.turn_id,
+            suggest_ref=ctx.suggest_ref)
     except llm.LLMError as exc:
         stages["triage"] = _ms(t)
         log.warning("autopilot triage failed (client=%s): %s", ctx.client_id, exc)

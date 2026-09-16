@@ -236,6 +236,19 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   audio jobs/ms) where **share = request wall time** — the honest attribution, because analyze and
   AI work run inside the request. **Retention days** (1–365, default 7) and **sample interval**
   (5–300 s, default 10) are settable in the tab (`app_settings` key `health`).
+- **AI usage, down to one call** (`/usage`, superadmin; `routers/usage_admin.py` →
+  `services/usage_report.py` (overview, call log) and `services/usage_drill.py` (recordings,
+  conversations), shared filter/group/totals helpers at the bottom of `services/usage.py`;
+  columns in `db/usage_detail.sql`). One `llm_usage` row per AI call — text models through
+  `llm.py`, and speech-to-text, text-to-speech and the local voice-tone model through
+  `llm.record_usage` (called from `voice.py` / `sentiment.py`). A row says which workspace,
+  user, provider, model and analyser (`feature` → group in `usage.GROUPS`), and what it was
+  FOR: `job_id` (the recording), `summary_id`, and for the chat bot `conversation_id` +
+  `turn_id` (the customer message that caused it) + `suggest_ref` (tells a regeneration from
+  the original). Tabs: Overview (breakdowns by workspace / analyser / provider / model / feature
+  / user + a time series), Recordings (tokens per analyser per recording → each call), Chat bot
+  (per conversation → per question), All calls. One filter bar (period or custom dates,
+  workspace, analyser, provider, model, kind, status); the lists sort and page server-side.
 
 **All AI structured outputs use forced tool-use with `strict: true` schemas + array-normalization**
 (`_as_str_list`) so the model can't return a shape that crashes the UI.
@@ -318,6 +331,18 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   prosody needs a start and an end per turn and otherwise reports `no_timestamps`, i.e. a
   recording that silently goes quiet. A recording that genuinely needs key terms belongs on
   ElevenLabs Scribe.
+- **Usage units and attribution (`/usage`).** Providers bill in different units and the page
+  never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
+  carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has
+  them; text-to-speech carries `characters`; voice tone is provider `local`, zero tokens.
+  Attribution rules that must not regress: `analysis.run_pipeline` sets the job itself (the
+  partner batch runs N pipelines in one request context, which used to bill every run to the
+  last row); a summary of ONE recording carries that `job_id` and its `summary_id`, a summary of
+  several only the `summary_id` (minted before the model call); chat calls pass
+  `conversation_id` / `turn_id` / `suggest_ref` explicitly through `llm.call_tool` /
+  `stream_text`; an abandoned stream still writes a failed row with the usage that arrived.
+  Every join from usage to a tenant table also matches `client_id`. Voice rows count toward the
+  health page's "AI calls" too.
 - **An unscored rubric dimension is dropped from the weighting, not scored zero**
   (`scoring.build_result`). The system dimensions are absent often and through nobody's fault
   — no KB, no checkable claim in the call, no tone pass, a pasted transcript with no audio —
@@ -531,6 +556,15 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   call and still counts toward the warning and the cut-off; `kb_only` and `general` are
   unchanged (§3, §4; contract `docs/CHAT_INTEGRATION.md` §5.2/§6, note in ADR-001's 2026-09-14
   addendum). **Not done:** no thresholds tuned for `open`, where the cut-off is now the spend cap.
+- **2026-09-16 — AI usage down to the call.** The owner asked whether the chat bot's usage
+  was tracked (it was, per workspace only) and for usage per recording per analyser and per
+  chat question. Speech was never metered at all; now every transcription, synthesis and
+  voice-tone run is a usage row beside the text-model calls, chat calls name their
+  conversation and message, summaries name their row, and `/usage` became a four-tab report
+  with filters and sorting (§3, §4). **Not done:** the Gemini Interactions API's usage block is
+  read defensively (its field names are unconfirmed, so a Gemini transcription may show audio
+  length but no tokens until checked against a real response); rows written before this change
+  have no conversation, summary or speech data, so older periods look lighter than they were.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST

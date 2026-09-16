@@ -41,7 +41,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, Header, HTTPException,
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ..services import chat, chat_copy, chat_store, limits, llm, settings_store
+from ..services import attribution, chat, chat_copy, chat_store, limits, llm, settings_store
 from ..services.auth import (Principal, assert_expected_tenant, make_token,
                              resolve_principal, verify_token)
 
@@ -429,7 +429,7 @@ async def post_turn(
             # generate a second time.
             _INFLIGHT.add(key)
             bg.add_task(_precompute, str(p.client_id), conversation_id, suggest_ref,
-                        body.locale, body.mode, p.integration_id, cfg)
+                        body.locale, body.mode, p.integration_id, cfg, turn_id=turn_id)
             precomputing = True
 
     return {
@@ -447,7 +447,7 @@ async def post_turn(
 
 async def _precompute(client_id: str, conversation_id: str, suggest_ref: str,
                       locale: str | None, mode: str, integration_id: str | None,
-                      cfg: dict) -> None:
+                      cfg: dict, *, turn_id=None) -> None:
     """Drain the generation for its side effects. Runs AFTER the 202 has been sent.
 
     The engine deliberately never touches the database (see services/chat.py), so persistence
@@ -460,7 +460,7 @@ async def _precompute(client_id: str, conversation_id: str, suggest_ref: str,
     key = (str(client_id), suggest_ref)
     try:
         ctx = await _build_context(client_id, conversation_id, suggest_ref, locale, mode,
-                                   integration_id, cfg)
+                                   integration_id, cfg, turn_id=turn_id)
         async for _ in _drive(str(client_id), suggest_ref, ctx):
             pass
     except llm.LLMBusyError:
@@ -585,7 +585,7 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
                          locale: str | None, mode: str, integration_id: str | None,
                          cfg: dict, *, conversation_ref: str | None = None,
                          turn_ref: str | None = None, channel: str = "web",
-                         envelope: dict | None = None) -> chat.ChatContext:
+                         envelope: dict | None = None, turn_id=None) -> chat.ChatContext:
     """Everything the engine needs, assembled OFF the request path.
 
     The model id is read from `settings_store` — never hardcoded, because the admin panel owns
@@ -597,6 +597,10 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
     row (a ticket stream) legitimately passes none of them. They are additive and defaulted for
     that reason. Everything inside `envelope` is attacker-controlled and is quarantined by
     `chat_prompts.wrap_untrusted` — it is never read as configuration here.
+
+    `turn_id` is the exception to "a row-rebuilt context has less": `copilot_suggestions` DOES
+    store it, and every driver passes it, because it is what names the question on each
+    `llm_usage` row the generation writes. Missing it costs no answer, only that attribution.
     """
     messages = await chat_store.recent_turns(client_id, conversation_id, HISTORY_TURNS)
     app_cfg = await settings_store.get_effective()
@@ -613,7 +617,7 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
         messages=messages, cfg=cfg, api_key=app_cfg["anthropic_api_key"],
         model=app_cfg["llm_model"], mode=mode, integration_id=integration_id,
         conversation_ref=conversation_ref, turn_ref=turn_ref, channel=channel,
-        envelope=envelope or {},
+        turn_id=str(turn_id) if turn_id else None, envelope=envelope or {},
         business_name=extra.get("business_name"), industry=extra.get("industry"),
         off_topic_count=int(extra.get("off_topic_count") or 0))
 
@@ -725,6 +729,11 @@ async def stream(request: Request, ticket: str = Query(...)):
         return _err(401, "Invalid, expired, or already-used stream ticket.", "bad_ticket")
     client_id = str(payload["client_id"])
     suggest_ref = str(payload["suggest_ref"])
+    # No `resolve_principal` on this route, so nothing has named the actor for the usage rows a
+    # live drive writes. The ticket was minted by an integration principal and carries its id;
+    # the spelling is `Principal.audit_actor`'s, so these rows group with the ones `/turns` wrote.
+    if payload.get("integration_id"):
+        attribution.set_actor(f"integration:{payload['integration_id']}")
 
     row = await chat_store.get_suggestion(client_id, suggest_ref)
     if row is None:
@@ -816,7 +825,7 @@ async def _engine_events(client_id: str, suggest_ref: str, row: dict,
         cfg = await chat_store.get_chat_config(client_id)
         ctx = await _build_context(client_id, str(row.get("conversation_id")), suggest_ref,
                                    row.get("locale"), row.get("mode") or "assist",
-                                   row.get("integration_id"), cfg)
+                                   row.get("integration_id"), cfg, turn_id=row.get("turn_id"))
     async for item in _drive(client_id, suggest_ref, ctx):
         yield item
 
@@ -913,8 +922,11 @@ async def regenerate(body: RegenerateIn, bg: BackgroundTasks,
                                       mode=src.get("mode") or "assist",
                                       integration_id=p.integration_id)
     _INFLIGHT.add((str(p.client_id), suggest_ref))
+    # The source row's turn: a regeneration answers the same customer message, so its tokens
+    # belong to that question (`suggest_ref` is what tells them apart from the original's).
     bg.add_task(_precompute, str(p.client_id), str(conversation_id), suggest_ref,
-                src.get("locale"), src.get("mode") or "assist", p.integration_id, cfg)
+                src.get("locale"), src.get("mode") or "assist", p.integration_id, cfg,
+                turn_id=src.get("turn_id"))
     return {"client_id": str(p.client_id), "suggest_ref": suggest_ref,
             "source_suggest_ref": body.suggest_ref, "transform": body.transform,
             "precompute": True, "retry_after_ms": SUGGEST_RETRY_MS}
@@ -1137,7 +1149,7 @@ async def answer(
     ctx = await _build_context(
         str(p.client_id), str(conversation_id), suggest_ref, body.locale, MODE_AUTOPILOT,
         p.integration_id, cfg, conversation_ref=body.conversation_ref, turn_ref=turn_ref,
-        channel=body.channel,
+        channel=body.channel, turn_id=turn_id,
         envelope={"channel": body.channel, "text": content,
                   "display_name": body.display_name, "subject": body.subject,
                   "attachment": body.attachment})

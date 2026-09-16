@@ -108,7 +108,8 @@ class Fake:
             raise self.fail
         return self.tone
 
-    async def prosody_segments(self, audio, ranges, filename=None, content_type=None):
+    async def prosody_segments(self, audio, ranges, filename=None, content_type=None, *,
+                               client_id=None):
         # Mirrors the real (items, status) contract — see services/sentiment.py.
         self.prosody_calls.append((audio, ranges, filename, content_type))
         return self.voice, ("ok" if self.voice is not None else self.voice_status)

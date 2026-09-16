@@ -392,7 +392,11 @@ def fake_summarise(monkeypatch):
         return {"anthropic_api_key": "test-key", "llm_model": "test-model"}
 
     async def _summarise(calls, *, api_key, model, client_id=None, user_id=None):
+        from app.services import attribution
         seen["calls"] = calls
+        # What a real model call here would be billed to (llm._record reads exactly these).
+        seen["job"] = attribution.current()[1]
+        seen["summary_id"] = attribution.current_summary()
         return {"language": "en", "short_summary": "One call about a wire fee.",
                 "key_points": [], "action_items": [], "participants": [], "stages": 1,
                 "calls": [{"index": i, "job_id": c["job_id"], "filename": c["filename"],
@@ -464,3 +468,22 @@ def test_the_same_recording_in_two_spellings_is_summarised_once(api, users, fake
     assert r.status_code == 200, r.text
     assert [c["job_id"] for c in r.json()["calls"]] == [rec]
     assert len(fake_summarise["calls"]) == 1
+
+
+def test_summary_tokens_name_the_summary_and_a_lone_recording(api, users, fake_summarise):
+    """The usage page traces a summary's tokens by `summary_id`, minted before the model call so
+    the call can carry it. A summary of one recording also bills that recording (the one-click
+    run); a summary of several bills none of them, rather than whichever was loaded last."""
+    a = users["a"]
+    one = _paste(api, a["headers"]).json()["id"]
+    two = _paste(api, a["headers"]).json()["id"]
+
+    r = api.post("/summaries/from-recordings", json={"job_ids": [one]}, headers=a["headers"])
+    assert r.status_code == 200, r.text
+    assert fake_summarise["summary_id"] == r.json()["id"]
+    assert fake_summarise["job"] == one
+
+    r = api.post("/summaries/from-recordings", json={"job_ids": [one, two]}, headers=a["headers"])
+    assert r.status_code == 200, r.text
+    assert fake_summarise["summary_id"] == r.json()["id"]
+    assert fake_summarise["job"] is None

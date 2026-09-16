@@ -426,7 +426,7 @@ async def _text_tone(segments: list[dict], *, api_key: str, model: str, guidance
 # Voice tone — the sidecar, per segment
 # --------------------------------------------------------------------------- #
 async def _voice_tone(segments: list[dict], audio: bytes, filename,
-                      content_type) -> tuple[dict | None, str]:
+                      content_type, client_id: str | None = None) -> tuple[dict | None, str]:
     """`(per-position {label, confidence}, status)` from the sidecar.
 
     Only segments that carry both times are sent; the rest simply get no voice reading. The
@@ -437,7 +437,8 @@ async def _voice_tone(segments: list[dict], audio: bytes, filename,
               for s in segments if s["start"] is not None and s["end"] is not None]
     if not ranges:
         return None, "no_timestamps"
-    items, status = await sentiment.prosody_segments(audio, ranges, filename, content_type)
+    items, status = await sentiment.prosody_segments(audio, ranges, filename, content_type,
+                                                     client_id=client_id)
     if items is None:
         return None, status
     by_pos: dict[int, dict] = {}
@@ -514,8 +515,8 @@ async def analyse(*, segments, transcript, audio: bytes | None, filename, conten
 
     text_task = _text_tone(rows, api_key=api_key, model=model, guidance=guidance or "",
                            client_id=client_id) if "text" in wanted and rows else _none()
-    voice_task = _voice_tone(rows, audio, filename, content_type) if "voice" in wanted \
-        else _none_voice("not_requested")
+    voice_task = (_voice_tone(rows, audio, filename, content_type, client_id)
+                  if "voice" in wanted else _none_voice("not_requested"))
     text_res, voice_pair = await asyncio.gather(text_task, voice_task)
     voice_by_pos, voice_status = voice_pair
 

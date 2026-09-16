@@ -113,7 +113,7 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...),
     # with. `combine()` reports that honestly as prosody_only rather than inventing a
     # text half.
     sent = sentiment.combine(None, await sentiment.prosody(
-        audio, file.filename, file.content_type))
+        audio, file.filename, file.content_type, client_id=principal.client_id))
 
     await analysis.mark_transcribed(job_id, transcript=transcript, language=language,
                                     sentiment=sent)

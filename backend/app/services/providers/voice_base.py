@@ -122,6 +122,46 @@ def silence_wav(seconds: float = 0.4, rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
+def _count(value) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _seconds(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and 0 <= f != float("inf") else None
+
+
+def stt_usage(*, input_tokens=None, output_tokens=None, cache_read_tokens=None,
+              audio_seconds=None, words=None) -> dict:
+    """The `usage` block every STT adapter returns beside the transcript — the same four token
+    keys `llm._record` reads, plus the audio length.
+
+    Providers bill speech differently (Scribe and whisper-1 by the second, gpt-4o-transcribe
+    and Gemini by the token), so a key the response did not carry stays None rather than 0:
+    "no tokens reported" and "zero tokens" are different claims on the usage page. When the
+    provider states no duration, the last word's `end` stands in for it — it misses trailing
+    silence, but it is the one length every timed transcript has.
+    """
+    secs = _seconds(audio_seconds)
+    if secs is None:
+        ends = [_seconds(w.get("end")) for w in (words or []) if isinstance(w, dict)]
+        ends = [e for e in ends if e is not None]
+        secs = max(ends) if ends else None
+    return {"input_tokens": _count(input_tokens), "output_tokens": _count(output_tokens),
+            "cache_read_tokens": _count(cache_read_tokens), "cache_creation_tokens": None,
+            "audio_seconds": secs}
+
+
 def own_model(res: "Resolved", default: str, *, foreign_prefixes: tuple[str, ...] = ()) -> str:
     """The model an adapter should send: `res.model`, unless it is unset or plainly another
     provider's id (a legacy `stt_model=scribe_v1` showing through under an OpenAI connection

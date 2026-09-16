@@ -50,7 +50,7 @@ import json
 import logging
 
 from .. import audio as audio_mod
-from . import voice_base
+from . import llm_gemini, voice_base
 from .voice_base import silence_wav
 
 log = logging.getLogger("cq")
@@ -306,6 +306,44 @@ def words_from_interaction(data: dict) -> tuple[list[dict], str]:
     return words, text
 
 
+def interaction_usage(data: dict, words: list[dict]) -> dict:
+    """Token usage from an Interactions API response.
+
+    The shape is NOT confirmed against a live response (the adapter's verified test passed on a
+    probe clip, whose usage nobody looked at), so every key is read defensively: the
+    documented-looking `usage.total_input_tokens` / `total_output_tokens`, the bare
+    `input_tokens` / `output_tokens` spelling, and a generateContent-style `usageMetadata`.
+    Cached input is split out and thinking counted as output, as `llm_gemini._usage` does. A
+    shape we do not recognise costs the row its tokens, never the transcript.
+    """
+    u = data.get("usage")
+    if not isinstance(u, dict):
+        if isinstance(data.get("usageMetadata"), dict):
+            meta = llm_gemini._usage(data["usageMetadata"])
+            return voice_base.stt_usage(input_tokens=meta["input_tokens"],
+                                        output_tokens=meta["output_tokens"],
+                                        cache_read_tokens=meta["cache_read_tokens"],
+                                        words=words)
+        return voice_base.stt_usage(words=words)
+
+    def first(*keys):
+        for key in keys:
+            if isinstance(u.get(key), int) and not isinstance(u.get(key), bool):
+                return u[key]
+        return None
+
+    inp = first("total_input_tokens", "input_tokens")
+    out = first("total_output_tokens", "output_tokens")
+    cached = first("total_cached_tokens", "cached_tokens")
+    thoughts = first("total_thought_tokens", "thought_tokens", "total_reasoning_tokens")
+    if inp is not None and cached is not None:
+        inp = max(inp - cached, 0)
+    if out is not None and thoughts is not None:
+        out += thoughts
+    return voice_base.stt_usage(input_tokens=inp, output_tokens=out, cache_read_tokens=cached,
+                                words=words)
+
+
 class GeminiSTT:
     id = "gemini"
     default_model = DEFAULT_MODEL
@@ -426,7 +464,8 @@ class GeminiSTT:
         lang = language_code.strip().lower()[:2] if language_code and language_code.strip() \
             else None
         return {"text": text, "language_code": lang, "words": words,
-                "detail": DETAIL_TRANSCRIBE + note}
+                "detail": DETAIL_TRANSCRIBE + note,
+                "usage": interaction_usage(data_out, words)}
 
     async def _transcribe_generate(self, res, model: str, data: bytes, mime: str, *,
                                    language_code: str | None, diarize: bool,
@@ -478,7 +517,14 @@ class GeminiSTT:
                                         f"{exc}", code="bad_response") from exc
         words, text, lang = words_from(parsed if isinstance(parsed, dict) else {},
                                        asked_language=language_code)
-        return {"text": text, "language_code": lang, "words": words, "detail": DETAIL_GENERATE}
+        # The same usageMetadata the text adapter reads, mapped the same way (cached input
+        # split out, thinking counted as output), so a Gemini token means one thing on the page.
+        meta = llm_gemini._usage(out.get("usageMetadata"))
+        return {"text": text, "language_code": lang, "words": words, "detail": DETAIL_GENERATE,
+                "usage": voice_base.stt_usage(input_tokens=meta["input_tokens"],
+                                              output_tokens=meta["output_tokens"],
+                                              cache_read_tokens=meta["cache_read_tokens"],
+                                              words=words)}
 
     async def probe(self, res) -> dict:
         model = self.model(res)

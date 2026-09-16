@@ -155,6 +155,13 @@ SCHEMA_POLL_MAX_S = 8.0
 _stop = asyncio.Event()
 
 
+# Columns the worker writes that arrived after its tables did. `llm_usage.characters` stands in
+# for usage_detail.sql as a whole (its ALTERs apply together): a curation call that ran in the
+# window between a deploy's container start and the api's migration would otherwise lose its
+# usage row to an UndefinedColumnError that `_write_usage` swallows.
+REQUIRED_COLUMNS = (("llm_usage", "characters"),)
+
+
 async def _await_schema() -> bool:
     """Block until the api's migrations have created REQUIRED_TABLES (or we give up).
 
@@ -176,8 +183,14 @@ async def _await_schema() -> bool:
             async with db.pool().acquire() as conn:
                 missing = [t for t in REQUIRED_TABLES
                            if await conn.fetchval("SELECT to_regclass($1)", t) is None]
+                for table, column in REQUIRED_COLUMNS:
+                    if not await conn.fetchval(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_schema = current_schema() AND table_name = $1 "
+                            "AND column_name = $2", table, column):
+                        missing.append(f"{table}.{column}")
         except Exception as exc:  # noqa: BLE001 — db not up yet is the normal case here
-            missing = list(REQUIRED_TABLES)
+            missing = list(REQUIRED_TABLES) + [f"{t}.{c}" for t, c in REQUIRED_COLUMNS]
             log.debug("schema probe failed (%s); retrying", exc)
         if not missing:
             if logged:

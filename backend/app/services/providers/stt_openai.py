@@ -106,6 +106,19 @@ def wants_word_timestamps(model: str) -> bool:
     return model.startswith("whisper")
 
 
+def usage_of(body: dict, words: list[dict]) -> dict:
+    """The response's `usage`, which comes in the two shapes OpenAI bills by: `type: tokens`
+    (the gpt-4o-transcribe family) or `type: duration` with `seconds` (whisper-1). Older
+    responses carry neither, and `verbose_json` still has a top-level `duration`."""
+    u = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+    seconds = u.get("seconds") if u.get("type") == "duration" else None
+    if seconds is None:
+        seconds = body.get("duration")
+    return voice_base.stt_usage(input_tokens=u.get("input_tokens"),
+                                output_tokens=u.get("output_tokens"),
+                                audio_seconds=seconds, words=words)
+
+
 class OpenAISTT:
     id = "openai"
     default_model = DEFAULT_MODEL
@@ -150,6 +163,7 @@ class OpenAISTT:
             "language_code": language_code_of(body.get("language"), lang),
             "words": words,
             "detail": NO_DIARIZATION if diarize else "",
+            "usage": usage_of(body, words),
         }
 
     async def probe(self, res) -> dict:

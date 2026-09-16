@@ -128,6 +128,7 @@ async def _probe_stt() -> dict:
     stt = await transcription_svc.get_default(force=True)
     try:
         out = await voice.transcribe(None, voice.silence_wav(), "probe.wav", "audio/wav",
+                                     feature="probe",
                                      transcription=stt, timeout=60.0)
     except voice.VoiceError as exc:
         # A 400/422 that is NOT auth/permission/credit means the request was authorised and
@@ -149,7 +150,7 @@ async def _probe_tts() -> dict:
     plan = await ctx.plan()
     if not plan.voice_id:
         return {"level": "warn", "code": "no_voice_configured", "detail": "no default voice set"}
-    audio = await ctx.synthesize(PROBE_TEXT, plan)
+    audio = await ctx.synthesize(PROBE_TEXT, plan, feature="probe")
     return {"level": "ok",
             "detail": f"{ctx.provider} model {plan.model_id} returned {len(audio)} bytes"}
 
@@ -162,7 +163,7 @@ async def _probe_tts_ka() -> dict:
     resolves them for `language_code=ka`."""
     ctx = await voice.tts(None)
     plan = await ctx.plan(language_code="ka")
-    audio = await ctx.synthesize(PROBE_TEXT_KA, plan)
+    audio = await ctx.synthesize(PROBE_TEXT_KA, plan, feature="probe")
     return {"level": "ok",
             "detail": f"{plan.model_id} + voice {plan.voice_id} returned {len(audio)} bytes"}
 

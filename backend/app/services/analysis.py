@@ -143,6 +143,12 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
     still honours the operator default and the workspace override rather than silently
     transcribing on the code defaults.
     """
+    # Attribute every AI call below to THIS recording, here rather than trusting the caller.
+    # `create_job` sets it too, but not every run follows its own create_job in the same
+    # context: the partner batch creates N rows in a loop and then runs N background pipelines
+    # that all inherit the LAST row's id, and a retried row never calls create_job at all —
+    # both used to bill one recording's transcription and checks to another, or to nothing.
+    attribution.set_job(job_id)
     cfg = await settings_store.get_effective()
     if stt_settings is None:
         stt_settings = await transcription.resolve(client_id)
@@ -237,7 +243,7 @@ async def run_pipeline(job_id: str, audio: bytes, filename: str, content_type: s
     # signal an anonymous visitor gets beyond the transcript. Never blocks the result.
     try:
         sent = await sentiment.analyse(audio, analysis, filename=filename,
-                                       content_type=content_type)
+                                       content_type=content_type, client_id=client_id)
     except Exception:  # noqa: BLE001 — a tone model must never cost anyone their transcript
         log.exception("sentiment failed for job %s", job_id)
         sent = None

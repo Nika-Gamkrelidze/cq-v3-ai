@@ -20,12 +20,14 @@ it reads only the `caps()` record, and `caps()` is the adapter's answer.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
-from . import ai_resolve, settings_store
+from . import ai_resolve, llm, settings_store
 from . import transcription as transcription_svc
 from .ai_resolve import Resolved
-from .providers import stt_elevenlabs, stt_gemini, stt_openai, tts_elevenlabs, tts_openai
+from .providers import (stt_elevenlabs, stt_gemini, stt_openai, tts_elevenlabs, tts_openai,
+                        voice_base)
 from .providers.voice_base import (LANGUAGE_REJECTED, MAX_TEXT_CHARS, SPEED_MAX,  # noqa: F401
                                    SPEED_MIN, STABILITY_PRESETS, STTAdapter, TTSAdapter,
                                    VoiceError, silence_wav)
@@ -64,7 +66,7 @@ def tts_adapter(provider: str) -> TTSAdapter:
 # ---------------------------------------------------------------------------
 async def transcribe(client_id: str | None, audio: bytes, filename: str | None,
                      content_type: str | None, *, transcription: dict | None = None,
-                     timeout: float | None = None) -> dict:
+                     timeout: float | None = None, feature: str = "transcribe") -> dict:
     """Transcribe on the provider this tenant resolves to. → {text, language_code, words,
     provider, model, source} (the last three say what actually ran, for logs and probes).
 
@@ -72,6 +74,9 @@ async def transcribe(client_id: str | None, audio: bytes, filename: str | None,
     it, because only the route has seen the per-file override). Left out, it is resolved here
     from `client_id`, so a caller that has not been taught about the settings still honours
     the operator default and the workspace override rather than transcribing on code defaults.
+
+    `feature` is only the usage label: the console's health probe passes "probe", so a second
+    of test silence is not reported as a customer transcription.
     """
     res = await ai_resolve.resolve(client_id, "stt")
     adapter = stt_adapter(res.provider)
@@ -80,13 +85,33 @@ async def transcribe(client_id: str | None, audio: bytes, filename: str | None,
     kw = transcription_svc.as_kwargs(cfg)
     if timeout is not None:
         kw["timeout"] = timeout
-    out = await adapter.transcribe(res, audio, filename, content_type, **kw)
+    model = adapter.model(res)
+    started = time.monotonic()
+    try:
+        out = await adapter.transcribe(res, audio, filename, content_type, **kw)
+    except BaseException:
+        # A failed or cancelled transcription is metered too (the provider may still bill for
+        # it), and BaseException because a cancelled upload is exactly that case. The original
+        # exception is re-raised untouched: `record_usage` never raises.
+        llm.record_usage(feature=feature, capability="stt", client_id=client_id,
+                         model=model, res=res, latency_ms=_ms_since(started), ok=False)
+        raise
     out = dict(out or {})
     out.setdefault("text", "")
     out.setdefault("language_code", None)
     out.setdefault("words", [])
-    out["provider"], out["model"], out["source"] = res.provider, adapter.model(res), res.source
+    if not isinstance(out.get("usage"), dict):
+        # An adapter (or a test stub) that predates the usage block still yields the length.
+        out["usage"] = voice_base.stt_usage(words=out["words"])
+    llm.record_usage(feature=feature, capability="stt", client_id=client_id, model=model,
+                     res=res, latency_ms=_ms_since(started), ok=True, usage=out["usage"],
+                     audio_seconds=out["usage"].get("audio_seconds"))
+    out["provider"], out["model"], out["source"] = res.provider, model, res.source
     return out
+
+
+def _ms_since(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +172,9 @@ class TTS:
     """One tenant's text-to-speech, resolved once. Routes build one per request so the
     validation, the catalogue and the synthesis all agree on the provider."""
 
-    def __init__(self, res: Resolved, adapter: TTSAdapter):
+    def __init__(self, res: Resolved, adapter: TTSAdapter, client_id: str | None = None):
         self.res, self.adapter = res, adapter
+        self.client_id = client_id      # whose usage a synthesis is metered to
         self._default_voice: str | None | bool = False      # False = not looked up yet
 
     @property
@@ -224,19 +250,33 @@ class TTS:
                        voice_settings=shape_voice_settings(caps, voice_settings), caps=caps,
                        lang=lang)
 
-    async def synthesize(self, text: str, plan: TTSPlan) -> bytes:
+    async def synthesize(self, text: str, plan: TTSPlan, *, feature: str = "tts") -> bytes:
+        """`feature` is only the usage label ("probe" from the console's health check)."""
         if not plan.voice_id:
             raise VoiceError("No TTS voice is configured (set one on the connection or in the "
                              "admin panel).", code="not_configured")
-        return await self.adapter.synthesize(
-            self.res, text, voice_id=plan.voice_id, model_id=plan.model_id,
-            language_code=plan.language_code, voice_settings=plan.voice_settings)
+        started = time.monotonic()
+        try:
+            audio = await self.adapter.synthesize(
+                self.res, text, voice_id=plan.voice_id, model_id=plan.model_id,
+                language_code=plan.language_code, voice_settings=plan.voice_settings)
+        except BaseException:
+            # Metered like a transcription: failed or cancelled, then the original error.
+            llm.record_usage(feature=feature, capability="tts", client_id=self.client_id,
+                             model=plan.model_id, res=self.res,
+                             latency_ms=_ms_since(started), ok=False, characters=len(text))
+            raise
+        # Text-to-speech bills by the character; no provider here reports tokens for it.
+        llm.record_usage(feature=feature, capability="tts", client_id=self.client_id,
+                         model=plan.model_id, res=self.res, latency_ms=_ms_since(started),
+                         ok=True, characters=len(text))
+        return audio
 
 
 async def tts(client_id: str | None) -> TTS:
     """This tenant's text-to-speech, resolved: provider, key, model, voice."""
     res = await ai_resolve.resolve(client_id, "tts")
-    return TTS(res, tts_adapter(res.provider))
+    return TTS(res, tts_adapter(res.provider), client_id)
 
 
 async def synthesize(client_id: str | None, text: str, *, voice_id: str | None = None,

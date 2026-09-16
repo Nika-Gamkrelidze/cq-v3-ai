@@ -910,10 +910,16 @@ async def _summarise_and_record(principal: Principal, cfg: dict, recs: list[dict
     """The digest step, shared by an upload (`_run_summary`) and by recordings that already
     exist (`summarise_recordings`): one model call over the calls in order, one call_summaries
     row, and the response shape the workbench adopts. Raises `_Failed`."""
-    # The summary spans the whole batch, so it belongs to no single recording. Without this the
+    # A summary of several calls belongs to no single recording. Without clearing the job the
     # tokens would be attributed to whichever one happened to be created last, which reads as a
-    # fact and is not one. `create_job` and `_load` set it per recording before this point.
-    attribution.set_job(None)
+    # fact and is not one (`create_job` and `_load` set it per recording before this point).
+    # A summary of ONE call does belong to it — that is the one-click "All at once" run, whose
+    # summary cost belongs on that recording's line — so the job stays for exactly that case.
+    # Either way the tokens name the summary row they produce: its id is minted here, before
+    # the model call, because the INSERT that would otherwise mint it runs after.
+    summary_id = uuid.uuid4()
+    attribution.set_job(recs[0]["id"] if len(recs) == 1 else None)
+    attribution.set_summary(summary_id)
     try:
         summary = await summarise.summarise(
             [{"job_id": r["id"], "filename": r["filename"], "language": r["language"],
@@ -923,18 +929,20 @@ async def _summarise_and_record(principal: Principal, cfg: dict, recs: list[dict
     except summarise.SummariseError as exc:
         status = 429 if isinstance(exc.__cause__, llm.LLMBusyError) else 502
         raise _Failed(status, str(exc)) from exc
+    finally:
+        attribution.set_summary(None)
 
     async with pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO call_summaries (principal_type, client_id, user_id, job_ids, language,
-                                        summary, created_by)
-            VALUES ($1, $2, $3, $4::uuid[], $5, $6::jsonb, $7)
+            INSERT INTO call_summaries (id, principal_type, client_id, user_id, job_ids,
+                                        language, summary, created_by)
+            VALUES ($8, $1, $2, $3, $4::uuid[], $5, $6::jsonb, $7)
             RETURNING id, created_at
             """,
             principal.kind, principal.client_id if principal.is_tenant else None,
             _user_id(principal), [uuid.UUID(r["id"]) for r in recs],
-            summary.get("language"), json.dumps(summary), actor)
+            summary.get("language"), json.dumps(summary), actor, summary_id)
     return {"id": str(row["id"]), "summary": summary, "calls": _summary_calls(recs),
             "created_at": row["created_at"].isoformat()}
 

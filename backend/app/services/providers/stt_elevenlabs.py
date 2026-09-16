@@ -34,9 +34,12 @@ class ElevenLabsSTT:
                     "keyterms": keyterms, "audio_format": audio_format}
         if timeout is not None:
             kw["timeout"] = timeout
-        return await elevenlabs.transcribe(audio, filename or "audio",
-                                           content_type or "application/octet-stream",
-                                           res.api_key, self.model(res), **kw)
+        out = dict(await elevenlabs.transcribe(audio, filename or "audio",
+                                               content_type or "application/octet-stream",
+                                               res.api_key, self.model(res), **kw) or {})
+        # Scribe reports no tokens — it bills by the second — so the usage is the audio length.
+        out["usage"] = voice_base.stt_usage(words=out.get("words"))
+        return out
 
     async def probe(self, res) -> dict:
         """A real POST /v1/speech-to-text on 0.4 s of silence — the only proof of the

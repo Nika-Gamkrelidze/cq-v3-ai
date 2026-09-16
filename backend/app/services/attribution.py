@@ -26,6 +26,7 @@ from contextvars import ContextVar
 # the ContextVar and set it from outside a request context by accident.
 _actor: ContextVar[str | None] = ContextVar("cq_llm_actor", default=None)
 _job_id: ContextVar[str | None] = ContextVar("cq_llm_job_id", default=None)
+_summary_id: ContextVar[str | None] = ContextVar("cq_llm_summary_id", default=None)
 
 
 def set_actor(actor: str | None) -> None:
@@ -44,3 +45,15 @@ def set_job(job_id) -> None:
 def current() -> tuple[str | None, str | None]:
     """`(actor, job_id)` for the request in flight, either of which may be None."""
     return _actor.get(), _job_id.get()
+
+
+def set_summary(summary_id) -> None:
+    """Called around a summary's model call, so its tokens name the `call_summaries` row they
+    produced. A summary of several calls belongs to no single recording (the job is cleared
+    for it), so without this its tokens could be traced to nothing at all. None clears."""
+    _summary_id.set(str(summary_id) if summary_id else None)
+
+
+def current_summary() -> str | None:
+    """The summary being produced in this request, or None."""
+    return _summary_id.get()

@@ -151,6 +151,9 @@ async def run_startup_migrations() -> list[str]:
         # capability overrides) + provider/connection columns on llm_usage. After
         # ai_usage.sql, whose tenant_ai_configs it supersedes and copies from below.
         await _apply(conn, "ai_connections.sql")
+        # usage_detail.sql: capability, chat conversation/turn, summary and audio/character
+        # columns on llm_usage. After ai_connections.sql, the last migration to touch that table.
+        await _apply(conn, "usage_detail.sql")
         # health.sql: host samples + per-tenant request load behind the console's Health tab.
         await _apply(conn, "health.sql")
         log.append(await _migrate_tenant_ai_configs(conn))

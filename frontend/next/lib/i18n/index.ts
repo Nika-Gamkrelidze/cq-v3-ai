@@ -50,6 +50,7 @@
      pages/console.ts       adm. pb. cred. kill. v.   (admin.html -> /console)
      pages/home.ts          hero.          (index.html    -> /)
      pages/usage.ts         usage.         (new page      -> /usage)
+     pages/usageLists.ts    ul.            (the /usage lists and drill-downs)
      pages/workspace.ts     tn. con.       (tenant.html   -> /workspace)
 
    features/ vs pages/ is not a filing preference: a prefix is a FEATURE when more than one
@@ -83,6 +84,7 @@ import * as consolePage from './pages/console';
 import * as copilot from './pages/copilot';
 import * as home from './pages/home';
 import * as usage from './pages/usage';
+import * as usageLists from './pages/usageLists';
 import * as workspace from './pages/workspace';
 
 export type Lang = 'en' | 'ka' | 'ru';
@@ -95,7 +97,7 @@ const MODULES: Record<Lang, Dict>[] = [
   ai, analysis, bot, convert, curation, editor, kb, retrieval, scoring, sentimentTab, timeline,
   transcription,
   tts, workbench,
-  account, aicfg, consolePage, copilot, home, usage, workspace,
+  account, aicfg, consolePage, copilot, home, usage, usageLists, workspace,
 ];
 
 function assemble(lang: Lang): Dict {

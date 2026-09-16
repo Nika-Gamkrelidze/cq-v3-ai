@@ -30,6 +30,7 @@ import asyncio
 import contextlib
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable
 
 import anthropic
@@ -169,7 +170,11 @@ async def _admit(feature: str, timeout_s: float = ADMIT_TIMEOUT_S):
 def _record(*, feature: str, client_id: str | None, integration_id: str | None, model: str,
             message=None, usage: dict | None = None, latency_ms: int, ok: bool,
             byo: bool = False, actor: str | None = None, job_id: str | None = None,
-            provider: str | None = None, connection_id: str | None = None) -> None:
+            provider: str | None = None, connection_id: str | None = None,
+            capability: str = "llm", conversation_id: str | None = None,
+            turn_id: str | None = None, suggest_ref: str | None = None,
+            summary_id: str | None = None, audio_seconds: float | None = None,
+            characters: int | None = None) -> None:
     """Fire-and-forget one `llm_usage` row. Accounting must never fail a turn.
 
     Deliberately not awaited and deliberately not holding a pool connection across the LLM
@@ -189,10 +194,18 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
 
     `provider` and `connection_id` say WHOSE money and WHICH registry connection — with
     `byo` they are what lets spend be grouped by provider and charged to the right party.
+
+    The rest answer "which piece of work was this" in the detail the usage page drills into
+    (db/usage_detail.sql): `capability` (llm | stt | tts | voice_tone, because a speech-to-text
+    call is metered here too, through `record_usage`), the chat `conversation_id` / `turn_id` /
+    `suggest_ref` that caused a bot or copilot call, the `summary_id` of a multi-call summary
+    (read from the request context like the job), and the non-token units a voice provider
+    bills by — `audio_seconds` and `characters`.
     """
     ctx_actor, ctx_job = attribution.current()
     actor = actor or ctx_actor
     job_id = job_id or ctx_job
+    summary_id = summary_id or attribution.current_summary()
     if usage is None and message is not None:
         usage = usage_of(message)
     usage = usage or {}
@@ -212,6 +225,13 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
         byo,
         provider,
         connection_id,
+        capability or "llm",
+        _uuid_or_none(conversation_id),
+        _uuid_or_none(turn_id),
+        suggest_ref,
+        _uuid_or_none(summary_id),
+        float(audio_seconds) if audio_seconds is not None else None,
+        int(characters) if characters is not None else None,
     )
     try:
         task = asyncio.create_task(_write_usage(row))
@@ -219,6 +239,39 @@ def _record(*, feature: str, client_id: str | None, integration_id: str | None, 
         return
     _usage_tasks.add(task)
     task.add_done_callback(_usage_tasks.discard)
+
+
+def _uuid_or_none(value) -> str | None:
+    """A usage row's link columns are uuids. A malformed one is dropped to NULL here rather
+    than failing the INSERT, which would lose the whole row — the tokens were still spent."""
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def record_usage(*, feature: str, client_id: str | None, model: str | None, capability: str,
+                 latency_ms: int, ok: bool, usage: dict | None = None,
+                 res: Resolved | None = None, audio_seconds: float | None = None,
+                 characters: int | None = None) -> None:
+    """Meter a call that did NOT go through this module's text seam — speech-to-text, text-to-
+    speech, the local voice-tone model — into the same `llm_usage` table, so a recording's
+    transcription sits beside its fact-check on the usage page.
+
+    Never raises, for the reason `_record` never does: `voice.py` calls this from its error
+    path too, and accounting must not replace a provider's real error with its own.
+    """
+    try:
+        _record(feature=feature, client_id=client_id, integration_id=None,
+                model=model or "unknown", usage=usage, latency_ms=latency_ms, ok=ok,
+                byo=bool(res.byo) if res is not None else False,
+                provider=res.provider if res is not None else None,
+                connection_id=res.connection_id if res is not None else None,
+                capability=capability, audio_seconds=audio_seconds, characters=characters)
+    except Exception as exc:  # noqa: BLE001 — cost accounting can never break a call
+        log.warning("usage record failed (%s): %s", feature, exc)
 
 
 async def _write_usage(row: tuple) -> None:
@@ -229,9 +282,11 @@ async def _write_usage(row: tuple) -> None:
                 INSERT INTO llm_usage (client_id, integration_id, feature, model,
                                        input_tokens, output_tokens,
                                        cache_read_tokens, cache_creation_tokens, latency_ms, ok,
-                                       actor, job_id, byo, provider, connection_id)
+                                       actor, job_id, byo, provider, connection_id,
+                                       capability, conversation_id, turn_id, suggest_ref,
+                                       summary_id, audio_seconds, characters)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13, $14,
-                        $15::uuid)
+                        $15::uuid, $16, $17::uuid, $18::uuid, $19, $20::uuid, $21, $22)
                 """, *row)
     except Exception as exc:  # noqa: BLE001 — cost accounting can never break a turn
         log.warning("llm_usage write failed: %s", exc)
@@ -244,7 +299,9 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
                     admit_timeout_s: float = ADMIT_TIMEOUT_S,
                     stream: bool = False,
                     on_progress: Callable[[int], None] | None = None,
-                    actor: str | None = None, job_id: str | None = None) -> dict:
+                    actor: str | None = None, job_id: str | None = None,
+                    conversation_id: str | None = None, turn_id: str | None = None,
+                    suggest_ref: str | None = None) -> dict:
     """The house forced-tool-use pattern: one tool, tool_choice pinned to it, strict schema.
 
     Returns the tool_use block's input as a plain dict. Raises LLMError if the model answered
@@ -268,6 +325,9 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
 
     `api_key` and `model` are the DEPLOYMENT default; the registry (a default or assigned
     connection) or the tenant's own key is substituted here — see `_resolve`.
+
+    `conversation_id` / `turn_id` / `suggest_ref` attribute a chat call to the conversation and
+    the message that caused it (usage only; nothing else reads them).
     """
     res = await _resolve(client_id, api_key, model)
     adapter = _adapter(res)
@@ -282,14 +342,16 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
                     model=res.model, usage=None,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
                     actor=actor, job_id=job_id, byo=res.byo,
-                    provider=res.provider, connection_id=res.connection_id)
+                    provider=res.provider, connection_id=res.connection_id,
+                    conversation_id=conversation_id, turn_id=turn_id, suggest_ref=suggest_ref)
             raise
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
             model=res.model, usage=result["usage"],
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
             actor=actor, job_id=job_id, byo=res.byo,
-            provider=res.provider, connection_id=res.connection_id)
+            provider=res.provider, connection_id=res.connection_id,
+            conversation_id=conversation_id, turn_id=turn_id, suggest_ref=suggest_ref)
 
     if result["stop_reason"] == MAX_TOKENS:
         raise LLMTruncatedError(
@@ -302,11 +364,18 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
 async def stream_text(*, feature: str, client_id: str | None, api_key: str, model: str,
                       system: str, user: str, opts: dict,
                       max_tokens: int = 1024,
-                      integration_id: str | None = None) -> AsyncIterator[str]:
+                      integration_id: str | None = None,
+                      conversation_id: str | None = None, turn_id: str | None = None,
+                      suggest_ref: str | None = None) -> AsyncIterator[str]:
     """Yield plain text deltas. The admission slot is held for the whole stream, because an
     open stream is exactly as much upstream concurrency as a blocking call.
 
-    Resolves the tenant's provider for the same reason `call_tool` does."""
+    Resolves the tenant's provider for the same reason `call_tool` does.
+
+    A stream the consumer abandons (a customer closing the widget mid-answer cancels the SSE
+    pump) still writes its row, as failed and with whatever usage had arrived: those tokens
+    were generated and billed, and a stream that vanished from the ledger would make the bot
+    look cheaper than it is."""
     res = await _resolve(client_id, api_key, model)
     adapter = _adapter(res)
     holder = StreamUsage()
@@ -321,13 +390,24 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
                     model=res.model, usage=None,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
-                    byo=res.byo, provider=res.provider, connection_id=res.connection_id)
+                    byo=res.byo, provider=res.provider, connection_id=res.connection_id,
+                    conversation_id=conversation_id, turn_id=turn_id,
+                    suggest_ref=suggest_ref)
+            raise
+        except (GeneratorExit, asyncio.CancelledError):
+            _record(feature=feature, client_id=client_id, integration_id=integration_id,
+                    model=holder.model or res.model, usage=holder.usage,
+                    latency_ms=int((time.monotonic() - started) * 1000), ok=False,
+                    byo=res.byo, provider=res.provider, connection_id=res.connection_id,
+                    conversation_id=conversation_id, turn_id=turn_id,
+                    suggest_ref=suggest_ref)
             raise
 
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
             model=holder.model or res.model, usage=holder.usage,
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
-            byo=res.byo, provider=res.provider, connection_id=res.connection_id)
+            byo=res.byo, provider=res.provider, connection_id=res.connection_id,
+            conversation_id=conversation_id, turn_id=turn_id, suggest_ref=suggest_ref)
 
 
 async def probe(res: Resolved, *, client_id: str | None = None) -> dict:

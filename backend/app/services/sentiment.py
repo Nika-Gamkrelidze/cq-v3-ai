@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import time
+from types import SimpleNamespace
 
 import httpx
 
@@ -46,6 +47,24 @@ _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 # call with a hundred turns is genuinely minutes of work, and timing it out means the reviewer
 # is told "unavailable" for something that was merely slow.
 _SEGMENTS_TIMEOUT = httpx.Timeout(300.0, connect=3.0)
+
+# The sidecar in `llm_usage`: provider "local", nobody's key, no registry connection. A stand-in
+# for the `Resolved` that `llm.record_usage` reads those three fields from — the sidecar has no
+# resolver chain to produce a real one.
+_LOCAL = SimpleNamespace(provider="local", byo=False, connection_id=None)
+_SIDECAR_MODEL = "cq-sentiment"
+
+
+def _record_tone(client_id: str | None, started: float, *, ok: bool, data=None,
+                 audio_seconds: float | None = None) -> None:
+    """Meter one sidecar request — zero tokens, but a recording's voice tone should appear
+    beside its transcription on the usage page. Called only once a request was attempted, so
+    a sidecar that is simply not configured leaves no rows. Never raises (`record_usage`)."""
+    model = data.get("model") if isinstance(data, dict) else None
+    llm.record_usage(feature="voice_tone", capability="voice_tone", client_id=client_id,
+                     model=model if isinstance(model, str) and model else _SIDECAR_MODEL,
+                     res=_LOCAL, latency_ms=int((time.monotonic() - started) * 1000), ok=ok,
+                     audio_seconds=audio_seconds)
 
 # Discrete labels the sidecar may return, mapped to the coarse polarity the UI colours by.
 _POLARITY = {
@@ -133,11 +152,13 @@ async def status(*, force: bool = False) -> dict:
 
 
 async def prosody(audio: bytes, filename: str | None = None,
-                  content_type: str | None = None) -> dict | None:
+                  content_type: str | None = None, *,
+                  client_id: str | None = None) -> dict | None:
     """Acoustic emotion from the sidecar, or None when it is unavailable.
 
     Never raises: every failure mode (not configured, connection refused, timeout, garbage
     body) resolves to None so the caller can carry on with the text signal alone.
+    `client_id` only names the workspace the usage row is metered to.
     """
     cfg = await settings_store.get_effective()
     url = (cfg.get("sentiment_url") or "").strip()
@@ -148,6 +169,7 @@ async def prosody(audio: bytes, filename: str | None = None,
         # windowing is the right place to handle length, not a 100 MB HTTP body.
         audio = audio[:_MAX_UPLOAD_BYTES]
 
+    started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
@@ -158,11 +180,14 @@ async def prosody(audio: bytes, filename: str | None = None,
             data = resp.json()
     except (httpx.HTTPError, ValueError, asyncio.TimeoutError) as exc:
         log.warning("prosody sentiment unavailable: %s", exc)
+        _record_tone(client_id, started, ok=False)
         return None
     except Exception:  # noqa: BLE001 — a tone model must never break the pipeline
         log.exception("prosody sentiment failed")
+        _record_tone(client_id, started, ok=False)
         return None
 
+    _record_tone(client_id, started, ok=isinstance(data, dict), data=data)
     if not isinstance(data, dict):
         return None
     label = str(data.get("label") or "unknown").lower()
@@ -275,7 +300,7 @@ async def standalone(transcript: str, audio: bytes | None, *, api_key: str, mode
     """Full standalone-sentiment record: text judge + prosody, run concurrently."""
     text_task = judge_text(transcript, api_key=api_key, model=model, guidance=guidance,
                            client_id=client_id)
-    pros_task = prosody(audio, filename, content_type) if audio else _none()
+    pros_task = prosody(audio, filename, content_type, client_id=client_id) if audio else _none()
     text, pros = await asyncio.gather(text_task, pros_task)
     return combine(text, pros)
 
@@ -312,9 +337,10 @@ def combine(text: dict | None, pros: dict | None) -> dict:
 
 
 async def analyse(audio: bytes | None, analysis: dict | None, *, filename: str | None = None,
-                  content_type: str | None = None) -> dict:
-    """Full sentiment record for one job. Safe to call unconditionally."""
-    pros = await prosody(audio, filename, content_type) if audio else None
+                  content_type: str | None = None, client_id: str | None = None) -> dict:
+    """Full sentiment record for one job. Safe to call unconditionally. `client_id` only
+    attributes the voice-tone usage row to its workspace."""
+    pros = await prosody(audio, filename, content_type, client_id=client_id) if audio else None
     return combine(_text_part(analysis), pros)
 
 
@@ -377,7 +403,8 @@ async def _why_unavailable(url: str, fallback: str) -> str:
 
 
 async def prosody_segments(audio: bytes, segments, filename: str | None = None,
-                           content_type: str | None = None) -> list | None:
+                           content_type: str | None = None, *,
+                           client_id: str | None = None) -> list | None:
     """Acoustic emotion per segment from the sidecar's `POST /prosody/segments`, or None.
 
     Returns `(items, status)`. `items` is `[{"i", "label", "polarity", "confidence",
@@ -393,6 +420,7 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
     Unlike `prosody()` the upload is NOT truncated: cutting the tail off a compressed file
     would shift or lose every later range, which is worse than no answer. The body is already
     bounded by the API's own upload limit for the principal that stored the recording.
+    `client_id` only names the workspace the usage row is metered to.
     """
     cfg = await settings_store.get_effective()
     url = (cfg.get("sentiment_url") or "").strip()
@@ -406,6 +434,9 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
         # before transcripts carried timings. There is nothing to slice.
         return None, "no_timestamps"
 
+    # The audio the sidecar reads runs to the last range it is asked to slice.
+    seconds = max(r["end"] for r in ranges)
+    started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=_SEGMENTS_TIMEOUT) as client:
             resp = await client.post(
@@ -421,15 +452,20 @@ async def prosody_segments(audio: bytes, segments, filename: str | None = None,
         # was the only thing anyone saw when the sidecar could not load its model at all.
         # Ask the sidecar what state it is in and say that instead.
         log.warning("per-segment prosody timed out: %s", exc)
+        _record_tone(client_id, started, ok=False, audio_seconds=seconds)
         return None, await _why_unavailable(url, "timeout")
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("per-segment prosody unavailable: %s", exc)
+        _record_tone(client_id, started, ok=False, audio_seconds=seconds)
         return None, await _why_unavailable(url, "unreachable")
     except Exception:  # noqa: BLE001 — a tone model must never break the analysis
         log.exception("per-segment prosody failed")
+        _record_tone(client_id, started, ok=False, audio_seconds=seconds)
         return None, "error"
 
     items = data.get("segments") if isinstance(data, dict) else None
+    _record_tone(client_id, started, ok=isinstance(items, list), data=data,
+                 audio_seconds=seconds)
     if not isinstance(items, list):
         return None, "error"
     out = []

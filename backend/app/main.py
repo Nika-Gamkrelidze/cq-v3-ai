@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import db
 from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, chat_config,
                      convert, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
-                     tenants, transcription as transcription_router, tts)
+                     tenants, transcription as transcription_router, tts, usage_admin)
 from .config import settings
 from .services import ai_registry, ai_resolve, analysis, settings_store
 from .services import auth as auth_service
@@ -334,6 +334,8 @@ app.include_router(recordings.router)
 # /ai/config (the workspace's own keys — owner). Root only, like the other settings routers.
 app.include_router(ai_admin.router)
 app.include_router(ai_tenant.router)
+# Detailed AI usage (superadmin): /admin/usage/{overview,calls,recordings,conversations}.
+app.include_router(usage_admin.router)
 
 # ---- B2B partner API (versioned) -------------------------------------------
 # New partner-facing endpoints (account, transcriptions, async + bulk analysis, jobs,

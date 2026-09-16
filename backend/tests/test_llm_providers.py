@@ -787,5 +787,8 @@ def test_record_writes_provider_and_connection(monkeypatch):
 
     asyncio.run(go())
     row = captured["row"]
-    assert row[-2:] == ("gemini", "conn-1")
+    # Positions follow _write_usage's column list; the detail columns (capability onwards)
+    # were appended after connection_id.
+    assert row[13:15] == ("gemini", "conn-1")
+    assert row[15] == "llm"
     assert row[4:6] == (1, 2)
