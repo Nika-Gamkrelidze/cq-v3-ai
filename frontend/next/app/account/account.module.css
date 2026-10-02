@@ -78,7 +78,7 @@ tr.actRow:focus-visible { outline: 2px solid var(--beam); outline-offset: -2px; 
   padding: 7px 14px; cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--hairline); }
 .seg button:hover { color: var(--paper); }
-.seg button[aria-pressed="true"] { background: var(--beam); color: #0a1f30; }
+.seg button[aria-pressed="true"] { background: var(--beam); color: var(--on-beam); }
 
 @media (max-width: 640px) {
   .ttsRow { grid-template-columns: 1fr auto; }

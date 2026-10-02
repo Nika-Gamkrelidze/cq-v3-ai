@@ -80,7 +80,7 @@
 }
 .seg button + button { border-left: 1px solid var(--hairline); }
 .seg button:hover { color: var(--paper); }
-.seg button[aria-pressed="true"] { background: var(--beam); color: #0a1f30; }
+.seg button[aria-pressed="true"] { background: var(--beam); color: var(--on-beam); }
 
 @media (max-width: 640px) {
   /* The label takes its own line and the slider + badge share the next. */
