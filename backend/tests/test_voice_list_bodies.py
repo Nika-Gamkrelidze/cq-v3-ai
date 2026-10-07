@@ -50,7 +50,8 @@ def test_a_list_wrapped_error_still_classifies_by_status(wire, resolver, status,
 
 @pytest.mark.parametrize("status, sentence", [
     (402, "Your prepayment credits are depleted. Please go to AI Studio at "
-          "https://ai.studio/projects to manage your project and billing."),
+          "https://ai.studio/projects to manage your project and billing. Learn more at "
+          "https://ai.google.dev/gemini-api/docs/billing#prepay. "),  # the live body's tail
     (429, "Quota exceeded for metric: generate_requests_per_model_per_day, limit: 100"),
 ])
 def test_a_quota_error_keeps_the_providers_sentence(wire, resolver, status, sentence):  # noqa: F811
@@ -60,7 +61,8 @@ def test_a_quota_error_keeps_the_providers_sentence(wire, resolver, status, sent
     wire["responses"] = {"/interactions": (status, body), **wire["responses"]}
     with pytest.raises(voice_base.VoiceError) as exc:
         run(voice.transcribe("t-1", b"x", "a.mp3", "audio/mpeg", transcription=ORIGINAL))
-    assert sentence in str(exc.value)
+    assert sentence.strip().rstrip(".") in str(exc.value)
+    assert ". ." not in str(exc.value) and ".." not in str(exc.value)
     assert exc.value.code == "quota"
 
 

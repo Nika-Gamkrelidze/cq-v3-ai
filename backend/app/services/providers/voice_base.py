@@ -212,6 +212,9 @@ def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
         msg = str(err.get("message") or "")
     elif isinstance(err, str):
         msg = err
+    # For the messages below that append it mid-sentence: Google's sentences end in their own
+    # full stop (and sometimes a space), and ours adds one.
+    tail = msg.strip().rstrip(".").strip()
     if resp.status_code == 401 or err_code in ("invalid_api_key",):
         return VoiceError(
             f"{action} failed: {vendor} did not accept the API key. Paste a current key on the "
@@ -220,7 +223,7 @@ def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
             or "permission" in err_code:
         return VoiceError(
             f"{action} was refused: this {vendor} key lacks the permission for it"
-            f"{' — ' + msg if msg else ''}.",
+            f"{' — ' + tail if tail else ''}.",
             status=resp.status_code, code="missing_permission", raw=raw)
     # Both quota branches keep the provider's own sentence: it is the only place that says WHICH
     # account and which limit. Google answers 402 when the prepay balance of the billing account
@@ -231,12 +234,12 @@ def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
             or resp.status_code == 402:
         return VoiceError(
             f"{action} failed: the {vendor} account behind this key is out of credits or over "
-            f"its quota{' — ' + msg if msg else ''}.",
+            f"its quota{' — ' + tail if tail else ''}.",
             status=resp.status_code, code="quota", raw=raw)
     if resp.status_code == 429:
         return VoiceError(
             f"{action} was rate-limited by {vendor}"
-            f"{' — ' + msg if msg else '; try again in a moment'}.",
+            f"{' — ' + tail if tail else '; try again in a moment'}.",
             status=resp.status_code, code="quota", raw=raw)
     return VoiceError(f"{action} failed ({resp.status_code}): {msg or raw}",
                       status=resp.status_code, raw=raw)
