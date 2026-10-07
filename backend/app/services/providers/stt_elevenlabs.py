@@ -17,6 +17,11 @@ from .voice_base import silence_wav
 DEFAULT_MODEL = "scribe_v1"
 
 
+# Scribe reads nearly any audio or video container, so it declares no list: the workspace's
+# `audio_format` is purely a quality choice here (see services/audio.py::for_provider).
+ACCEPTED_AUDIO = None
+
+
 class ElevenLabsSTT:
     id = "elevenlabs"
     default_model = DEFAULT_MODEL

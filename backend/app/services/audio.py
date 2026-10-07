@@ -73,6 +73,67 @@ STT_FORMATS: dict[str, _Spec] = {
 # this is still the lossy one — it is an evidence question, and the evidence is not in yet.
 DEFAULT_STT_FORMAT = "mp3_16k"
 
+# ---------------------------------------------------------------------------------------------
+# What a provider can READ. ElevenLabs Scribe takes nearly any audio or video container, so the
+# workspace's `audio_format` (above) was only ever a quality choice. Google and OpenAI accept a
+# fixed list, and the same choice — `original` above all, or a conversion that fell back to the
+# upload — could hand them a container they reject (a phone's .amr, a .wma, a .3gp, a video).
+# Each speech-to-text adapter therefore declares the MIME types it accepts and the format to
+# convert to when the chosen one is not among them (`for_provider`).
+# ---------------------------------------------------------------------------------------------
+
+# Spellings browsers and recorders use for the same thing -> the one the provider lists.
+_MIME_ALIASES = {
+    "audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/vnd.wave": "audio/wav",
+    "audio/x-pn-wav": "audio/wav", "audio/x-flac": "audio/flac", "audio/x-aiff": "audio/aiff",
+    "audio/x-m4a": "audio/m4a", "audio/mp4": "audio/m4a", "audio/x-mp3": "audio/mpeg",
+    "audio/mpeg3": "audio/mpeg", "audio/x-mpeg": "audio/mpeg", "audio/mpg": "audio/mpeg",
+    "audio/x-aac": "audio/aac", "audio/vorbis": "audio/ogg", "audio/x-ogg": "audio/ogg",
+}
+_EXT_MIME = {
+    "mp3": "audio/mpeg", "mpga": "audio/mpeg", "wav": "audio/wav", "flac": "audio/flac",
+    "m4a": "audio/m4a", "aac": "audio/aac", "ogg": "audio/ogg", "oga": "audio/ogg",
+    "opus": "audio/opus", "weba": "audio/webm", "aif": "audio/aiff", "aiff": "audio/aiff",
+    "amr": "audio/amr", "3gp": "audio/3gpp", "wma": "audio/x-ms-wma",
+    "mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
+    "mkv": "video/x-matroska", "avi": "video/x-msvideo",
+}
+
+
+def mime_of(content_type: str | None, filename: str | None) -> str:
+    """The audio's MIME type in the spelling providers list: the declared type when it names
+    audio or video, else the file extension's, else application/octet-stream."""
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    if ct.startswith(("audio/", "video/")):
+        return _MIME_ALIASES.get(ct, ct)
+    name = (filename or "").rsplit("/", 1)[-1]
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return _EXT_MIME.get(ext, "application/octet-stream")
+
+
+async def for_provider(data: bytes, filename: str, content_type: str, audio_format: str | None,
+                       *, accepts: frozenset[str] | None, fallback: str) -> SttPayload:
+    """`to_stt_format`, then make sure the provider can read the result.
+
+    `accepts` is the provider's list of MIME types (None = it reads anything, as Scribe does).
+    When the workspace's format leaves the audio in a container outside that list, the ORIGINAL
+    upload is converted again to `fallback` — one of `STT_FORMATS` the provider accepts. The
+    returned payload carries the canonical MIME type. If even that cannot be produced (no ffmpeg,
+    a file ffmpeg cannot decode) the first payload goes as it is: the provider then refuses it
+    with its own sentence, which now reaches the user (`voice_base.json_object`).
+    """
+    payload = await to_stt_format(data, filename, content_type, audio_format)
+    mime = mime_of(payload.content_type, payload.filename)
+    if accepts is None or mime in accepts:
+        return payload._replace(content_type=mime) if accepts is not None else payload
+    log.info("stt: %s is not readable by this provider; converting to %s", mime, fallback)
+    alt = await to_stt_format(data, filename, content_type, fallback)
+    alt_mime = mime_of(alt.content_type, alt.filename)
+    if alt_mime in accepts:
+        return alt._replace(content_type=alt_mime)
+    log.warning("stt: could not convert %s to %s; sending it as it is", mime, fallback)
+    return payload._replace(content_type=mime)
+
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 

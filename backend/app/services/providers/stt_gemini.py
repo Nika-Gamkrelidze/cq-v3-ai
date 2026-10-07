@@ -98,6 +98,17 @@ _BCP47 = {
     "hi": "hi-IN", "id": "id-ID", "vi": "vi-VN", "th": "th-TH", "fa": "fa-IR", "uz": "uz-UZ",
 }
 
+# What each Google API reads. The Interactions API's `mime_type` is an ENUM (ai.google.dev
+# /api/interactions-api, checked 2026-10); generateContent documents a shorter list. Anything
+# else — a video, a phone's .amr, .wma, .3gp, an `original` upload of those — is converted to
+# FALLBACK_FORMAT first (audio.for_provider) instead of being sent for Google to refuse.
+INTERACTIONS_AUDIO = frozenset({
+    "audio/wav", "audio/mp3", "audio/mpeg", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac",
+    "audio/m4a", "audio/l16", "audio/opus", "audio/alaw", "audio/mulaw", "audio/webm"})
+GENERATE_AUDIO = frozenset({
+    "audio/wav", "audio/mp3", "audio/mpeg", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"})
+FALLBACK_FORMAT = "flac_16k"   # lossless, mono, 16 kHz: accepted by both
+
 # The Interactions API's audio mime type is an ENUM; the common aliases mapped onto it.
 _INTERACTIONS_MIME = {
     "audio/mp4": "audio/m4a", "audio/x-m4a": "audio/m4a", "audio/x-wav": "audio/wav",
@@ -210,16 +221,6 @@ def instruction(*, language_code: str | None, diarize: bool, keyterms: list[str]
     lines.append("Give start and end as seconds from the beginning of the recording, and "
                  "report the language you heard as an ISO-639-1 code.")
     return " ".join(lines)
-
-
-def _mime(content_type: str | None, filename: str | None) -> str:
-    ct = (content_type or "").split(";", 1)[0].strip().lower()
-    if ct.startswith("audio/") or ct.startswith("video/"):
-        return ct
-    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
-    return {"mp3": "audio/mpeg", "flac": "audio/flac", "wav": "audio/wav", "m4a": "audio/mp4",
-            "ogg": "audio/ogg", "opus": "audio/ogg", "webm": "audio/webm", "aac": "audio/aac",
-            "mp4": "video/mp4"}.get(ext, "audio/mpeg")
 
 
 def _num(v):
@@ -412,9 +413,11 @@ class GeminiSTT:
                 f"{model} is Google's streaming model (WebSockets only) and cannot transcribe "
                 f"a recording; set the connection's model to {DEFAULT_MODEL}.",
                 code="invalid_model")
-        payload = await audio_mod.to_stt_format(audio, filename or "audio", content_type or "",
-                                                audio_format)
-        mime = _mime(payload.content_type, payload.filename)
+        accepts = INTERACTIONS_AUDIO if is_transcribe_model(model) else GENERATE_AUDIO
+        payload = await audio_mod.for_provider(audio, filename or "audio", content_type or "",
+                                               audio_format, accepts=accepts,
+                                               fallback=FALLBACK_FORMAT)
+        mime = payload.content_type
         timeout = timeout or 300.0
         if is_transcribe_model(model):
             return await self._transcribe_interactions(
