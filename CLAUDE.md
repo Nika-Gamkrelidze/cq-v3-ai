@@ -340,7 +340,11 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   adapter declares `ACCEPTED_AUDIO` (or None for "anything") and a fallback. Provider error bodies
   are read with `voice_base.json_object()`, never `resp.json().get(...)`: Google sometimes wraps an
   error in a one-element array, and the AttributeError that caused replaced the real message
-  ("Transcription failed: 'list' object has no attribute 'get'").
+  ("Transcription failed: 'list' object has no attribute 'get'"). The 402/429 messages carry the
+  provider's own sentence too: Google answers **402** when the *prepay* balance of the billing
+  account behind the key is empty (prepay is the default for AI Studio accounts since 2026-03-23,
+  and every key on that billing account stops at once) and 429 for a named per-minute/per-day/spend
+  cap — our wording alone cannot say which account or which limit.
 - **Usage units and attribution (`/usage`).** Providers bill in different units and the page
   never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
   carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has

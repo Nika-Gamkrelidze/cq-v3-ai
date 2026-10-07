@@ -222,14 +222,21 @@ def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
             f"{action} was refused: this {vendor} key lacks the permission for it"
             f"{' — ' + msg if msg else ''}.",
             status=resp.status_code, code="missing_permission", raw=raw)
+    # Both quota branches keep the provider's own sentence: it is the only place that says WHICH
+    # account and which limit. Google answers 402 when the prepay balance of the billing account
+    # behind the KEY is empty (not necessarily the account the owner is looking at), and 429 for
+    # a per-minute, per-day or spend cap, which it names — "try again in a moment" is wrong for
+    # a daily one.
     if err_code == "insufficient_quota" or err_type == "insufficient_quota" \
             or resp.status_code == 402:
         return VoiceError(
-            f"{action} failed: the {vendor} account is out of credits or over its quota.",
+            f"{action} failed: the {vendor} account behind this key is out of credits or over "
+            f"its quota{' — ' + msg if msg else ''}.",
             status=resp.status_code, code="quota", raw=raw)
     if resp.status_code == 429:
         return VoiceError(
-            f"{action} was rate-limited by {vendor}; try again in a moment.",
+            f"{action} was rate-limited by {vendor}"
+            f"{' — ' + msg if msg else '; try again in a moment'}.",
             status=resp.status_code, code="quota", raw=raw)
     return VoiceError(f"{action} failed ({resp.status_code}): {msg or raw}",
                       status=resp.status_code, raw=raw)

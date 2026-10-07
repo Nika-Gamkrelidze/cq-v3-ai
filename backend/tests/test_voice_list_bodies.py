@@ -48,6 +48,22 @@ def test_a_list_wrapped_error_still_classifies_by_status(wire, resolver, status,
     assert exc.value.code == expect_code
 
 
+@pytest.mark.parametrize("status, sentence", [
+    (402, "Your prepayment credits are depleted. Please go to AI Studio at "
+          "https://ai.studio/projects to manage your project and billing."),
+    (429, "Quota exceeded for metric: generate_requests_per_model_per_day, limit: 100"),
+])
+def test_a_quota_error_keeps_the_providers_sentence(wire, resolver, status, sentence):  # noqa: F811
+    """Our own wording cannot say which billing account or which limit; Google's does."""
+    resolver["stt"] = gemini_stt("gemini-3.5-transcribe")
+    body = {"error": {"code": status, "status": "RESOURCE_EXHAUSTED", "message": sentence}}
+    wire["responses"] = {"/interactions": (status, body), **wire["responses"]}
+    with pytest.raises(voice_base.VoiceError) as exc:
+        run(voice.transcribe("t-1", b"x", "a.mp3", "audio/mpeg", transcription=ORIGINAL))
+    assert sentence in str(exc.value)
+    assert exc.value.code == "quota"
+
+
 @pytest.mark.parametrize("body", [[], [1, 2], "oops", 7, None, [None, "x"]])
 def test_odd_error_bodies_never_crash_the_classifier(wire, resolver, body):  # noqa: F811
     resolver["stt"] = gemini_stt("gemini-3.5-transcribe")
