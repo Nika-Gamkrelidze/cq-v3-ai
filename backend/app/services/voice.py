@@ -97,6 +97,9 @@ async def transcribe(client_id: str | None, audio: bytes, filename: str | None,
                          model=model, res=res, latency_ms=_ms_since(started), ok=False)
         raise
     out = dict(out or {})
+    # An adapter that had to run another model (Gemini's stand-in for a refusing Transcribe
+    # model) names it, so the usage row and the caller see what actually ran and was billed.
+    model = str(out.pop("model", None) or model)
     out.setdefault("text", "")
     out.setdefault("language_code", None)
     out.setdefault("words", [])

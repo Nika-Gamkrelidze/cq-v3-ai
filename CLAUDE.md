@@ -331,6 +331,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   prosody needs a start and an end per turn and otherwise reports `no_timestamps`, i.e. a
   recording that silently goes quiet. A recording that genuinely needs key terms belongs on
   ElevenLabs Scribe.
+  **Stand-in model (since 2026-10-07):** Google started answering every Transcribe request with
+  400 "Thinking is not enabled for this model" (a Google-side fault — the bare documented request
+  fails too, and we send no thinking setting). On exactly that refusal the adapter transcribes the
+  recording on a chat model with the same key (`FALLBACK_CHAT_MODEL` `gemini-3.8-flash`, or the
+  connection's `settings.fallback_model`), says so in `detail`, and bills `/usage` to the model
+  that ran (adapters may return `model`; `voice.transcribe` records it). Every request tries the
+  Transcribe model first, so recovery needs no deploy. **Test connection never falls back** — it
+  is how an operator sees whether Google has fixed it.
 - **Each speech-to-text provider declares the audio it can read** (`services/audio.py::
   for_provider`, constants in each `providers/stt_*.py`). The workspace `audio_format` setting was
   built for ElevenLabs Scribe, which reads nearly any container; Google's Interactions API takes an

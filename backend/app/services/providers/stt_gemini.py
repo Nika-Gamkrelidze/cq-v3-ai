@@ -80,6 +80,21 @@ NOTE_TERMS_DROPPED = (" Key terms were not sent: Gemini Transcribe cannot combin
 NOTE_TERMS_RULE = (" Key terms are not sent on this model; word timings are kept instead. "
                    "Use ElevenLabs Scribe for a recording that needs key terms.")
 
+# Since 2026-10-07 ~08:27 UTC Google answers EVERY gemini-3.5-transcribe request — the bare
+# documented one included, and with thinking explicitly off — with 400 "Thinking is not enabled
+# for this model" (discuss.ai.google.dev/t/187295, googleapis/js-genai#2011). Nothing in our
+# request can avoid it; we never send a thinking setting. So on exactly that refusal a recording
+# is transcribed by a chat model on the same key instead of failing, and goes back to the
+# Transcribe model on its own the moment Google accepts it again. The connection setting
+# `fallback_model` overrides the chat model. Test connection does NOT fall back: it is how an
+# operator sees whether Google has fixed it.
+FALLBACK_CHAT_MODEL = "gemini-3.8-flash"
+NOTE_FALLBACK = ("{model} is refusing requests on Google's side (\"Thinking is not enabled for "
+                 "this model\"), so this recording was transcribed by {chat} instead. ")
+NOTE_PROBE_FALLBACK = (" This is a Google-side fault on {model}, not this key: recordings are "
+                       "transcribed by {chat} meanwhile (speakers by ear, timings per segment) "
+                       "and go back to {model} automatically once Google accepts it again.")
+
 _LANG_NAMES = {
     "ka": "Georgian", "en": "English", "ru": "Russian", "de": "German", "fr": "French",
     "es": "Spanish", "it": "Italian", "tr": "Turkish", "uk": "Ukrainian", "hy": "Armenian",
@@ -150,6 +165,17 @@ def _headers(res) -> dict:
 def is_transcribe_model(model: str | None) -> bool:
     """The dedicated ASR family (``gemini-3.5-transcribe``, later versions), by name."""
     return "transcribe" in (model or "").lower()
+
+
+def refuses_thinking(exc: voice_base.VoiceError) -> bool:
+    """Google's 2026-10-07 refusal of the Transcribe model, and nothing else."""
+    return exc.status == 400 and "thinking is not enabled" in f"{exc} {exc.raw}".lower()
+
+
+def fallback_model(res) -> str:
+    """The chat model that stands in for a refusing Transcribe model."""
+    chosen = str((res.settings or {}).get("fallback_model") or "").strip()
+    return chosen if chosen and not is_transcribe_model(chosen) else FALLBACK_CHAT_MODEL
 
 
 def bcp47(code: str | None) -> str | None:
@@ -407,6 +433,13 @@ class GeminiSTT:
                          diarize: bool = True, keyterms: list[str] | None = None,
                          audio_format: str | None = None,
                          timeout: float | None = None) -> dict:
+        return await self._run(res, audio, filename, content_type, language_code=language_code,
+                               diarize=diarize, keyterms=keyterms, audio_format=audio_format,
+                               timeout=timeout, fallback=True)
+
+    async def _run(self, res, audio: bytes, filename: str | None, content_type: str | None, *,
+                   language_code: str | None, diarize: bool, keyterms: list[str] | None,
+                   audio_format: str | None, timeout: float | None, fallback: bool) -> dict:
         model = self.model(res)
         if is_transcribe_model(model) and model.lower().endswith("-live"):
             raise voice_base.VoiceError(
@@ -420,9 +453,26 @@ class GeminiSTT:
         mime = payload.content_type
         timeout = timeout or 300.0
         if is_transcribe_model(model):
-            return await self._transcribe_interactions(
-                res, model, payload.data, mime, language_code=language_code, diarize=diarize,
-                keyterms=keyterms, timeout=timeout)
+            try:
+                return await self._transcribe_interactions(
+                    res, model, payload.data, mime, language_code=language_code,
+                    diarize=diarize, keyterms=keyterms, timeout=timeout)
+            except voice_base.VoiceError as exc:
+                if not (fallback and refuses_thinking(exc)):
+                    raise
+                chat = fallback_model(res)
+                log.warning("gemini transcribe: %s refused the request (%s); transcribing on %s",
+                            model, exc, chat)
+                if mime not in GENERATE_AUDIO:     # m4a / opus / webm: Interactions-only
+                    payload = await audio_mod.for_provider(
+                        audio, filename or "audio", content_type or "", audio_format,
+                        accepts=GENERATE_AUDIO, fallback=FALLBACK_FORMAT)
+                out = await self._transcribe_generate(
+                    res, chat, payload.data, payload.content_type, language_code=language_code,
+                    diarize=diarize, keyterms=keyterms, timeout=timeout)
+                # `model` tells voice.py what actually ran, so /usage bills the right model.
+                return {**out, "model": chat,
+                        "detail": NOTE_FALLBACK.format(model=model, chat=chat) + out["detail"]}
         return await self._transcribe_generate(
             res, model, payload.data, mime, language_code=language_code, diarize=diarize,
             keyterms=keyterms, timeout=timeout)
@@ -532,10 +582,14 @@ class GeminiSTT:
     async def probe(self, res) -> dict:
         model = self.model(res)
         try:
-            await self.transcribe(res, silence_wav(), "probe.wav", "audio/wav",
-                                  diarize=False, audio_format="original", timeout=60.0)
+            await self._run(res, silence_wav(), "probe.wav", "audio/wav", language_code=None,
+                            diarize=False, keyterms=None, audio_format="original",
+                            timeout=60.0, fallback=False)
         except voice_base.VoiceError as exc:
-            return {"ok": False, "detail": str(exc), "code": exc.code}
+            detail = str(exc)
+            if is_transcribe_model(model) and refuses_thinking(exc):
+                detail += NOTE_PROBE_FALLBACK.format(model=model, chat=fallback_model(res))
+            return {"ok": False, "detail": detail, "code": exc.code}
         except Exception as exc:  # noqa: BLE001 — a probe never raises
             return {"ok": False, "detail": str(exc), "code": "http"}
         about = DETAIL_TRANSCRIBE + NOTE_TERMS_RULE if is_transcribe_model(model) \
