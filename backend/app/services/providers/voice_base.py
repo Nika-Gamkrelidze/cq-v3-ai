@@ -181,14 +181,31 @@ def _snippet(resp: httpx.Response) -> str:
     return resp.text[:500]
 
 
+def json_object(resp: httpx.Response) -> dict:
+    """The response body as a JSON OBJECT, or {} — never an exception, never a non-dict.
+
+    Providers do not always answer with an object. Google's gateway wraps some error bodies
+    (and the occasional success) in a one-element array — `[{"error": {...}}]` — and a bare
+    `resp.json().get(...)` on that raised `'list' object has no attribute 'get'`, which then
+    REPLACED the provider's own error message: the user read "Transcription failed: 'list'
+    object has no attribute 'get'" and could not tell a bad key from a bad file. So: unwrap
+    an array to its first object, and treat anything else (a string, a number, malformed JSON,
+    an empty body) as "no fields".
+    """
+    try:
+        data = resp.json()
+    except ValueError:
+        return {}
+    if isinstance(data, list):
+        data = next((item for item in data if isinstance(item, dict)), {})
+    return data if isinstance(data, dict) else {}
+
+
 def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
     """Map an OpenAI-style error response onto an actionable message + machine code."""
     raw = _snippet(resp)
     err_code = err_type = msg = ""
-    try:
-        err = (resp.json() or {}).get("error")
-    except ValueError:
-        err = None
+    err = json_object(resp).get("error")
     if isinstance(err, dict):
         err_code = str(err.get("code") or "").lower()
         err_type = str(err.get("type") or "").lower()

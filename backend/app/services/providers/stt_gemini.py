@@ -371,7 +371,8 @@ class GeminiSTT:
             headers={**_headers(res), "X-Goog-Upload-Offset": "0",
                      "X-Goog-Upload-Command": "upload, finalize", "Content-Type": mime},
             content=data)
-        info = (done.json() or {}).get("file") or {}
+        info = voice_base.json_object(done).get("file")
+        info = info if isinstance(info, dict) else {}
         name, uri, state = info.get("name"), info.get("uri"), info.get("state")
         if not (name and uri):
             raise voice_base.VoiceError("Gemini accepted the upload but returned no file URI.",
@@ -389,7 +390,7 @@ class GeminiSTT:
             poll = await voice_base.http_request(
                 "GET", f"{BASE_URL}/{name}", "Speech-to-text upload", vendor="Gemini",
                 timeout=30.0, headers=_headers(res))
-            state = (poll.json() or {}).get("state")
+            state = voice_base.json_object(poll).get("state")
         return name, uri
 
     async def _delete_quietly(self, res, name: str) -> None:
@@ -451,8 +452,7 @@ class GeminiSTT:
         finally:
             if uploaded:
                 await self._delete_quietly(res, uploaded)
-        payload = resp.json()
-        data_out = payload if isinstance(payload, dict) else {}
+        data_out = voice_base.json_object(resp)
         words, text = words_from_interaction(data_out)
         status = str(data_out.get("status") or "completed")
         if status != "completed" and not text:
@@ -501,7 +501,7 @@ class GeminiSTT:
         finally:
             if uploaded:
                 await self._delete_quietly(res, uploaded)
-        out = resp.json() or {}
+        out = voice_base.json_object(resp)
         candidates = out.get("candidates") or []
         cand = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
         if cand.get("finishReason") == "MAX_TOKENS":

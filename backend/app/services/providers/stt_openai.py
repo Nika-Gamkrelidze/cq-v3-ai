@@ -152,7 +152,7 @@ class OpenAISTT:
         resp = await voice_base.http_request(
             "POST", f"{base_url(res)}/audio/transcriptions", "Speech-to-text", vendor="OpenAI",
             timeout=timeout or 300.0, headers=_headers(res), data=data, files=files)
-        body = resp.json() or {}
+        body = voice_base.json_object(resp)
         words = [
             {"text": w.get("word"), "start": w.get("start"), "end": w.get("end"),
              "type": "word"}

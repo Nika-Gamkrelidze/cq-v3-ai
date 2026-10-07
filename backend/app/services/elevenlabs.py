@@ -64,10 +64,7 @@ def _api_error(resp: httpx.Response, action: str, scope: str | None = None) -> E
     """
     raw = resp.text[:500]
     status_str = msg = ""
-    try:
-        detail = (resp.json() or {}).get("detail")
-    except ValueError:
-        detail = None
+    detail = voice_base.json_object(resp).get("detail")
     if isinstance(detail, dict):
         status_str = str(detail.get("status") or detail.get("code") or "").lower()
         msg = str(detail.get("message") or "")
@@ -157,7 +154,7 @@ async def transcribe(audio: bytes, filename: str, content_type: str, api_key: st
         data["file_format"] = payload.file_format
     resp = await _request("POST", "/speech-to-text", "Speech-to-text", SCOPE_STT,
                           timeout=timeout, headers=_headers(api_key), data=data, files=files)
-    body = resp.json()
+    body = voice_base.json_object(resp)
     return {
         "text": body.get("text", ""),
         "language_code": body.get("language_code"),
