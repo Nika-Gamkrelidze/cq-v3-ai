@@ -1,0 +1,308 @@
+{
+ "meta": {
+  "title": "CommuniQ CQ",
+  "subtitle": "Quick Start",
+  "tagline": "Your first call analysis in 15 minutes — for organization owners and members.",
+  "version": "CommuniQ CQ v3 AI · Quick Start · English · v2.0 · October 2026",
+  "no_contents": true,
+  "font": "Calibri"
+ },
+ "sections": [
+  {
+   "h1": "1. What this is and what you can do",
+   "blocks": [
+    {
+     "type": "p",
+     "text": "CommuniQ CQ v3 AI is your organization's workspace where a call recording is turned into text and checked. The system compares the facts stated on the call with your knowledge base, scores the call against your rubric, assesses the mood of the conversation and prepares a summary. Your customers' chat bot works from the same knowledge base. This short guide takes you to your first result in the first 15 minutes; for details, see the full guide."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Role",
+      "What they can do"
+     ],
+     "rows": [
+      [
+       "Owner",
+       "Everything a member can do, plus changing settings: the rubric, sentiment, transcription, the bot and your own AI subscription; corrects scores and decides on suggestions."
+      ],
+      [
+       "Member",
+       "Works fully with the knowledge base, analyzes calls and sees the history. Sees the settings tabs as view-only."
+      ]
+     ],
+     "widths": [
+      2200,
+      6826
+     ]
+    }
+   ]
+  },
+  {
+   "h1": "2. Signing in",
+   "blocks": [
+    {
+     "type": "steps",
+     "items": [
+      "In the header, click the link “Sign in”.",
+      "On the “Your CommuniQ account” card, stay on the “Sign in” sub-tab.",
+      "In the “Email or username” field, enter the workspace username you received from CommuniQ, and in the “Password” field, enter the password.",
+      "Press Enter or click the “Sign in” button. The message “Welcome” appears and your workspace opens."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: do not use the “Create account” sub-tab: it creates a personal account that is not connected to your organization and cannot see its knowledge base. You cannot reset your password yourself; contact CommuniQ."
+    },
+    {
+     "type": "note",
+     "text": "Note: the session is tied to a single browser tab and is valid for 24 hours. Sign in again in a new tab."
+    }
+   ]
+  },
+  {
+   "h1": "3. Step 1: add knowledge",
+   "blocks": [
+    {
+     "type": "p",
+     "text": "Fact-checking compares a call with your documents, so the knowledge base comes first. It does not use up analysis units."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open “Knowledge Base” → “Import”.",
+      "Choose a mode: “Upload file”, “Paste text” or “CSV (Q&A / key-value)”.",
+      "Select one or more files, or paste the text. Category, title and tags are optional.",
+      "Click the “Import” button and wait for it to finish.",
+      "Open “Documents” and check that the document's status is ready."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Formats: PDF, DOCX, XLSX, CSV, TXT and MD; the file limit is 25 MB.",
+      "The status ready means the document has been processed and can be found by search. pending and processing mean it is still being processed; error means a failure: the reason appears when you hover over the ⚠ icon.",
+      "Short, self-contained entries work best in search; for templates, see the link “Sample files to copy:”."
+     ]
+    }
+   ]
+  },
+  {
+   "h1": "4. Step 2: analyze your first call",
+   "blocks": [
+    {
+     "type": "steps",
+     "items": [
+      "Open “Analyze a Call”.",
+      "Drop an audio or video file onto the area “Drop an audio or video file here, or click to browse”. The file limit is 100 MB. Instead of a recording, you can click “Paste transcript”, paste the text (one line per turn) and click “Use this transcript”.",
+      "If you uploaded a file, click the “Transcribe” button and wait for the message “Transcript ready”.",
+      "Open the “All at once” sub-tab and click the “Transcribe and run all checks” button (once a call is already loaded, “Run all checks”).",
+      "When it finishes, click “Open” on the row. Each result is on its own sub-tab: “Fact-check”, “Score”, “Sentiment”, “Summarise”; all of them are linked to one player and timeline."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: each transcription and each run of the checks uses 1 analysis unit from the workspace's daily limit; “All at once” from an empty panel uses at most 5. The unit for a canceled or failed transcription is not returned. Opening a saved result is free."
+    }
+   ]
+  },
+  {
+   "h1": "5. Reading the results",
+   "blocks": [
+    {
+     "type": "table",
+     "head": [
+      "Verdict",
+      "Meaning"
+     ],
+     "rows": [
+      [
+       "“supported”",
+       "Your documents confirm the claim."
+      ],
+      [
+       "“partially supported”",
+       "The gist is correct, but some detail is not."
+      ],
+      [
+       "“contradicted”",
+       "Your documents say something different; such a claim appears in the “Possible misinformation” list."
+      ],
+      [
+       "“not in KB”",
+       "Your documents say nothing about this, so the knowledge base is missing a document."
+      ]
+     ],
+     "widths": [
+      3300,
+      5726
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The “weighted” score is the call's overall rating out of 100 based on your rubric: the AI scores an ordinary criterion, and the system calculates the weighted total. Two criteria are measured: “Knowledge Base fact check” is calculated from the fact-check, and “Courtesy & empathy” from the tone analysis. If either could not be measured on a call, it shows “—” and does not lower the score."
+    },
+    {
+     "type": "p",
+     "text": "Sentiment has two parts, and they are never combined into one number. “Words” assesses what was said, “Voice tone” assesses how the speaker sounded; the voice part is not available on a pasted transcript."
+    }
+   ]
+  },
+  {
+   "h1": "6. First-time setup by the owner (owner)",
+   "blocks": [
+    {
+     "type": "p",
+     "text": "Only the owner can do these steps. In order of importance:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "☐ “Rubric”: review the criteria and weights, click “Normalize to 100%” (the total must be 100%) and “Save rubric”.",
+      "☐ “Transcription”: click “Override for this workspace”, set “Spoken language” to “Georgian” (if your calls are in Georgian), leave “Separate the speakers” turned on and click “Save”.",
+      "☐ “Sentiment”: leave “Analyse sentiment on this workspace’s calls” turned on, fill in “Guidance for the analyser” if needed and click “Save sentiment settings”.",
+      "☐ “Knowledge Base” → “Documents”: share at least one document with the bot (🤖) that your customers are allowed to read.",
+      "☐ “Bot”: write the “Refusal copy” in every language, tick “Autopilot” and click “Save bot settings”.",
+      "☐ “Review Queue”: review the cards from time to time and accept or reject them; nothing in the knowledge base changes without your decision.",
+      "☐ Optional, “AI providers”: use the “Use my own subscription” button to turn on your own API key."
+     ]
+    }
+   ]
+  },
+  {
+   "h1": "7. The nine tabs at a glance",
+   "blocks": [
+    {
+     "type": "table",
+     "head": [
+      "Tab",
+      "Purpose",
+      "Who changes it"
+     ],
+     "rows": [
+      [
+       "“Knowledge Base”",
+       "Documents for fact-checking and the bot",
+       "Everyone"
+      ],
+      [
+       "“Analyze a Call”",
+       "Transcription and checks",
+       "Everyone; the owner corrects scores"
+      ],
+      [
+       "“Rubric”",
+       "How calls are scored",
+       "Owner"
+      ],
+      [
+       "“Sentiment”",
+       "Sentiment analysis settings",
+       "Owner"
+      ],
+      [
+       "“Transcription”",
+       "Language, speakers, key terms",
+       "Owner"
+      ],
+      [
+       "“AI providers”",
+       "Which AI subscription the workspace uses",
+       "Owner"
+      ],
+      [
+       "“Review Queue”",
+       "Suggested knowledge base changes",
+       "The owner decides"
+      ],
+      [
+       "“Bot”",
+       "Your customers' chat bot",
+       "Owner"
+      ],
+      [
+       "“History”",
+       "Earlier recordings and summaries",
+       "Everyone"
+      ]
+     ],
+     "widths": [
+      2300,
+      4126,
+      2600
+     ]
+    }
+   ]
+  },
+  {
+   "h1": "8. Common problems and fixes",
+   "blocks": [
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "rows": [
+      [
+       "“Could not sign in. Check your username and password.”",
+       "Check your username and password; if you are sure they are correct, ask CommuniQ whether the account is active."
+      ],
+      [
+       "“Your session has expired — please sign in again.”",
+       "Sign in again in the same tab."
+      ],
+      [
+       "'File exceeds 25 MB limit' or 'Audio file exceeds 100 MB limit'",
+       "Split the file into parts and upload them separately."
+      ],
+      [
+       "'No readable text found in the file. …'",
+       "The PDF is a scan: run text recognition (OCR) or save a text version."
+      ],
+      [
+       "'Rate limit reached for analyses (N per day).'",
+       "The daily limit is used up: wait until tomorrow or ask CommuniQ to raise it."
+      ],
+      [
+       "The fact-check says “not in KB” about a known fact",
+       "Add the relevant document and click “Run again”."
+      ],
+      [
+       "A measured criterion shows “—”",
+       "This is not an error: first run “Fact-check” and “Analyse the tone”, or use “All at once”."
+      ],
+      [
+       "A settings tab shows “View only — …”",
+       "You are a member; contact the owner to make a change."
+      ]
+     ],
+     "widths": [
+      4000,
+      5026
+     ]
+    }
+   ]
+  },
+  {
+   "h1": "9. Where to go next",
+   "blocks": [
+    {
+     "type": "bullets",
+     "items": [
+      "Knowledge base, file types and allowing documents for the bot: see the full guide, chapters 3–4.",
+      "Call analysis, the daily limit and results: see the full guide, chapters 5–6.",
+      "The rubric and measured criteria: see the full guide, chapter 7; sentiment: chapter 8.",
+      "Transcription and your own AI key: see the full guide, chapters 9–10.",
+      "Review Queue and the bot: see the full guide, chapters 11–12.",
+      "All messages and fixes: see the full guide, chapter 17."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Only CommuniQ can reset a password, deactivate an account, raise the daily limit or fix voice tone problems: contact your CommuniQ contact person or the support team and give the exact text of the message."
+    }
+   ]
+  }
+ ]
+}

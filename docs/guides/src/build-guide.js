@@ -1,14 +1,20 @@
-// Builds the CommuniQ tenant guide (.docx) from content.json, in the v1.0 guide's visual style:
+// Builds a CommuniQ tenant guide or quick-start (.docx) from its content JSON, in the v1.0 guide's visual style:
 // Sylfaen 11 pt body, navy (#07263C) bold headings, the "CommuniQ CQ" title page with the red rule,
 // navy "note" and red "warning" callout boxes, light-blue table headers. A4, 1" margins.
 //
 //   npm install --no-save docx@9          # once, in this folder (not a project dependency)
-//   node build-guide.js tenant-guide-ka.json ../CommuniQ-Tenant-Guide-KA.docx
-//   cp ../CommuniQ-Tenant-Guide-KA.docx ../../../frontend/public/guides/   # the served copy
-//   (cd ../../../frontend/public && zip -X guides.zip guides/CommuniQ-Tenant-Guide-KA.docx)
+//   for n in tenant-guide quickstart; do for l in ka en; do
+//     f=$( [ $n = quickstart ] && echo CommuniQ-Tenant-QuickStart || echo CommuniQ-Tenant-Guide )
+//     node build-guide.js $n-$l.json ../$f-$(echo $l | tr a-z A-Z).docx
+//   done; done
+//   cp ../CommuniQ-Tenant-*.docx ../../../frontend/public/guides/          # the served copies
+//   (cd ../../../frontend/public && zip -X guides.zip guides/CommuniQ-Tenant-*.docx)
 //
-// tenant-guide-ka.json is the guide's content (v2.0, written from the code in October 2026): edit it
-// there and rebuild, rather than editing the .docx by hand, so the next revision has a source.
+// The four JSON files are the guides' content (v2.0, written from the code in October 2026): edit
+// them and rebuild, rather than editing a .docx by hand, so the next revision has a source.
+// The KA and EN files are parallel (same chapters, same blocks) — change both when a fact changes.
+// meta.font picks the body font (Sylfaen, the default, for Georgian; Calibri for English) and
+// meta.no_contents drops the contents page (the quick-start).
 //
 // content.json: { meta: {title, subtitle, tagline, version, contents_title},
 //                 sections: [{ h1, blocks: [{type: p|h2|h3|steps|bullets|note|warn|table, ...}] }] }
@@ -20,10 +26,12 @@ const {
 } = require('docx');
 
 const NAVY = '07263C', RED = 'FA3B3C', GREY = '5A7184', TINT = 'EAF1F6', ROSE = 'FDECEC';
-const FONT = 'Sylfaen', FULL = 9026;
+const FULL = 9026;
 
 const [, , src = 'content.json', out = 'out.docx'] = process.argv;
 const doc = JSON.parse(fs.readFileSync(src, 'utf8'));
+// meta.font: the body font (Sylfaen for Georgian, the default; Calibri for English).
+const FONT = doc.meta.font || 'Sylfaen';
 
 // "a **b** c" -> runs; `base` carries size/colour for the whole paragraph.
 function runs(text, base = {}) {
@@ -118,7 +126,8 @@ const titlePage = [
   new Paragraph({ children: [new PageBreak()] }),
 ];
 
-const contents = [
+// meta.no_contents: a short document (the quick-start) goes from the cover straight to the text.
+const contents = m.no_contents ? [] : [
   new Paragraph({ heading: HeadingLevel.HEADING_1, children: runs(m.contents_title || 'სარჩევი') }),
   ...doc.sections.map(s => new Paragraph({ spacing: { after: 60 }, indent: { left: 200 }, children: runs(s.h1) })),
   new Paragraph({ children: [new PageBreak()] }),
