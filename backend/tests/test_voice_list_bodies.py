@@ -21,7 +21,8 @@ from app.services import elevenlabs as el
 from app.services.ai_resolve import Resolved
 from app.services.providers import voice_base
 
-from tests.test_voice import ORIGINAL, gemini_stt, openai_stt, resolver, run, wire  # noqa: F401
+from tests.test_voice import (ORIGINAL, gemini_stt, no_usage_rows, openai_stt,  # noqa: F401
+                              resolver, run, wire)
 
 
 GOOGLE_400 = [{"error": {"code": 400, "status": "INVALID_ARGUMENT",

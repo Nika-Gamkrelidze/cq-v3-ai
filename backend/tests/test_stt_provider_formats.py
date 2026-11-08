@@ -14,7 +14,8 @@ from app.services import audio as audio_mod
 from app.services import voice
 from app.services.providers import stt_gemini, stt_openai, voice_base
 
-from tests.test_voice import ORIGINAL, gemini_stt, openai_stt, resolver, run, wire  # noqa: F401
+from tests.test_voice import (ORIGINAL, gemini_stt, no_usage_rows, openai_stt,  # noqa: F401
+                              resolver, run, wire)
 
 WAV = voice_base.silence_wav(0.5)
 

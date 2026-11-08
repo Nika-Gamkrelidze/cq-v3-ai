@@ -15,8 +15,8 @@ from app.services import llm, voice
 from app.services.ai_resolve import Resolved
 from app.services.providers import stt_gemini, voice_base
 
-from tests.test_voice import (ORIGINAL, _first, _gemini_reply, gemini_stt, resolver,  # noqa: F401
-                              run, wire)
+from tests.test_voice import (ORIGINAL, _first, _gemini_reply, gemini_stt,  # noqa: F401
+                              no_usage_rows, resolver, run, wire)
 
 THINKING_400 = (400, {"error": {"code": 400, "status": "INVALID_ARGUMENT",
                                 "message": "Thinking is not enabled for this model"}})
