@@ -970,8 +970,8 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
                       <span>{t('wb.sem.voice')}</span>
                       <Tip text={t('wb.sem.voice.tip')} />
                     </label>
-                    {!audioAvailable && activeCall
-                      ? <span className="hint wb-voice-hint">{t('wb.sem.voice.off')}</span>
+                    {!audioAvailable
+                      ? <span className="hint wb-voice-hint">{t(activeCall ? 'wb.sem.voice.off' : 'wb.sem.voice.none')}</span>
                       : null}
                   </div>
                   {props.sentimentConfig ? <GuidancePanel t={t} io={props.sentimentConfig} /> : null}
