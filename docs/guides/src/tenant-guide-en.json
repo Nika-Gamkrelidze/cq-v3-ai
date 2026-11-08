@@ -1,0 +1,1970 @@
+{
+ "meta": {
+  "title": "CommuniQ CQ",
+  "subtitle": "Tenant User Guide",
+  "tagline": "Working with your knowledge base, analyzing and scoring calls, workspace settings, the chat bot and audio tools — for organization owners and members.",
+  "version": "CommuniQ CQ v3 AI · Tenant User Guide · English · v2.0 · October 2026",
+  "contents_title": "Contents",
+  "font": "Calibri"
+ },
+ "sections": [
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "This guide is intended for the staff of CommuniQ CQ v3 AI customer organizations: quality supervisors, team leads, and operators. It covers the workspace (the header link “My workspace”) and its nine tabs: “Knowledge Base”, “Analyze a Call”, “Rubric”, “Sentiment”, “Transcription”, “AI providers”, “Review Queue”, “Bot”, and “History”, as well as the CQ Chat bot and copilot, the “Audio editor”, and the “Public app”."
+    },
+    {
+     "type": "p",
+     "text": "Every account has one of two roles: owner or member. The role is assigned by CommuniQ and cannot be changed from the portal. The label **(owner)** in a heading means that only an owner can change the setting."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Role",
+      "Capabilities"
+     ],
+     "widths": [
+      2000,
+      7026
+     ],
+     "rows": [
+      [
+       "Owner",
+       "Everything a member can do, plus: editing the rubric (“Import from file (AI)”, “Reset to defaults”, “Score colours”), the Sentiment, Transcription, and Bot settings, your own AI subscription in the “AI providers” tab, manually correcting call scores, and accepting or declining suggestions in the “Review Queue” tab."
+      ],
+      [
+       "Member",
+       "Full use of the knowledge base (import, edit, delete, sharing with the bot, export), call analysis, and the “History” tab. A member sees the other tabs but only for viewing; a member cannot change scores or decide on suggestions."
+      ],
+      [
+       "CommuniQ",
+       "Creates accounts and assigns roles, resets passwords, sets limits and the retention period, and connects CQ Chat."
+      ]
+     ]
+    },
+    {
+     "type": "note",
+     "text": "Note: A member has full rights over the knowledge base, including sharing with the bot and deleting, so agree in advance within your team who shares documents with the bot. Every change is recorded in the log under the author's name (see chapter 4)."
+    },
+    {
+     "type": "h2",
+     "text": "What's new"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Analyze a Call” is now a workbench: after “Transcribe”, run the checks one at a time or with the “All at once” button (see chapters 5–6).",
+      "Fact-checking has a new verdict, “partially supported” (see chapter 6).",
+      "New tabs “Sentiment”, “Transcription”, and “AI providers”, and new pages “Audio editor” and the public “Audio Converter” (see chapters 8–10, 15–16)."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Conventions"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Interface labels appear in quotation marks “…”. Some server messages arrive in English, and statuses (ready, processing, pending, error, done) are in English in every language.",
+      "The ⓘ icon opens a hint with a longer explanation.",
+      "“Contact CommuniQ” means: get in touch with your contact person at CommuniQ or with the support team."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Download the guide and the sample knowledge base files together as an archive at /guides.zip."
+    }
+   ],
+   "h1": "1. About this guide"
+  },
+  {
+   "blocks": [
+    {
+     "type": "h2",
+     "text": "Signing in"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "In the header, click the “Sign in” link (it appears if no one is signed in on this tab).",
+      "On the “Your CommuniQ account” card, stay on the “Sign in” sub-tab.",
+      "In the “Email or username” field, enter the username you received from CommuniQ, and in the “Password” field, enter your password (the eye button shows what you typed).",
+      "Press Enter or click “Sign in” — your workspace opens."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "If you open the workspace address (/workspace) without signing in, it shows its own “Sign in” card."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: Do not use the “Create account” sub-tab — it creates a separate **personal** account that is not linked to your organization and cannot see its knowledge base. Workspace accounts are created only by CommuniQ."
+    },
+    {
+     "type": "note",
+     "text": "Note: Self-registration, a password reset link and changing your own password do not exist in the portal — contact CommuniQ."
+    },
+    {
+     "type": "p",
+     "text": "The message “Could not sign in. Check your username and password.” looks the same for wrong credentials, a disabled user or a disabled workspace; if you are sure of your password, ask CommuniQ whether the account is active."
+    },
+    {
+     "type": "h2",
+     "text": "The header"
+    },
+    {
+     "type": "p",
+     "text": "At the top of every page you see the logo (it leads to the public page), the links “Public app” (see chapter 16), “Audio editor” (see chapter 15) and “My workspace”, the EN / KA / RU switch, the theme button ☾ / ☀ (dark by default) and the “Log out” button. The language and theme are remembered across the whole browser."
+    },
+    {
+     "type": "h2",
+     "text": "The session"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "A session belongs to a single browser tab: it stays when you reload the page, ends when you close the tab or click “Log out”, and in a new tab you must sign in again.",
+      "By default a session lasts 24 hours from sign-in (CommuniQ may set a different period); active work does not extend it. When it runs out, “Your session has expired — please sign in again.” appears — sign in again in the same tab.",
+      "If the server is temporarily unavailable, the session is not lost — click “Retry”."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Workspace tabs"
+    },
+    {
+     "type": "p",
+     "text": "The workspace has nine tabs. Both roles see all of them; a member only views, unless stated otherwise below."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Tab",
+      "What it is for"
+     ],
+     "widths": [
+      3000,
+      6026
+     ],
+     "rows": [
+      [
+       "“Knowledge Base”",
+       "Documents for checking calls and for the bot; a member has full access (see chapters 3–4)"
+      ],
+      [
+       "“Analyze a Call”",
+       "Transcription and checks; only an owner can correct scores by hand (see chapters 5–6)"
+      ],
+      [
+       "“Rubric”",
+       "How calls are scored; a member does not see the “Score colours” card (see chapter 7)"
+      ],
+      [
+       "“Sentiment”",
+       "Sentiment and voice tone settings (see chapter 8)"
+      ],
+      [
+       "“Transcription”",
+       "How a recording becomes text (see chapter 9)"
+      ],
+      [
+       "“AI providers”",
+       "Whose AI account the workspace runs on (see chapter 10)"
+      ],
+      [
+       "“Review Queue”",
+       "Proposed changes to the knowledge base; an owner makes the decision (see chapter 11)"
+      ],
+      [
+       "“Bot”",
+       "Chat bot settings (see chapter 12)"
+      ],
+      [
+       "“History”",
+       "Earlier recordings and summaries; a member has full access (see chapter 14)"
+      ]
+     ]
+    },
+    {
+     "type": "p",
+     "text": "To open a tab directly, add # and its name to the address, for example /workspace#rubric (others: kb, analyze, sentiment, transcription, ai, bot, history)."
+    },
+    {
+     "type": "p",
+     "text": "General messages: “The service is temporarily unavailable. Please try again in a moment.” — wait and try again; “Something went wrong on our side. Please try again in a moment — if it keeps happening, contact support. (Code …)” — when you contact CommuniQ, give the code."
+    }
+   ],
+   "h1": "2. Signing in and basics"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The Knowledge Base is a collection of your organization's policies, frequently asked questions and procedures. Fact-checking compares calls against it, the copilot drafts replies from it, and the bot quotes only the documents you have shared with it. Working with the knowledge base does not use up analysis units."
+    },
+    {
+     "type": "p",
+     "text": "The tab has eight sub-tabs; this chapter covers “Overview”, “Documents” and “Import”, and the rest are described in chapter 4."
+    },
+    {
+     "type": "h2",
+     "text": "Overview"
+    },
+    {
+     "type": "p",
+     "text": "The “Knowledge base health” card shows eight indicators; to reload them, click “Refresh”. Two of them tell you what to do: “Shared with bot” — while it is 0, you cannot turn on the bot's autopilot (see chapter 12); “Embedding coverage” — anything below 100% means that search cannot find some chunks (for the fix, see chapter 4)."
+    },
+    {
+     "type": "h2",
+     "text": "Importing knowledge"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open “Knowledge Base” → “Import” and choose a mode: “Upload file”, “Paste text” or “CSV (Q&A / key-value)”.",
+      "Optionally fill in “Category”, “Title”, “Tags (comma-separated)” and “Metadata (JSON, optional)”.",
+      "Select one or more files, or paste the text.",
+      "Click “Import”, wait for the progress line to finish, and check “Documents”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Files: PDF, DOCX, XLSX/XLSM, CSV, TXT, MD, up to 25 MB each. Several files are each saved as a separate document, and “Title” is not used. A file that could not be imported appears in the “Failed:” line with its name and the reason; the rest are still imported.",
+      "In a CSV, the first row must be the column headings. A two-column file is imported as question-and-answer pairs; with more columns, each row becomes one entry.",
+      "Document status: pending → processing → ready, or error on failure. To see the reason, hover over the ⚠ icon in “Documents”.",
+      "Some files are rejected as soon as you upload them: larger than 25 MB — split them into parts; old .doc / .xls — save them as .docx / .xlsx; a scanned PDF with no text — run it through OCR and repeat the import."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "In the “Upload file” mode, tick “My file does not follow the template — restructure it with AI”: the AI reorganizes the document into standalone entries, while amounts, deadlines and numbers stay unchanged. The restructuring is done by your workspace's text model (see chapter 10), the import takes longer, and the page tells you when it is ready."
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "If the AI would lose any number, phone number, address, percentage or product name, the import stops and the document remains with status error.",
+      "Text longer than 100,000 characters is rejected before the import starts — split it into parts. Restructuring does not use up analysis units; it is counted only in AI usage."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Documents"
+    },
+    {
+     "type": "p",
+     "text": "The list is paged (50 documents per page); the filters are “Status”, “Type”, “Tag”, “Visibility” (“All” / “Shared with bot” / “Internal”) and “Search title/content”. At the end of each row are the action buttons:"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Button",
+      "Action"
+     ],
+     "rows": [
+      [
+       "🤖 “Share with bot” / 🚫 “Stop sharing”",
+       "Shares the document with the bot or stops sharing it."
+      ],
+      [
+       "✏️ “Edit”",
+       "Opens the edit window."
+      ],
+      [
+       "🧩 “Chunks”",
+       "Opens the document's chunks (see chapter 4)."
+      ],
+      [
+       "↻ “Re-embed”",
+       "Rebuilds the search data immediately, without asking for confirmation."
+      ],
+      [
+       "🗑 “Delete”",
+       "Deletes the document after you confirm."
+      ]
+     ],
+     "widths": [
+      3300,
+      5726
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: Deletion is irreversible — the document's chunks disappear from all answers immediately and cannot be restored."
+    },
+    {
+     "type": "p",
+     "text": "When editing, change the “Title”, “Category”, “Tags”, “Metadata (JSON, optional)” or “Content” and click “Save”. If you change the content, the document is split into chunks again and the embeddings are updated; if this fails, the document is marked with status error."
+    },
+    {
+     "type": "h2",
+     "text": "Visibility"
+    },
+    {
+     "type": "p",
+     "text": "Every document is “Internal” by default: fact-checking, call analysis and the copilot use it, but customers never see it. The public bot can also quote a document that is “Shared with bot” word for word. To share a document or stop sharing it, click 🤖 or 🚫 in its row and confirm."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: Share with the bot only documents that your customers are allowed to read."
+    },
+    {
+     "type": "h2",
+     "text": "Bulk actions"
+    },
+    {
+     "type": "p",
+     "text": "Tick rows, or the box in the heading for the whole page (up to 50 documents). A bar appears with the buttons “Share selected with bot”, “Stop sharing selected”, “Rebuild search”, “Retag” and “Delete”; deleting, sharing, stopping sharing and rebuilding search ask for confirmation."
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Rebuild search” runs immediately and briefly takes up resources from the search that is currently running.",
+      "“Retag” **replaces** the existing tags with the comma-separated list you enter — it does not add to them."
+     ]
+    }
+   ],
+   "h1": "3. Knowledge Base"
+  },
+  {
+   "blocks": [
+    {
+     "type": "h2",
+     "text": "Chunks"
+    },
+    {
+     "type": "p",
+     "text": "Search compares chunks, not whole documents: on import, every document is split into short pieces."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Chunks” sub-tab and, in the “Document” list, choose the document you need (the list shows up to 500 documents).",
+      "To fix a chunk, click “Edit chunk” — on save, only this chunk's embedding is refreshed. To remove one you do not need, use “Delete chunk”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "A green edge means the chunk is searchable; a red edge and “no embedding” mean search cannot find it (the fix is “Rebuild search index”, below)."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: a deleted chunk disappears from all answers immediately. If you only want to correct the text, use edit."
+    },
+    {
+     "type": "h2",
+     "text": "Test search"
+    },
+    {
+     "type": "p",
+     "text": "The “Test search” sub-tab shows what search finds for your question; it does not call the AI model and costs nothing."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "In the “Query (any language)” field, enter a question.",
+      "If needed, change “Results to return” (8 by default, 50 at most) and “Minimum match score (0–1)” (the default of 0 filters nothing).",
+      "Click “Run retrieval”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The second panel, “Search knowledge base” (the “Search” button), returns about 6 best chunks."
+    },
+    {
+     "type": "note",
+     "text": "Note: search covers internal documents and documents shared with the bot alike, so the test does not show what only the bot sees."
+    },
+    {
+     "type": "h3",
+     "text": "How to read the result"
+    },
+    {
+     "type": "p",
+     "text": "“semantic” means a match by meaning, and “text match” means the fallback search by spelling similarity. Confidence is calculated from the best score: “confident” is 0.55 or higher, “fair” is 0.45 or higher, and “weak” is below 0.45."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: scores are relative — only the ranking is reliable. A list of results is not proof of a match, so trust the warning bar."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Bar",
+      "What to do"
+     ],
+     "rows": [
+      [
+       "“Nothing to search yet”",
+       "The knowledge base is empty — import documents."
+      ],
+      [
+       "“Nothing matched”, “Only weak matches”",
+       "The topic is not in the knowledge base or there is a gap — add or rewrite a document."
+      ],
+      [
+       "“Nothing clearly matched”",
+       "Several chunks are equally close — make the documents more specific or split them."
+      ],
+      [
+       "“Fallback search — meaning-based search is down”, “Search could not run” (red)",
+       "This is not a gap in your knowledge base — try again, then tell CommuniQ."
+      ]
+     ],
+     "widths": [
+      3300,
+      5726
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Duplicates"
+    },
+    {
+     "type": "p",
+     "text": "The “Duplicates” sub-tab loads on its own. “Exact duplicates” are documents with identical content: the first is marked “keeping” and the others have “Delete” (with confirmation). “Near-duplicates” are pairs of chunks with 95% or higher similarity; the list is informational only, and you decide which wording to keep."
+    },
+    {
+     "type": "h2",
+     "text": "Activity"
+    },
+    {
+     "type": "p",
+     "text": "The “Activity” sub-tab shows the knowledge base's last 100 events. To filter, type a word in the “Action” field (for example import or delete) and press Enter. In the “Who” column: tenant:<username> is a person in your workspace, tenant:apikey is a system connected with an API key, and superadmin is CommuniQ."
+    },
+    {
+     "type": "h2",
+     "text": "Maintenance"
+    },
+    {
+     "type": "p",
+     "text": "“Export” (JSON) and “Export CSV” download all documents, internal ones included."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: the file also contains internal documents — share it only with people who are allowed to see this information."
+    },
+    {
+     "type": "h3",
+     "text": "Rebuild search index"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Maintenance” sub-tab.",
+      "On the “Rebuild search index” card, click “Queue rebuild”.",
+      "Confirm in the confirmation window."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The rebuild runs in the background and takes a long time, while search keeps working; only one rebuild can run at a time. The states are “Queued”, “Running”, “Finished” (check for failed documents), “Failed” (try again, then contact CommuniQ), and “Cancelled”."
+    },
+    {
+     "type": "p",
+     "text": "Run a rebuild when CommuniQ tells you the search model has changed, when “Embedding coverage” in the “Overview” is below 100%, or when chunks show “no embedding”. For a single document, ↻ “Re-embed” in the “Documents” sub-tab is faster."
+    }
+   ],
+   "h1": "4. Search test, chunks and knowledge-base upkeep"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The “Analyze a Call” tab is a workbench: you load one source, either a recording or a pasted transcript, and transcribe it. Then you run the checks (“Fact-check”, “Scoring”, “Sentiment”, “Summarise”) one at a time or together with “All at once”. The results are described in chapter 6."
+    },
+    {
+     "type": "note",
+     "text": "Note: This tab does not record from a microphone. The “Record” button is only in the public app (see chapter 16)."
+    },
+    {
+     "type": "h2",
+     "text": "Source: uploading a recording"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Drop one audio or video file on the field “Drop an audio or video file here, or click to browse”, or click the field and choose a file.",
+      "If needed, open the “Transcription” panel and change the settings for this recording (see below).",
+      "Click “Transcribe” and wait for the message “Transcript ready”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "File size is limited to 100 MB; CommuniQ may set a lower limit for your workspace.",
+      "Only one recording can be loaded at a time: a second file replaces the first. For several related calls, use Summarise. For a new file, click “Change”.",
+      "Which provider actually does the transcription is shown in the “AI providers” tab (see chapter 10)."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: Every upload uses one analysis unit. The unit for a cancelled or failed transcription is not returned."
+    },
+    {
+     "type": "h2",
+     "text": "Source: pasting a transcript"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "On the “Source” card, click “Paste transcript”.",
+      "Paste the transcript: one turn per line, optionally starting with the speaker.",
+      "Click “Use this transcript”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "A pasted transcript has no player: findings are marked directly in the text, and voice tone is not available. You can score a chat conversation the same way. The limit is 200,000 characters; pasting uses one analysis unit."
+    },
+    {
+     "type": "h2",
+     "text": "Opening a saved recording"
+    },
+    {
+     "type": "p",
+     "text": "In the “History” tab (see chapter 14), click a row and the recording or summary loads here with all its saved results; no unit is used until you run something again. After the retention period expires, the call opens without audio: the transcript and the results remain."
+    },
+    {
+     "type": "h2",
+     "text": "Transcription settings for one recording"
+    },
+    {
+     "type": "p",
+     "text": "The “Transcription” panel is available to everyone, including members. The fields and rules are the same as in the “Transcription” tab (see chapter 9)."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Transcription” panel and select “Override for this recording”.",
+      "Change the fields you need (“Spoken language”, “Separate the speakers”, “Key terms”, “Audio sent to the model”).",
+      "Click “Transcribe”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "There is no save button: the change is sent with the file and applies only to this recording. “Back to inherited” or “Change” cancels it.",
+      "Key terms: up to 1,000, one per line; each under 50 characters and at most five words."
+     ]
+    },
+    {
+     "type": "note",
+     "text": "Note: Key terms raise the cost of each transcription by about 20%. Gemini Transcribe does not use them; it keeps word timings instead."
+    },
+    {
+     "type": "h2",
+     "text": "Player and timeline"
+    },
+    {
+     "type": "p",
+     "text": "An audio call has a player, “Playback speed” (1×, 1.5×, 2×) and a “Download recording” button. On the timeline, each result has its own lane (“Fact-check”, “Sentiment Words”, “Sentiment Voice”)."
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Click a finding’s quote and the player jumps to that moment; click a segment on a lane and the matching finding opens in its own subtab.",
+      "Space pauses or resumes playback; ← and → skip 5 seconds back or forward."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "All at once"
+    },
+    {
+     "type": "p",
+     "text": "If nothing is loaded yet, “All at once” first transcribes the queued file or the pasted text. Then “Fact-check”, “Sentiment” and “Summarise” start together; “Scoring” starts after the first two finish, because the rubric’s measured criteria read their results."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Load one recording or paste a transcript.",
+      "Open the “All at once” subtab.",
+      "Click “Transcribe and run all checks” or, if the call is already loaded, “Run all checks”.",
+      "To see the full result, click “Open” on the row."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "An error in one check does not stop the others; the error appears on that check’s subtab. To run them again, click “Run all checks again”.",
+      "If part of the rubric could not be measured, “Weighted score” gets a note, for example “out of 70% of the rubric”; “Not measured” means there is no value.",
+      "“All at once” works on one recording; if a summary of several calls is loaded, the summary covers all of them."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Analysis units and the daily limit"
+    },
+    {
+     "type": "p",
+     "text": "Every transcription and every run of a check uses one analysis unit from the workspace’s daily limit. The limit applies if CommuniQ has set one."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Action",
+      "Units"
+     ],
+     "rows": [
+      [
+       "Uploading or pasting a call",
+       "1"
+      ],
+      [
+       "“Check the facts”, “Analyse the tone” or “Score the call”: each run",
+       "1"
+      ],
+      [
+       "Summary",
+       "1, plus 1 for each file transcribed for it"
+      ],
+      [
+       "“All at once” from an empty panel",
+       "Up to 5"
+      ],
+      [
+       "Opening a saved result, score history, manually correcting scores",
+       "0"
+      ]
+     ],
+     "widths": [
+      5726,
+      3300
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "When the limit is reached, the English message “Rate limit reached for analyses (N per day).” appears: wait until the next day or contact CommuniQ. Your own AI key (see chapter 10) does not lift the daily limit."
+     ]
+    },
+    {
+     "type": "note",
+     "text": "Note: AI provider errors appear in the provider’s own words, in English (see chapter 17)."
+    }
+   ],
+   "h1": "5. Analyze a Call"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "After you load a recording or transcript (see chapter 5), each check in the “Analyze a Call” tab has its own sub-tab and its own run button. Every run uses 1 analysis unit from the daily limit; opening a saved result is free."
+    },
+    {
+     "type": "h2",
+     "text": "Fact-check"
+    },
+    {
+     "type": "p",
+     "text": "Compares the claims made in the call with your workspace’s knowledge base."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Fact-check” sub-tab.",
+      "Click “Check the facts”.",
+      "Wait for the message “Fact-check ready”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The “Knowledge base fact-check” card shows the “accuracy”, the verdict counts, and the “Possible misinformation” list. Each claim shows its verdict, the reasoning, and an excerpt from the knowledge base; click a claim and the player jumps to the matching moment."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Verdict",
+      "Meaning"
+     ],
+     "rows": [
+      [
+       "“supported”",
+       "The documents confirm the claim."
+      ],
+      [
+       "“partially supported”",
+       "A detail does not match; counts as half in the accuracy."
+      ],
+      [
+       "“contradicted”",
+       "The documents say something different."
+      ],
+      [
+       "“not in KB”",
+       "The documents say nothing about this; it does not lower the accuracy."
+      ]
+     ],
+     "widths": [
+      3300,
+      5726
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Accuracy is calculated only over the claims that were checked. If the call contains no claim to check, you see “No verifiable claims were found.”; if you do not have a knowledge base yet, add documents first."
+    },
+    {
+     "type": "note",
+     "text": "Note: if “not in KB” appears on a topic that operators should know, the knowledge base is missing a document (see chapter 11)."
+    },
+    {
+     "type": "h2",
+     "text": "Sentiment"
+    },
+    {
+     "type": "p",
+     "text": "Evaluates how the conversation went. There are two checkboxes:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Words” — evaluates only what was said: the politeness, harshness, or rudeness of each turn.",
+      "“Voice tone” — evaluates from the audio itself how each speaker sounds."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "When audio is available, both boxes are checked by default. For a pasted transcript, “Voice tone” is unavailable."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Sentiment” sub-tab.",
+      "Check “Words”, “Voice tone”, or both.",
+      "Click “Analyse the tone”.",
+      "Wait for the message “Tone analysis ready”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The “Sentiment analysis” card starts with “Overall”; below it you see each speaker’s “Politeness”, “Flags”, and “Turn by turn” — a list that follows the player during playback."
+    },
+    {
+     "type": "p",
+     "text": "The “Guidance” field is the same workspace guidance as in the “Sentiment” tab (see chapter 8); only the **owner** can change it."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: this text also steers the tone analyzer, so changing it affects the rubric’s politeness score in future calls."
+    },
+    {
+     "type": "p",
+     "text": "If the voice part does not appear in the result, the card tells you why; “Words” still works in that case. If you see “The voice model is still loading. Try again in a minute.” or the service does not respond in time, run it again after a short while; for the other messages, see chapter 17."
+    },
+    {
+     "type": "h2",
+     "text": "Scoring"
+    },
+    {
+     "type": "p",
+     "text": "Scores the call against your active rubric; the “Edit the rubric” link takes you to the “Rubric” tab."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Score” sub-tab.",
+      "Click “Score the call”.",
+      "Wait for the message “Score ready”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The “Rubric Score” card shows the “weighted” total score out of 100 and the “Version”. Each criterion shows its score, “weight” (%), “contribution”, reasoning, and quotes; click a quote and the player jumps to the matching moment. The colours follow the “Score colours” thresholds (see chapter 7)."
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "The two measured criteria — fact-check and politeness — are calculated from the saved results of those two sub-tabs, so run them first or use “All at once”.",
+      "A criterion that could not be measured appears as “—” and is left out of the weighting; it does not receive a score of 0 (see chapter 7)."
+     ]
+    },
+    {
+     "type": "h3",
+     "text": "Editing scores by hand (owner)"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the scored call — right here or from the “History” tab.",
+      "Change one or more scores in the 0–100 fields.",
+      "Optionally fill in the “Why are you changing this? (optional)” field.",
+      "Click “Save scores” and wait for the message “Scores updated.”"
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The server recalculates the weighted total; a corrected criterion shows “edited” · “was” N. Clearing a field removes the criterion from the weighting. Editing is free."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: the fact-check and politeness scores cannot be edited by hand — a number entered there is silently ignored on save. If you disagree with the fact-check score, correct the knowledge base."
+    },
+    {
+     "type": "p",
+     "text": "Both roles can see the change history (“Show history” / “Hide history”): “Version” 1 is “Original (AI)”, followed by the changes made by people."
+    },
+    {
+     "type": "h2",
+     "text": "Summary"
+    },
+    {
+     "type": "p",
+     "text": "A short summary, key points, and full transcripts for one or several related calls — they are transcribed in order and summarized together. Only this sub-tab accepts several files; a queued file has a “Remove file” button."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Summarise” sub-tab.",
+      "Drop one or more files into the upload field, or use a call that is already loaded.",
+      "Click “Transcribe & summarise” (for a loaded call, “Summarise”).",
+      "Wait for the message “Summary ready”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The result contains “Summary”, “Key points”, “Action items” (created only here), “Participants”, “Calls”, and “Full transcripts”. Running it on calls that are already loaded uses their saved transcripts, so they are not transcribed again. The summary is saved in the “History” tab → “Summaries”."
+    },
+    {
+     "type": "p",
+     "text": "**Limits:**"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "1–10 files per summary, each up to 100 MB, and up to 300 MB of audio in total.",
+      "Each transcribed file uses 1 analysis unit and the summary itself uses 1 more; for example, summarizing 3 new files costs 4 units."
+     ]
+    }
+   ],
+   "h1": "6. Fact-check, sentiment, scoring and summaries"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The rubric defines how calls are scored: it is a list of dimensions (name, short description, scoring guidance for the grader, weight) and an overall guidance text. Only the owner can edit it; members can only view the rubric."
+    },
+    {
+     "type": "note",
+     "text": "Note: A workspace that has not yet saved a rubric uses the shared default rubric; your own copy is created the first time you save."
+    },
+    {
+     "type": "h2",
+     "text": "Dimensions and weights"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Click “+ Add dimension” and fill in “Dimension name”, “Weight”, “Short description” and “Scoring guidance” — describe what earns a high score and what earns a low one.",
+      "To remove a dimension, click the trash icon (“Delete”).",
+      "Check the “Total weight”. If the total is not 100%, click “Normalize to 100%”.",
+      "Optionally fill in “Overall rubric / guidance”.",
+      "Click “Save rubric”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Every save creates a new version: new calls are scored with the active version. The weights must add up to 100% (±0.5), there can be from 1 to 30 dimensions, and each one needs a name."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Measured dimensions"
+    },
+    {
+     "type": "p",
+     "text": "Two dimensions are marked “Measured” — their score is not judged by the AI from the transcript; the system calculates it from measurements:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "**Knowledge Base fact check** — the share of claims that your documents confirm (from the fact-check).",
+      "**Courtesy & empathy** — the tone analyzer’s politeness score for the operator only.",
+      "Only the weight can be changed; the name is locked and the dimension cannot be deleted. They were added to previously saved rubrics with a weight of 0, so no score changed."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "When a measurement is not possible (for example, there is no knowledge base, or a pasted transcript has no audio), the dimension appears on the scorecard with a “—” mark and does not take part in the weighting: no points are deducted, and the total is spread over the remaining dimensions."
+    },
+    {
+     "type": "note",
+     "text": "Note: A reviewer cannot manually correct the score of a measured dimension (see chapter 6). Courtesy & empathy depends on the sentiment guidance (see chapter 8)."
+    },
+    {
+     "type": "h2",
+     "text": "Import from a file (AI) (owner)"
+    },
+    {
+     "type": "p",
+     "text": "Upload an existing scoring standard and the AI turns it into a draft. Nothing is saved until you review it and click “Save rubric”."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Click “Import from file (AI)” and choose a file.",
+      "Wait for the draft — a long import can take several minutes; the percentage may pause at 80%.",
+      "Check and correct the dimensions and weights, then click “Save rubric”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Formats: .pdf, .docx, .xlsx, .xlsm, .csv, .txt, .md; up to 25 MB. A scanned PDF (with no text layer) cannot be read.",
+      "A very long standard is rejected (“too long to import in one piece”) — import only the defining sheet or section.",
+      "The import creates at most 30 dimensions and replaces all the dimensions and the overall guidance currently in the editor; it is one AI call and appears in AI usage."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: The draft does not contain the two measured dimensions — after you save, they come back with a weight of 0. If you want them to count, set their weights, fix the total with “Normalize to 100%”, and save again."
+    },
+    {
+     "type": "h2",
+     "text": "Reset to defaults (owner)"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Click “Reset to defaults” in the lower left corner of the rubric card.",
+      "In the “Reset this rubric to the default?” window, enter “Your password” and confirm with the “Reset to default” button."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The rubric is replaced with a copy of the shared default and saved as a new version; earlier versions remain."
+    },
+    {
+     "type": "h2",
+     "text": "Score colours (owner)"
+    },
+    {
+     "type": "p",
+     "text": "The “Score colours” card sets the thresholds for the score colours (by default: “Red” — below 50, “Yellow” — 50–79, “Green” — 80 and above)."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "In the “Red” row, enter the boundary between red and yellow (1–99); in the “Yellow” row, enter the boundary between yellow and green (higher than the first, at most 100); both must be whole numbers.",
+      "Click “Save colours”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "“Reset colours to default” immediately sets the thresholds back to 50 and 80, with no password."
+    }
+   ],
+   "h1": "7. Rubric (owner)"
+  },
+  {
+   "blocks": [
+    {
+     "type": "h2",
+     "text": "What sentiment means"
+    },
+    {
+     "type": "p",
+     "text": "Sentiment consists of two independent parts: “The words” — what was said — and “Voice” — how it sounded (timbre, energy, rhythm). The voice is assessed by CommuniQ's own model, and the audio does not leave the system. The parts are never averaged into a single number: when they disagree (polite words, a tense voice), that is a **finding**."
+    },
+    {
+     "type": "p",
+     "text": "In the call analysis they correspond to the fields “Words” and “Voice tone” (see chapter 6). The voice needs the timing of each turn, so it does not appear for a pasted transcript, for old recordings, or for a transcription made without separating the speakers."
+    },
+    {
+     "type": "h2",
+     "text": "Sentiment settings (owner)"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Sentiment” tab.",
+      "Select or clear the “Analyse sentiment on this workspace’s calls” checkbox (on by default).",
+      "Optionally fill in “Guidance for the analyser”: who your customers are, what counts as a complaint, and what tone is expected (up to 4000 characters).",
+      "Click “Save sentiment settings”."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "When it is turned off, sentiment is no longer produced; the rest of the analysis does not change.",
+      "Members can only view the settings."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: the same guidance also steers the rubric criterion “Courtesy & empathy”; changing it will change the score of future calls, but not of calls already scored."
+    },
+    {
+     "type": "h2",
+     "text": "Voice status"
+    },
+    {
+     "type": "p",
+     "text": "The “The two halves” card reads the status when the tab is opened; to check again, reopen the tab."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Status",
+      "What it means / what to do"
+     ],
+     "widths": [
+      2900,
+      6126
+     ],
+     "rows": [
+      [
+       "“Working”",
+       "Voice tone is working."
+      ],
+      [
+       "“Starting up”",
+       "The model is loading (about one minute after an update); calls get only the words half. Wait and run “Analyse the tone” again."
+      ],
+      [
+       "“Not working”, “Not available”, “Turned off”",
+       "Calls get only the words half. The workspace cannot fix this — contact CommuniQ."
+      ],
+      [
+       "“Unknown”",
+       "The status could not be read; reopen the tab."
+      ]
+     ]
+    },
+    {
+     "type": "p",
+     "text": "If a call has no tone result, the “Courtesy & empathy” criterion is excluded from the weighting and does not receive a score of 0 (see chapter 7)."
+    }
+   ],
+   "h1": "8. Sentiment"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "Transcription runs before every other step, so a misheard word turns into a wrong fact-check and a wrong score. Only the **owner** can change the settings (members can only view them), and a change applies to future transcriptions only."
+    },
+    {
+     "type": "h2",
+     "text": "Your own settings"
+    },
+    {
+     "type": "p",
+     "text": "Until the owner changes anything, the workspace follows the CommuniQ default (marked “Inherited”)."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “Transcription” tab and click “Override for this workspace”.",
+      "Change the four settings: “Spoken language”, “Separate the speakers”, “Key terms” and “Audio sent to the model”, then click “Save”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "For the language, choose “Detect automatically”, “English”, “Georgian” or “Russian”: “Georgian” is more accurate for Georgian calls, and if the language changes during a call, use “Detect automatically”. “Separate the speakers” is on; turning it off removes per-speaker analysis, the timeline bars, voice tone and the measured Courtesy & empathy criterion, so turn it off only for a specific reason."
+    },
+    {
+     "type": "p",
+     "text": "All four settings are saved together. To undo, click “Back to inherited” and confirm."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: when you go back to inherited, the workspace's key terms list is lost; copy it first."
+    },
+    {
+     "type": "h2",
+     "text": "Key terms"
+    },
+    {
+     "type": "p",
+     "text": "These are words the model should recognize more accurately (product and place names, words that are often misheard). Enter one per line:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Up to 1000 terms; each up to 50 characters and no more than five words.",
+      "The characters < > { } [ ] and the backslash (\\) are not allowed."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: key terms raise the cost of every transcription by about 20%; add only the words the model really gets wrong."
+    },
+    {
+     "type": "note",
+     "text": "Note: Gemini Transcribe does not use key terms, because it preserves word timings (timeline, per-speaker scoring, voice tone). You can see the provider under “AI providers” → “Speech to text” → “In effect” (see chapter 10)."
+    },
+    {
+     "type": "h2",
+     "text": "Audio sent to the model"
+    },
+    {
+     "type": "p",
+     "text": "A lossy conversion can erase the difference between similar-sounding words, while more data makes the upload longer."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Option",
+      "Description"
+     ],
+     "rows": [
+      [
+       "“Original file, unconverted”",
+       "Best quality, largest upload."
+      ],
+      [
+       "“Lossless, original sample rate”",
+       "All frequencies, no loss."
+      ],
+      [
+       "“Lossless, 16 kHz”",
+       "The model's sample rate, without artifacts."
+      ],
+      [
+       "“Uncompressed, 16 kHz”",
+       "Fast path, large in size."
+      ],
+      [
+       "“Compressed, 16 kHz”",
+       "Smallest upload, lossy (default)."
+      ]
+     ],
+     "widths": [
+      3300,
+      5726
+     ]
+    },
+    {
+     "type": "p",
+     "text": "If similar Georgian words get mixed up in the transcript, try “Lossless, 16 kHz”."
+    },
+    {
+     "type": "note",
+     "text": "Note: A member can also change these settings for a single recording in the “Analyze a Call” tab (see chapter 5)."
+    }
+   ],
+   "h1": "9. Transcription (owner)"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "By default the workspace runs on CommuniQ’s AI accounts. If you have your own subscription with a provider, you can use it on the “AI providers” tab, in the “Your own AI subscription” card — billing then goes to your account. Only the owner can make changes; members see the tab for viewing only."
+    },
+    {
+     "type": "p",
+     "text": "There are three cards: “Text AI”, “Speech to text” and “Text to speech”. Each one says either “Using CommuniQ’s” (the usual state) or “Using your own key”. The “In effect” line shows the source, the provider and the model, but never the key."
+    },
+    {
+     "type": "h2",
+     "text": "Turning on your own subscription (owner)"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “AI providers” tab and click “Use my own subscription” on the card you want.",
+      "Choose the “Provider”: for text, Anthropic (Claude), OpenAI (GPT), Google (Gemini); for speech to text, ElevenLabs, OpenAI, Google (Gemini); for text to speech, ElevenLabs, OpenAI.",
+      "Optionally enter the “Model” (the provider’s exact id); leaving the field empty means the default model.",
+      "Paste the “API key” and click “Save” (or “Cancel”).",
+      "Make sure “Your subscription is now in use” appears."
+     ]
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Each card is set separately: text can run on your key while speech runs on CommuniQ’s account.",
+      "The key is stored encrypted and is never shown again — you see only “Key set (…abcd)”. It takes effect **immediately**.",
+      "Changing only the provider or the model, without a key, cannot be saved. When you switch the provider, the saved key is lost and you must paste a new one."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Testing, changing and removing (owner)"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "**Test:** click “Test connection” — the result is “Works” or “Failed” with the provider’s message. The test checks the saved settings, so save first.",
+      "**Change:** paste a new key or change the model and click “Save”. Leaving the key field empty keeps the existing key.",
+      "**Remove:** click “Back to CommuniQ’s” and confirm. The provider, model and key are deleted together; this cannot be undone."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: a saved key takes effect right away. If the test fails, every AI request on that card will stop. Correct the key or the balance immediately, or go back to CommuniQ’s connection."
+    },
+    {
+     "type": "h2",
+     "text": "Billing and limits"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "With your key, every request on that card is charged to **your** provider account.",
+      "The workspace’s daily limits apply unchanged; your provider’s limits apply as well: an empty balance or a rate limit will stop analysis (see chapter 17)."
+     ]
+    }
+   ],
+   "h1": "10. AI providers — your own AI subscription (owner)"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The “Review Queue” tab is the queue of suggested changes to the knowledge base. Every night the system looks back over the previous day’s chats and calls and suggests that you add a missing answer, update outdated text, or hide text that the bot should not say. Nothing in the knowledge base changes until a person confirms it."
+    },
+    {
+     "type": "p",
+     "text": "Suggestions come from chats where the bot found nothing to base an answer on or an operator rewrote the copilot’s draft (the strongest signal), and from calls where the fact-check found a claim to be “not in KB” or “contradicted”."
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "The review runs every night, so a gap from today shows up in the queue tomorrow morning.",
+      "Similar questions are merged into one card; a card normally needs at least 2 distinct sources. At most 10 cards are open at a time.",
+      "The tab shows only unresolved cards. To update the list, click “Refresh”."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Suggestion types and the card"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Add” — a missing answer is added to the knowledge base as a new document;",
+      "“Update” — the text of an existing document or chunk is replaced with new wording;",
+      "“Hide” — a document is removed from the bot’s answers."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The card shows the type, a title, “confidence”, “risk”, the reasoning, and “What customers actually said” — up to 3 quotes; “Open call” ↗ or “Open conversation” ↗ opens the original. “Add” and “Hide” cards show “Proposed content”; an “Update” card shows “Change against the current chunk”, with the part to be removed in red and the added part in green."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: If a quote carries the mark “⚠ cites evidence from another tenant”, the card cannot be accepted. Report it to CommuniQ."
+    },
+    {
+     "type": "h2",
+     "text": "Decision (owner)"
+    },
+    {
+     "type": "p",
+     "text": "Only an owner who signed in with a username and password can accept or decline a suggestion; this is not possible with an API key or a member account. Each card has three buttons:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Accept” — the change appears in the knowledge base within a few seconds;",
+      "“Accept with edits” — change the suggested text and accept it (empty text is not accepted);",
+      "“Decline” — see below."
+     ]
+    },
+    {
+     "type": "h3",
+     "text": "Decline"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Click “Decline”.",
+      "At the question “Why are you declining?”, choose a reason: “Not true”, “Already covered”, “Don’t want the bot saying this” or “Temporary / one-off”.",
+      "Confirm."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "You cannot decline without a reason. A declined topic is paused for 90 days — similar groups no longer enter the queue."
+    },
+    {
+     "type": "h3",
+     "text": "Confirming a “Hide” card"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Click “Accept” or “Accept with edits”.",
+      "In the “Hide this content?” window, type the word shown — HIDE.",
+      "Confirm."
+     ]
+    },
+    {
+     "type": "h3",
+     "text": "What happens after acceptance"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Add” — a new document is created (category and tag curated); by default it is internal — the copilot, the fact-check and scoring use it, the public bot does not;",
+      "“Update” — the target document is reprocessed with the new text;",
+      "“Hide” — the document becomes internal and the public bot no longer uses it; nothing is deleted."
+     ]
+    },
+    {
+     "type": "warn",
+     "text": "Warning: The public bot does not use an accepted **Add** until you allow it for the bot in the “Knowledge Base” tab (see chapter 3)."
+    },
+    {
+     "type": "p",
+     "text": "If two people act on the same card, the second one gets an error — click “Refresh”. If an accepted change does not appear in the knowledge base, contact CommuniQ."
+    },
+    {
+     "type": "h2",
+     "text": "Bulk accept (owner)"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Select the “Add” and “Update” cards you want.",
+      "On the bar that appears, click “Accept selected”.",
+      "Confirm the question — the changes appear in the knowledge base immediately."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "“Hide” cards have no checkbox, and there is no bulk decline — review them one by one."
+    },
+    {
+     "type": "note",
+     "text": "Note: Only CommuniQ can run a review on request, turn it off for a workspace, or change the default allowance."
+    }
+   ],
+   "h1": "11. Review Queue"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "In the “Bot” tab you set up the public chat bot that answers customers in CQ Chat. Only the **owner** can change the settings; a member sees the form for viewing only."
+    },
+    {
+     "type": "p",
+     "text": "Next to the heading you see the bot’s state and the “Refresh” button: “Answering customers” means autopilot is on; “Drafts only — a human sends every reply” means it is off; “Stopped by CommuniQ” means CommuniQ has stopped the bot."
+    },
+    {
+     "type": "h2",
+     "text": "Autopilot"
+    },
+    {
+     "type": "p",
+     "text": "“Autopilot — the bot answers customers with no human in the loop” is off by default: the bot only prepares a draft, which an operator checks and sends. To turn it on:"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open “Knowledge Base” and share at least one document with the bot (see chapter 3).",
+      "Return to “Bot” and write the refusal copy in every language the bot answers in.",
+      "Select “Autopilot — the bot answers customers with no human in the loop”.",
+      "Click “Save bot settings”."
+     ]
+    },
+    {
+     "type": "note",
+     "text": "Note: if CommuniQ has stopped autopilot, every conversation is handed to a human until it is restored; saving does not lift the stop — contact CommuniQ."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: every bot reply and every sorting of a question is an AI call and is recorded against your workspace; if “Text AI” uses your own key, the cost is charged to it."
+    },
+    {
+     "type": "h2",
+     "text": "Texts and escalation"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Persona” — free text: who the bot is and how it should sound.",
+      "“Languages the bot answers in” — choose “English”, “Georgian” and/or “Russian” (at least one).",
+      "“Greeting” — the bot’s first message (EN, KA, RU); if a field is empty, nothing is sent.",
+      "“Refusal copy — what the bot says when your knowledge base has no answer” — the bot writes this when the documents do not contain the answer, and hands the conversation to a colleague. Fill it in for every language before turning autopilot on.",
+      "“Escalation keywords” — comma-separated words: if the customer’s message contains one of them, the conversation is handed to a human immediately."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Built-in escalation works regardless of the list: the conversation is handed to a human when the customer asks for an operator, complains, threatens legal action, or is in distress. In a case of distress, the customer first receives a safety message with the emergency number 112."
+    },
+    {
+     "type": "h2",
+     "text": "Search and limits"
+    },
+    {
+     "type": "p",
+     "text": "Leave the search fields (“Minimum match score before the bot answers (0–1)”, the number of passages, “Max reply characters”, and so on) and the four rate limits (drafts and bot replies — per minute for the whole workspace, per hour for one customer) at their defaults unless CommuniQ advises otherwise; after any change, check the result in “Test search” (see chapter 4)."
+    },
+    {
+     "type": "h2",
+     "text": "Answer policy"
+    },
+    {
+     "type": "p",
+     "text": "The “Answer policy” list determines how far the bot may go beyond the shared documents:"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Option",
+      "How the bot behaves"
+     ],
+     "rows": [
+      [
+       "“Shared documents only — no general knowledge” (default)",
+       "For a question the documents do not cover, it writes the refusal copy and hands the conversation to a colleague; an unrelated question gets a one-sentence redirect and is counted."
+      ],
+      [
+       "“Shared documents first, general knowledge for related questions”",
+       "It answers a question in your field briefly and marks the answer as general guidance; an unrelated question is still redirected."
+      ],
+      [
+       "“Answer any question — unrelated ones count toward the warning and the stop”",
+       "It answers even an unrelated question briefly; each such answer costs one small AI call."
+      ]
+     ],
+     "widths": [
+      3500,
+      5526
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The bot takes prices, deadlines and promises only from your documents; a figure or promise that does not exist in the documents hands the conversation to a human. To change the policy, choose an option, confirm the window for the second or third option, and click “Save bot settings”."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: the second and third options allow answers that are not in your documents and that no one in the company has approved."
+    },
+    {
+     "type": "h2",
+     "text": "Business, opening hours, unrelated questions"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“About the business” (max. 1000 characters) — describe what you do in a sentence or two; the bot uses this to tell your topic from an outside one, so be sure to fill it in.",
+      "“Write a short summary for the human who takes over” — needs one extra model call at handoff; when it is off, the operator receives the conversation without context (see chapter 13).",
+      "“Time zone” (Asia/Tbilisi by default) — the bot uses it for the date, the time, and whether you are open."
+     ]
+    },
+    {
+     "type": "steps",
+     "items": [
+      "In the “Opening hours” block, select “Tell the bot our opening hours” — the table fills in: Monday–Friday 09:00–18:00.",
+      "For each day, select or clear “Open” and set “Opens” and “Closes” (a closing time earlier than the opening time means after midnight, e.g. 22:00–02:00).",
+      "Click “Save bot settings”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The bot counts unrelated questions within one conversation. At the “Warn after (questions)” threshold (3 by default) it adds a warning to its reply; at the “Stop after (questions)” threshold (5 by default) it no longer answers anything the documents do not clearly cover. Stopping does not close the chat and does not hand the conversation to a human; 0 turns the step off; the stop threshold must be higher than the warning threshold."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: with the “Answer any question …” option, the stop threshold is what limits the cost — 0 there means no limit."
+    },
+    {
+     "type": "h2",
+     "text": "AI disclosure and saving"
+    },
+    {
+     "type": "p",
+     "text": "A line is added to the bot’s reply telling the customer they are talking to a program. In the “When to show it” field, choose “First reply in a conversation” (default), “Every reply” or “Never — the channel discloses in its own interface”. “Disclosure text” is written per language; an empty field restores the built-in wording."
+    },
+    {
+     "type": "p",
+     "text": "“Save bot settings” saves the whole form as a new version. Before saving, it checks that at least one language is selected, that hours and thresholds are filled in correctly, that with autopilot on the refusal copy exists in every language, and that at least one document is shared. If a message appears, correct the field it points to and save again."
+    }
+   ],
+   "h1": "12. Bot (owner)"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "In CQ Chat, CQ offers two kinds of help: the bot (autopilot), which answers customers from the documents shared with the bot, and the copilot, which prepares draft replies for operators. The owner sets the bot's settings in the “Bot” tab (see chapter 12). If the bot or copilot does not work in CQ Chat, contact CommuniQ."
+    },
+    {
+     "type": "h2",
+     "text": "When autopilot is on"
+    },
+    {
+     "type": "p",
+     "text": "On a new conversation the bot answers first; any operator can take the conversation over. The conversation is handed to a person when:"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "the answer is not in the shared documents;",
+      "the customer asks for a person, expresses a complaint or types an escalation keyword;",
+      "it is an emergency, in which case the customer first receives the emergency number (112 by default);",
+      "the bot's answer contained a figure or a promise that the documents do not confirm;",
+      "one customer's hourly limit has been used up (only this conversation is handed over)."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Copilot: draft replies"
+    },
+    {
+     "type": "p",
+     "text": "After a handoff (or in every conversation, if autopilot is off) the copilot prepares drafts in the panel; the owner sets how many in the “Suggested replies per turn (drafts mode)” field (2 by default). The operator edits the draft and sends it themselves."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: Read a draft before you send it; a wrong draft usually points to a gap in the knowledge base or an outdated document."
+    },
+    {
+     "type": "note",
+     "text": "Note: A draft that has to be rewritten is a strong sign of a gap in the knowledge base. The nightly review will suggest a change in the “Review Queue” tab (see chapter 11)."
+    },
+    {
+     "type": "h2",
+     "text": "When the bot is stopped"
+    },
+    {
+     "type": "p",
+     "text": "The bot does not answer if autopilot is off, if CommuniQ has stopped the bot (“Stopped by CommuniQ”; the settings are kept, and to restore it contact CommuniQ), or if the workspace's per-minute limit has been used up. In that case conversations go to operators."
+    }
+   ],
+   "h1": "13. The copilot and the bot in CQ Chat"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The “History” tab stores everything that has been analyzed in the workspace — the work of all users. It contains two tables, “Recordings” and “Summaries”, each showing the latest 50 entries. To update a list, click “Refresh”; this tab has no search, filter or delete."
+    },
+    {
+     "type": "h2",
+     "text": "Recordings"
+    },
+    {
+     "type": "p",
+     "text": "The table shows uploaded calls and pasted transcripts: “File”, “Source” (“Audio” or “Text”), “Status”, “Language”, “Length”, “Analysed” (the checks already run), “By” and “When”."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open the “History” tab and find the entry you need in the “Recordings” table.",
+      "Click the row.",
+      "The recording opens in the “Analyze a Call” tab with all of its saved results."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Opening a saved result is free; re-running a check uses an analysis unit (see chapter 5)."
+    },
+    {
+     "type": "note",
+     "text": "Note: After the retention period expires, the audio is deleted, but the transcript and results remain. Such a call opens without a player."
+    },
+    {
+     "type": "h2",
+     "text": "Summaries"
+    },
+    {
+     "type": "p",
+     "text": "The second table shows the summary of one or more calls (“Calls”, “Summary”, “Language”, “By”, “When”). Click its row to open it. Re-running on calls that are already loaded does not create a duplicate in History."
+    },
+    {
+     "type": "h2",
+     "text": "Limitations"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "Only the latest 50 entries are shown; for older calls, contact CommuniQ.",
+      "If the list fails to load, you will see “Could not load the knowledge base.” — here it refers to the History list. Click “Refresh”; if that does not help, sign out and sign in again."
+     ]
+    }
+   ],
+   "h1": "14. History"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The “Audio editor” trims a recording, cuts out a section, adjusts the volume level and converts it to another format. The audio is processed in your browser, and no sign-in is required."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: nothing is saved from the editor. Your edits are lost when you close the page, so download the result first."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "In the header, open “Audio editor”.",
+      "In the “Recording” section, drop a file into the “Drop an audio or video file here” field or click “Choose a file”.",
+      "Select a section on the waveform or with the buttons “Start point [” and “End point ]”. With no selection, the action applies to the whole recording.",
+      "Use the actions from the groups “Edit”, “Level” or “Channels”. “Undo” reverses a step (“Redo” restores it).",
+      "Click “Download WAV” (free) or choose a “Format” and click “Convert & download”."
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Layers and files"
+    },
+    {
+     "type": "p",
+     "text": "Each opened file is a separate layer: the “starts at” field changes the start time, and a layer has “Mute”, “Solo” and “Remove layer”, while “Flatten layers” merges all layers into one recording."
+    },
+    {
+     "type": "p",
+     "text": "A file must not be larger than 120 MB. Telephony formats (gsm, alaw, amr, sln) do not open in the browser — first convert them to WAV with the “Audio Converter” (see chapter 16)."
+    },
+    {
+     "type": "h2",
+     "text": "Actions"
+    },
+    {
+     "type": "p",
+     "text": "“Play selection” plays the section, and “Clear selection” removes the selection. Keys: Space — play/pause, Ctrl/Cmd+Z — undo."
+    },
+    {
+     "type": "table",
+     "head": [
+      "Group",
+      "Actions"
+     ],
+     "widths": [
+      2600,
+      6426
+     ],
+     "rows": [
+      [
+       "“Edit”",
+       "“Cut out selection”, “Keep only selection”, “Silence selection”, “Insert silence (seconds)” + “Insert” (up to 60 seconds)"
+      ],
+      [
+       "“Level”",
+       "“Normalise”, “Fade in”, “Fade out”"
+      ],
+      [
+       "“Channels”",
+       "“Mix to mono”, “Make stereo”, “Swap left/right”, keep only 1 channel"
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Export"
+    },
+    {
+     "type": "bullets",
+     "items": [
+      "“Download WAV” creates the file in the browser; no limit is used.",
+      "“Convert & download” processes the file on the server (formats — see chapter 16), a ZIP file is downloaded, and 1 conversion is used from the anonymous daily limit, including when you are signed in to a workspace. If the conversion fails, the WAV is still downloaded."
+     ]
+    },
+    {
+     "type": "note",
+     "text": "Note: a WAV is often larger than the original; the limit for “Call analysis” is 100 MB."
+    }
+   ],
+   "h1": "15. Audio editor"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "The “Public app” link (or the CommuniQ logo) opens a page that is available even without an account. Everyone sees “Text to Speech” and “Audio Converter”. If you are signed in in the same browser tab, “Speech to Text” and “Sentiment” are added."
+    },
+    {
+     "type": "warn",
+     "text": "Warning: even if you are signed in, the public page treats you as an **anonymous** guest. The daily limit is counted per IP address, so colleagues in the same office may share it. The knowledge base, fact-check and rubric do not work here, and nothing is saved in “History”. For a real call analysis, use “Analyze a Call” (see chapter 5)."
+    },
+    {
+     "type": "h2",
+     "text": "Daily limit"
+    },
+    {
+     "type": "p",
+     "text": "The top of the page shows how many “transcriptions”, “speech clips” and “file conversions” are “left today.”; at 0 the bar turns amber, and ∞ means there is no limit. The default limits per IP address per day are: 3 transcriptions (including sentiment analysis), 10 speech clips, 60 file conversions. For higher limits and for the knowledge base, sign in to your account."
+    },
+    {
+     "type": "h2",
+     "text": "Text to Speech"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open “Text to Speech” and choose a “Language”: English, Russian or “Georgian”.",
+      "Choose a “Voice” (“Default voice” is recommended).",
+      "In the “Text” field, type what you want spoken — up to 5000 characters (some models allow fewer).",
+      "Click “Generate speech” and listen to the clip."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Each clip uses 1 speech clip. “Preview voice (free sample)” does not use the limit, but choose a specific voice first. For Georgian, the default voice gives the best result."
+    },
+    {
+     "type": "h2",
+     "text": "Speech to Text and Sentiment"
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Upload an “Audio or video file” or click “Record” (the microphone is available only here).",
+      "Click “Transcribe” — the transcript and the detected language appear.",
+      "For sentiment, open “Sentiment” and click “Analyze sentiment”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "The result shows “What was said” and “How it sounded”; if they do not match, “The words and the tone of voice disagree — worth listening to.” appears (see chapter 8). Each run uses 1 transcription, the upload limit is 10 MB, and nothing is saved."
+    },
+    {
+     "type": "h2",
+     "text": "Audio Converter"
+    },
+    {
+     "type": "p",
+     "text": "The converter converts several files at once into the format of a telephone system (for example, Asterisk) and gives you a single ZIP file."
+    },
+    {
+     "type": "steps",
+     "items": [
+      "Open “Audio Converter” and drop your files into the “Files to convert” field.",
+      "Choose the “Output format”.",
+      "Click “Convert” (you can cancel while it is running).",
+      "Click “Download ZIP”."
+     ]
+    },
+    {
+     "type": "p",
+     "text": "Up to 30 files per batch, each up to 60 MB, with the batch up to 150 MB; each file uses 1 file conversion. An anonymous download remains available for 2 hours."
+    },
+    {
+     "type": "p",
+     "text": "To return to the workspace, use “My workspace”."
+    }
+   ],
+   "h1": "16. The public app"
+  },
+  {
+   "blocks": [
+    {
+     "type": "p",
+     "text": "Find the message or symptom. If the advice does not help, contact CommuniQ and give the exact text of the message and its code."
+    },
+    {
+     "type": "h2",
+     "text": "Sign-in and session"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "“Could not sign in. …” or after signing in you see a personal account without your organization’s data",
+       "Check your username and password; a disabled user sees the same message. You cannot reset the password yourself — contact CommuniQ (see chapter 2)."
+      ],
+      [
+       "“Your session has expired — please sign in again.” or a new tab opens without authorization",
+       "The session is tied to the tab and lasts 24 hours. Sign in again in that tab (see chapter 2)."
+      ],
+      [
+       "“The service is temporarily unavailable. …” or “Something went wrong on our side. … (Code …)”",
+       "Click “Retry”; if it keeps happening, send CommuniQ the code (see chapter 2)."
+      ],
+      [
+       "“View only — …”, the bot form is gray, or a feature is unavailable",
+       "You are a member — to make changes, contact the owner (see chapter 1). CommuniQ turns on a feature that is unavailable."
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Knowledge base"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "A file is rejected (“File exceeds 25 MB limit”, .doc/.xls, “No readable text found …”)",
+       "The limit is 25 MB. Save .doc/.xls as .docx/.xlsx. A scanned PDF needs text recognition (OCR) (see chapter 3)."
+      ],
+      [
+       "“AI restructuring failed.”",
+       "The reason is written under the import: split text longer than 100,000 characters; if fragments would be lost, import the file without AI restructuring (see chapter 3)."
+      ],
+      [
+       "Status error (⚠) or “Embedding coverage” is below 100%",
+       "Fix it with “Edit” (✏️) or click ↻ (“Re-embed”); or, under “Maintenance”, “Queue rebuild”. A fragment without an embedding cannot be found by search (see chapters 3–4)."
+      ],
+      [
+       "Search finds the wrong fragments; or a red bar “Fallback search — meaning-based search is down”",
+       "In “Test search”, check the confidence marker; delete duplicates. The red bar is not a fault in your knowledge base — try again, then tell CommuniQ (see chapter 4)."
+      ],
+      [
+       "The bot uses a document that should have been internal",
+       "Click “Stop sharing” (🚫) on the document (see chapters 3–4)."
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Call analysis and transcription"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "An upload is rejected or “Rate limit reached for analyses (N per day).”",
+       "The limits are 100 MB per file, 300 MB per summary, and 200,000 characters per transcript. At the daily limit, wait until tomorrow or ask CommuniQ to raise it; “All at once” uses up to 5 units (see chapters 5–6)."
+      ],
+      [
+       "“API key is not configured”, “did not accept the API key”, “does not know this model”, or “Failed — …” after “Test connection”",
+       "With your own key, in the “AI providers” tab paste a valid key, correct the “Model”, save, and click “Test connection”. Otherwise contact CommuniQ (see chapter 10)."
+      ],
+      [
+       "“out of credits”, “over its quota”, “rate-limited”, or “having trouble right now”",
+       "If the card shows “Using your own key”, top up the balance or click “Back to CommuniQ’s”; otherwise tell CommuniQ. The unit of a transcription that has already started is not returned (see chapters 5 and 10)."
+      ],
+      [
+       "“The recording is no longer stored — only the transcript and its results remain.” or playback fails",
+       "The transcript and results are saved; to play it, upload the file again. If playback fails, click “Download recording” or try another browser (see chapters 5 and 14)."
+      ],
+      [
+       "The speaker bars are not shown",
+       "Turn on “Separate the speakers” and transcribe again (see chapter 9)."
+      ],
+      [
+       "Keywords have no effect, or the settings are not saved",
+       "Gemini Transcribe does not use keywords. A red counter means more than 1000 words (see chapter 9)."
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Checks, scoring and rubric"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "Fact-check says “not in KB” or “No verifiable claims were found.”",
+       "For the first, import the relevant document and click “Run again” (see chapter 3). The second means the call contains no factual claim (see chapter 6)."
+      ],
+      [
+       "“The voice model is still loading. …”, “The voice-tone service did not answer in time. …”, or “Sentiment” shows “Not working”",
+       "Try again in a minute. If “Sentiment” shows “Not working” or “Not available”, CommuniQ fixes that (see chapter 8)."
+      ],
+      [
+       "“This recording has no per-turn timings, …” or “Sentiment analysis is disabled …”",
+       "The first is expected for a pasted transcript — use “Words”. For the second, the owner must tick “Analyse sentiment on this workspace’s calls” in the “Sentiment” tab (see chapter 8)."
+      ],
+      [
+       "A measured criterion shows “—” or “Not measured”",
+       "This is not an error: no score was deducted. First run “Check the facts” and “Analyse the tone”, or “All at once” (see chapters 6–7)."
+      ],
+      [
+       "The score fields are not shown or the rubric is not saved",
+       "Only the owner changes scores and the rubric. The weights must add up to 100% — “Normalize to 100%”. The “Score colours” thresholds are whole numbers: 1–99 for yellow, and for green anything above that up to 100 (see chapters 6–7)."
+      ],
+      [
+       "“Rubric import failed.” or after import the measured criteria have weight 0",
+       "A scanned PDF needs OCR; from a long file, import only the part with the standard. Give the measured criteria a weight (see chapter 7)."
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Review and bot"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "“Nothing to review — the queue is clear.” or the bot does not use an accepted addition",
+       "An empty queue is normal: suggestions appear the next morning, and only the owner makes the decision. Added text is internal by default — share it with the bot (see chapter 11)."
+      ],
+      [
+       "Autopilot switches off again, or saving shows a message about text, language, time, or limits",
+       "Share at least one document with the bot and fill in the refusal text in every language. The warning threshold is 0–50, the stop threshold is 0–100 and greater than the warning (see chapter 12)."
+      ],
+      [
+       "The bot hands almost every conversation to a person, or answers too many unrelated questions",
+       "For the first, check whether enough documents are shared, the escalation keywords, and “Rate caps”. For the second, reduce “Stop after (questions)” or choose “Shared documents only — no general knowledge” (see chapter 12)."
+      ],
+      [
+       "“Stopped by CommuniQ” or “Could not load the bot settings.”",
+       "Only CommuniQ changes the first. For the second, click “Refresh” (see chapter 12)."
+      ]
+     ]
+    },
+    {
+     "type": "h2",
+     "text": "Public app and audio editor"
+    },
+    {
+     "type": "table",
+     "head": [
+      "Symptom",
+      "What to do"
+     ],
+     "widths": [
+      3300,
+      5726
+     ],
+     "rows": [
+      [
+       "The bar is amber or “Anonymous access is disabled.”",
+       "The anonymous daily limit (by IP) has been used up. Disabled access is a CommuniQ setting (see chapter 16)."
+      ],
+      [
+       "The editor does not accept the file or conversion is rejected",
+       "First convert .gsm, .alaw, .amr, .sln formats to WAV in “Audio Converter”; the editor limit is 120 MB. Use the free “Download WAV” (see chapters 15–16)."
+      ]
+     ]
+    }
+   ],
+   "h1": "17. Troubleshooting"
+  }
+ ]
+}

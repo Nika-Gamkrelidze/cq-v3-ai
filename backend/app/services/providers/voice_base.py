@@ -181,20 +181,40 @@ def _snippet(resp: httpx.Response) -> str:
     return resp.text[:500]
 
 
+def json_object(resp: httpx.Response) -> dict:
+    """The response body as a JSON OBJECT, or {} — never an exception, never a non-dict.
+
+    Providers do not always answer with an object. Google's gateway wraps some error bodies
+    (and the occasional success) in a one-element array — `[{"error": {...}}]` — and a bare
+    `resp.json().get(...)` on that raised `'list' object has no attribute 'get'`, which then
+    REPLACED the provider's own error message: the user read "Transcription failed: 'list'
+    object has no attribute 'get'" and could not tell a bad key from a bad file. So: unwrap
+    an array to its first object, and treat anything else (a string, a number, malformed JSON,
+    an empty body) as "no fields".
+    """
+    try:
+        data = resp.json()
+    except ValueError:
+        return {}
+    if isinstance(data, list):
+        data = next((item for item in data if isinstance(item, dict)), {})
+    return data if isinstance(data, dict) else {}
+
+
 def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
     """Map an OpenAI-style error response onto an actionable message + machine code."""
     raw = _snippet(resp)
     err_code = err_type = msg = ""
-    try:
-        err = (resp.json() or {}).get("error")
-    except ValueError:
-        err = None
+    err = json_object(resp).get("error")
     if isinstance(err, dict):
         err_code = str(err.get("code") or "").lower()
         err_type = str(err.get("type") or "").lower()
         msg = str(err.get("message") or "")
     elif isinstance(err, str):
         msg = err
+    # For the messages below that append it mid-sentence: Google's sentences end in their own
+    # full stop (and sometimes a space), and ours adds one.
+    tail = msg.strip().rstrip(".").strip()
     if resp.status_code == 401 or err_code in ("invalid_api_key",):
         return VoiceError(
             f"{action} failed: {vendor} did not accept the API key. Paste a current key on the "
@@ -203,16 +223,23 @@ def _classify(resp: httpx.Response, action: str, vendor: str) -> VoiceError:
             or "permission" in err_code:
         return VoiceError(
             f"{action} was refused: this {vendor} key lacks the permission for it"
-            f"{' — ' + msg if msg else ''}.",
+            f"{' — ' + tail if tail else ''}.",
             status=resp.status_code, code="missing_permission", raw=raw)
+    # Both quota branches keep the provider's own sentence: it is the only place that says WHICH
+    # account and which limit. Google answers 402 when the prepay balance of the billing account
+    # behind the KEY is empty (not necessarily the account the owner is looking at), and 429 for
+    # a per-minute, per-day or spend cap, which it names — "try again in a moment" is wrong for
+    # a daily one.
     if err_code == "insufficient_quota" or err_type == "insufficient_quota" \
             or resp.status_code == 402:
         return VoiceError(
-            f"{action} failed: the {vendor} account is out of credits or over its quota.",
+            f"{action} failed: the {vendor} account behind this key is out of credits or over "
+            f"its quota{' — ' + tail if tail else ''}.",
             status=resp.status_code, code="quota", raw=raw)
     if resp.status_code == 429:
         return VoiceError(
-            f"{action} was rate-limited by {vendor}; try again in a moment.",
+            f"{action} was rate-limited by {vendor}"
+            f"{' — ' + tail if tail else '; try again in a moment'}.",
             status=resp.status_code, code="quota", raw=raw)
     return VoiceError(f"{action} failed ({resp.status_code}): {msg or raw}",
                       status=resp.status_code, raw=raw)

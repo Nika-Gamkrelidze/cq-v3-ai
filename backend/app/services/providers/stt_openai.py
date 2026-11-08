@@ -119,6 +119,14 @@ def usage_of(body: dict, words: list[dict]) -> dict:
                                 audio_seconds=seconds, words=words)
 
 
+# The containers /audio/transcriptions reads (platform.openai.com: flac, mp3, mp4, mpeg, mpga,
+# m4a, ogg, wav, webm). Anything else is converted to FALLBACK_FORMAT first.
+ACCEPTED_AUDIO = frozenset({
+    "audio/flac", "audio/mpeg", "audio/mp3", "audio/m4a", "audio/ogg", "audio/wav", "audio/webm",
+    "video/mp4", "video/webm"})
+FALLBACK_FORMAT = "flac_16k"
+
+
 class OpenAISTT:
     id = "openai"
     default_model = DEFAULT_MODEL
@@ -132,8 +140,9 @@ class OpenAISTT:
                          audio_format: str | None = None,
                          timeout: float | None = None) -> dict:
         model = self.model(res)
-        payload = await audio_mod.to_stt_format(audio, filename or "audio", content_type or "",
-                                                audio_format)
+        payload = await audio_mod.for_provider(audio, filename or "audio", content_type or "",
+                                               audio_format, accepts=ACCEPTED_AUDIO,
+                                               fallback=FALLBACK_FORMAT)
         files = {"file": (payload.filename or "audio", payload.data,
                           payload.content_type or "application/octet-stream")}
         data: dict = {"model": model}
@@ -152,7 +161,7 @@ class OpenAISTT:
         resp = await voice_base.http_request(
             "POST", f"{base_url(res)}/audio/transcriptions", "Speech-to-text", vendor="OpenAI",
             timeout=timeout or 300.0, headers=_headers(res), data=data, files=files)
-        body = resp.json() or {}
+        body = voice_base.json_object(resp)
         words = [
             {"text": w.get("word"), "start": w.get("start"), "end": w.get("end"),
              "type": "word"}
