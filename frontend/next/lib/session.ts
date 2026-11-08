@@ -380,12 +380,17 @@ export class ApiError extends Error {
   readonly detail: string | null;
   readonly i18nKey: string;
   readonly vars?: Record<string, string | number>;
+  /** The structured `detail` when the server sent an object rather than a sentence — a
+      validation refusal that lists every problem with its path (`{message, errors}`), or the
+      fields to mark (`{message, fields}`). `detail` above still carries its `message`. */
+  readonly body?: unknown;
 
   constructor(init: {
     status: number;
     detail: string | null;
     i18nKey: string;
     vars?: Record<string, string | number>;
+    body?: unknown;
   }) {
     /* `message` is the DEVELOPER-facing fallback — a console line, a stack trace, and the
        `e.message` that `/usage` and `/ai-config` already render. It is deliberately not the
@@ -397,6 +402,7 @@ export class ApiError extends Error {
     this.detail = init.detail;
     this.i18nKey = init.i18nKey;
     this.vars = init.vars;
+    this.body = init.body;
   }
 }
 
@@ -438,8 +444,15 @@ async function errorFrom(r: Response): Promise<ApiError> {
   // have been seen as `message` or `error`; brand.js accepts all three and so does this.
   const d = data as { detail?: unknown; message?: unknown; error?: unknown } | null;
   const raw = d ? (d.detail ?? d.message ?? d.error) : null;
-  const detail = typeof raw === 'string' && raw ? raw : null;
-  return new ApiError({ status: r.status, detail, ...keyForStatus(r.status) });
+  // An object detail is a structured refusal; its `message` is still the sentence to show.
+  const inner = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as { message?: unknown }).message : null;
+  const detail = typeof raw === 'string' && raw ? raw
+    : typeof inner === 'string' && inner ? inner : null;
+  return new ApiError({
+    status: r.status, detail, ...keyForStatus(r.status),
+    body: raw && typeof raw === 'object' ? raw : undefined,
+  });
 }
 
 /** Parse a body as JSON, or `null` if it is not JSON at all (an nginx HTML error page). */

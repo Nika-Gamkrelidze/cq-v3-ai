@@ -28,7 +28,7 @@ import re
 import httpx
 import pytest
 
-from app.services import ai_resolve, segments, settings_store, voice
+from app.services import ai_resolve, llm, segments, settings_store, voice
 from app.services import transcription as tr
 from app.services.ai_resolve import Resolved
 from app.services.providers import tts_elevenlabs, voice_base
@@ -41,6 +41,15 @@ ORIGINAL = {"audio_format": "original"}     # no ffmpeg; every other setting on 
 def run(coro):
     """Drive one coroutine on its own loop — the house pattern (see conftest.sql)."""
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def no_usage_rows(monkeypatch):
+    """Every voice call meters itself, and that write goes to the app's pool whenever an earlier
+    file has started it. That pool belongs to the TestClient's loop, so reaching it from `run`'s
+    loop kills the portal: every later `api` call fails, or shutdown waits for it forever. Run
+    alone this file never shows it, because nothing has opened the pool yet."""
+    monkeypatch.setattr(llm, "_record", lambda **kw: None)
 
 
 # ---------------------------------------------------------------------------

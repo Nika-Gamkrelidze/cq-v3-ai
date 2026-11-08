@@ -1,0 +1,97 @@
+/* The CRM form editor and the filled-form view. Colours come from the global tokens only, so
+   both themes follow without a second set of rules here. */
+
+.layout { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+.list { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 12px; min-width: 0; }
+@media (max-width: 900px) { .list { position: static; } }
+.item {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; text-align: left;
+  padding: 9px 10px; border-radius: var(--r-sm); border: 1px solid var(--hairline);
+  background: var(--input-bg); color: var(--paper); cursor: pointer; font-size: 13.5px;
+}
+.item:hover { border-color: color-mix(in oklab, var(--beam) 45%, transparent); }
+.item.active { border-color: color-mix(in oklab, var(--beam) 70%, transparent);
+  background: color-mix(in oklab, var(--beam) 10%, var(--input-bg)); }
+.item.bad { border-color: color-mix(in oklab, var(--alert) 60%, transparent); }
+.itemMain { flex: 1; min-width: 0; }
+.itemLabel { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.itemMeta { display: block; font-size: 11px; color: var(--muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { font-size: 11px; color: var(--muted); min-width: 18px; }
+
+.badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+  background: color-mix(in oklab, var(--muted) 18%, transparent); color: var(--mist); white-space: nowrap; }
+.badge.derived { background: color-mix(in oklab, var(--ok) 16%, transparent); color: var(--ok); }
+.badge.external { background: color-mix(in oklab, var(--pending) 18%, transparent); color: var(--pending); }
+.badge.fixed { background: color-mix(in oklab, var(--navy-400) 30%, transparent); color: var(--mist); }
+.badge.req { background: color-mix(in oklab, var(--alert) 14%, transparent); color: var(--coral); }
+
+.section { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--hairline); }
+.section h4 { margin: 0 0 8px; font-size: 13.5px; }
+
+.problems { margin: 0 0 14px; padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px;
+  border: 1px solid color-mix(in oklab, var(--alert) 40%, transparent);
+  background: color-mix(in oklab, var(--alert) 7%, transparent); }
+.problems.warnOnly { border-color: color-mix(in oklab, var(--pending) 45%, transparent);
+  background: color-mix(in oklab, var(--pending) 7%, transparent); }
+.problems ul { margin: 6px 0 0; padding-left: 18px; }
+.problems li { margin: 3px 0; }
+.problems button { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+.err { color: var(--coral); }
+.warn { color: var(--pending); }
+
+.optRow { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid color-mix(in oklab, var(--hairline) 60%, transparent); }
+.optRow input { flex: 1; min-width: 0; }
+.optKey { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; flex: 0 0 120px; width: 120px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optTree { color: var(--muted); font-size: 12px; }
+.optDetail { margin: 4px 0 10px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--input-bg) 60%, transparent); }
+.mini { width: 28px !important; height: 28px !important; font-size: 12px; }
+
+.rule { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; margin: 6px 0; }
+.rule > * { flex: 1 1 150px; min-width: 0; }
+.rule > button { flex: 0 0 auto; }
+.checks { max-height: 170px; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  padding: 6px 8px; background: var(--input-bg); }
+.checks label { display: flex; gap: 6px; align-items: center; margin: 3px 0; font-size: 13px; font-weight: 400; }
+
+.slots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.slot { font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 8px; border-radius: 6px;
+  background: color-mix(in oklab, var(--beam) 12%, transparent); color: var(--paper); }
+
+/* ---------------------------------------------------------------- the filled form */
+.head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.label { font-size: 15px; font-weight: 700; }
+.grid { display: grid; grid-template-columns: minmax(150px, 230px) 1fr; border: 1px solid var(--hairline);
+  border-radius: var(--r-md); overflow: hidden; }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+.k, .v { padding: 9px 12px; border-top: 1px solid color-mix(in oklab, var(--hairline) 70%, transparent); font-size: 13.5px; }
+.k { color: var(--mist); font-weight: 600; background: color-mix(in oklab, var(--input-bg) 50%, transparent); }
+.grid > .k:first-child, .grid > .k:first-child + .v { border-top: 0; }
+@media (max-width: 640px) { .v { border-top: 0; padding-top: 0; } }
+.missing { box-shadow: inset 3px 0 0 var(--coral); }
+.na { opacity: .55; }
+.value { white-space: pre-wrap; word-break: break-word; }
+.empty { color: var(--muted); font-style: italic; }
+.edited { font-size: 10.5px; color: var(--pending); margin-left: 6px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+.conf { display: inline-flex; gap: 2px; }
+.conf i { width: 6px; height: 6px; border-radius: 50%; background: var(--hairline); display: inline-block; }
+.conf i.on { background: var(--ok); }
+.quote { cursor: pointer; padding: 1px 8px; border-radius: 6px; font-size: 12px;
+  background: color-mix(in oklab, var(--beam) 9%, transparent); color: var(--mist); }
+.quote:hover, .quote:focus-visible { background: color-mix(in oklab, var(--beam) 18%, transparent); outline: none; }
+.formRow { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.formRow > div { flex: 1 1 220px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.pick { text-align: left; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--hairline);
+  background: var(--input-bg); color: var(--paper); cursor: pointer; font: inherit; }
+.pick:hover { border-color: color-mix(in oklab, var(--beam) 55%, transparent); }
+.pick b { display: block; margin-bottom: 4px; }
+
+.formsTable td { vertical-align: middle; }
+.diff { font-size: 12.5px; margin: 6px 0 0; padding-left: 18px; }

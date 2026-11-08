@@ -31,6 +31,7 @@ import { useI18n } from '@/lib/useI18n';
 import { AiTab } from './AiTab';
 import { AnalyseTab } from './AnalyseTab';
 import { BotTab } from './BotTab';
+import { CrmTab } from './CrmTab';
 import { makeJson, makeSend, SCOPE, WsContext, type TabName, type Ws } from './ctx';
 import { Gate } from './Gate';
 import { HealthTab } from './HealthTab';
@@ -69,6 +70,9 @@ const TABS: { key: TabName; icon: string; label: string }[] = [
   { key: 'kb', icon: '📚', label: 'tab.kb' },
   { key: 'analyze', icon: '🎧', label: 'tab.analyze' },
   { key: 'rubric', icon: '🎯', label: 'tab.scoring' },
+  /* Beside the rubric: the other thing a workspace defines once and every analysed call is
+     measured against — here, the CRM form the AI fills from the call. */
+  { key: 'crm', icon: '📋', label: 'crm.forms.tab' },
   /* Beside the rubric because the rubric now DEPENDS on it: the courtesy dimension is scored
      from the tone analyser this tab configures, so the guidance written here moves a number on
      every scorecard. It also carries the only place in the product that says out loud whether
@@ -280,10 +284,10 @@ export default function WorkspacePage() {
 
   const showTab = useCallback((next: TabName) => { setTab(next); }, []);
 
-  /* The workbench's "edit the rubric" is an <a href="/workspace#rubric"> inside a component
-     this page does not own, so the hash is the contract. Handled BOTH ways: the capture-phase
-     click below keeps it a tab switch rather than a navigation, and `hashchange` catches a link
-     followed from anywhere else (or a bookmark). */
+  /* The workbench's "edit the rubric" and "edit the forms" are <a href="/workspace#rubric">
+     and `#crm` inside components this page does not own, so the hash is the contract. Handled
+     BOTH ways: the capture-phase click below keeps it a tab switch rather than a navigation,
+     and `hashchange` catches a link followed from anywhere else (or a bookmark). */
   useEffect(() => {
     const fromHash = () => {
       const h = location.hash.slice(1) as TabName;
@@ -294,11 +298,25 @@ export default function WorkspacePage() {
     return () => window.removeEventListener('hashchange', fromHash);
   }, []);
 
+  /* EVERY link to a tab of this page, not just the rubric's. `hashchange` cannot be the only
+     handler for the rest of them: it fires when the fragment CHANGES, and nothing here ever
+     writes the hash back, so the second click on `/workspace#crm` — the URL the first click
+     already left in the bar — does nothing at all. The same click is also a full document load
+     for an operator who arrived at `/workspace?tenant=<uuid>`, because the target differs from
+     the current URL outside the fragment, and reloading the SPA abandons the recording loaded
+     in the workbench. A path is matched before the hash so a `#crm` on some other page stays a
+     navigation. */
   const onAppClick = useCallback((e: React.MouseEvent) => {
-    const a = (e.target as HTMLElement).closest?.('a[href$="#rubric"]');
-    if (!a) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;   // a new tab or window, not this one
+    const href = (e.target as HTMLElement).closest?.('a[href]')?.getAttribute('href') || '';
+    const cut = href.indexOf('#');
+    if (cut < 0) return;
+    const path = href.slice(0, cut);
+    if (path && path !== '/workspace' && path !== location.pathname) return;
+    const hash = href.slice(cut + 1) as TabName;
+    if (!TAB_KEYS.includes(hash)) return;
     e.preventDefault();
-    setTab('rubric');
+    setTab(hash);
   }, []);
 
   const openRecording = useCallback((id: string) => {
@@ -385,6 +403,7 @@ export default function WorkspacePage() {
           <section className={`panel${tab === 'kb' ? ' active' : ''}`}><KbTab on={tab === 'kb'} gen={genState} /></section>
           <section className={`panel${tab === 'analyze' ? ' active' : ''}`}><AnalyseTab wbRef={wbRef} /></section>
           <section className={`panel${tab === 'rubric' ? ' active' : ''}`}><RubricTab on={tab === 'rubric'} gen={genState} /></section>
+          <section className={`panel${tab === 'crm' ? ' active' : ''}`}><CrmTab on={tab === 'crm'} gen={genState} /></section>
           <section className={`panel${tab === 'sentiment' ? ' active' : ''}`}><SentimentTab on={tab === 'sentiment'} gen={genState} /></section>
           <section className={`panel${tab === 'transcription' ? ' active' : ''}`}><TranscriptionTab on={tab === 'transcription'} gen={genState} /></section>
           <section className={`panel${tab === 'ai' ? ' active' : ''}`}><AiTab on={tab === 'ai'} gen={genState} /></section>

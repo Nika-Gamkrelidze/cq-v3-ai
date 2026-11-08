@@ -66,6 +66,9 @@ export function AnalyseTab({ wbRef }: { wbRef: RefObject<WorkbenchHandle | null>
       // that would only ever answer 403.
       canEditScores={canConfigure}
       sentimentConfig={sentimentConfig}
+      // The workspace's CRM forms; "edit the forms" is a link to the CRM tab, like the rubric's.
+      // `epoch` reloads the form list when an operator switches workspace.
+      crm={{ formsHref: '/workspace#crm', epoch: ws.tid }}
       // XHR uploads bypass the page's own error path, so the workbench reports its 401s back
       // here — one expired session, one gate, exactly as everywhere else on this page.
       onUnauthorized={unauthorized}

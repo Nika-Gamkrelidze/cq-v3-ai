@@ -215,7 +215,7 @@ def test_users_recording_is_invisible_to_tenants_other_users_and_anonymous(api, 
     assert rec in _ids(api.get("/recordings", headers=a["headers"]))
     listed = [x for x in api.get("/recordings", headers=a["headers"]).json() if x["id"] == rec][0]
     assert listed["has_audio"] is False and listed["source"] == "text"
-    assert listed["ran"] == {"factcheck": False, "score": False, "semantic": False}
+    assert listed["ran"] == {"factcheck": False, "score": False, "semantic": False, "crm": False}
     # The owner's own audio link answers with the purge wording, not "not found".
     r = api.get(f"/recordings/{rec}/audio", headers=a["headers"])
     assert r.status_code == 404 and r.json()["detail"] == "Audio no longer stored"

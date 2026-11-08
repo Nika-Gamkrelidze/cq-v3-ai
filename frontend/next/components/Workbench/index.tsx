@@ -32,6 +32,7 @@ import {
   forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
 import { Timeline, type TimelineHandle } from '@/components/Timeline';
+import { CrmPanel } from '@/components/crm/CrmPanel';
 import { toast } from '@/components/ui/Toast';
 import { Tip } from '@/components/ui/Tip';
 import { bandsFrom, DEFAULT_BANDS, scoreBand, type ScoreBands } from '@/lib/aiShapes';
@@ -89,6 +90,9 @@ export interface WorkbenchProps {
   canEditScores?: boolean;
   sentimentConfig?: SentimentConfigIO | null;
   onUnauthorized?: () => void;
+  /** Show the CRM-form section, and where "edit the forms" goes. Workspace scope only: CRM
+      forms belong to a workspace, and a personal account has none. `undefined` hides it. */
+  crm?: { formsHref: string | null; epoch?: string };
 }
 
 /** How one analyser run ended. `skip` = nothing was sent (no source, or no mode picked). */
@@ -116,7 +120,9 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
   const [mode, setMode] = useState<'audio' | 'text'>('audio');
   const [files, setFiles] = useState<File[]>([]);
   const [paste, setPaste] = useState('');
-  const [tab, setTabState] = useState<Feature | 'all'>(order[0] || 'score');
+  /* 'crm' is a tab but not a Feature: it is no check in "All at once", has no timeline lane
+     and keeps its results in its own panel (`components/crm/CrmPanel.tsx`). */
+  const [tab, setTabState] = useState<Feature | 'all' | 'crm'>(order[0] || 'score');
   const [source, setSource] = useState<SourceState | null>(null);
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [bands, setBands] = useState<ScoreBands>(DEFAULT_BANDS);
@@ -920,6 +926,16 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
               {t('wb.tab.all')}
             </button>
           ) : null}
+          {props.crm && scope === 'tenant' ? (
+            <button
+              type="button" role="tab"
+              className={`subtab${tab === 'crm' ? ' active' : ''}`}
+              aria-selected={tab === 'crm'}
+              onClick={() => setTabState('crm')}
+            >
+              {t('crm.tab')}
+            </button>
+          ) : null}
         </div>
 
         {order.map(k => {
@@ -1067,6 +1083,16 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(function Wo
                 })}
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {props.crm && scope === 'tenant' ? (
+          <div className={`wb-pane${tab === 'crm' ? ' active' : ''}`} data-an="crm" role="tabpanel">
+            <CrmPanel
+              callId={activeCall?.id || null} scope={scope} onSeek={seek} callIndex={activeIndex}
+              formsHref={props.crm.formsHref} epoch={props.crm.epoch} active={tab === 'crm'}
+              onUnauthorized={onUnauthorized}
+            />
           </div>
         ) : null}
       </section>

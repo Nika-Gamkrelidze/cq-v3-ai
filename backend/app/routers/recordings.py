@@ -736,7 +736,10 @@ async def list_recordings(limit: int = 20, principal: Principal = Depends(resolv
                    audio_path IS NOT NULL AS has_audio,
                    kb_check IS NOT NULL AS ran_factcheck,
                    scoring  IS NOT NULL AS ran_score,
-                   semantic IS NOT NULL AS ran_semantic
+                   semantic IS NOT NULL AS ran_semantic,
+                   EXISTS (SELECT 1 FROM crm_results c
+                           WHERE c.job_id = audio_jobs.id
+                             AND c.client_id = audio_jobs.client_id) AS ran_crm
             FROM audio_jobs WHERE {where} ORDER BY created_at DESC LIMIT ${len(args)+1}
             """, *args, limit)
     return [{
@@ -747,7 +750,7 @@ async def list_recordings(limit: int = 20, principal: Principal = Depends(resolv
         # without an author is just a thing that happened.
         "created_by": r["created_by"],
         "ran": {"factcheck": r["ran_factcheck"], "score": r["ran_score"],
-                "semantic": r["ran_semantic"]},
+                "semantic": r["ran_semantic"], "crm": r["ran_crm"]},
     } for r in rows]
 
 

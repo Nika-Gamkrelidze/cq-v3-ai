@@ -8,6 +8,7 @@ import AiProvidersTab from './AiProvidersTab';
 import AnonymousTab from './AnonymousTab';
 import BotControlTab from './BotControlTab';
 import DefaultBotTab from './DefaultBotTab';
+import DefaultCrmTab from './DefaultCrmTab';
 import DefaultRubricTab from './DefaultRubricTab';
 import EmbeddingsTab from './EmbeddingsTab';
 import HealthTab from './HealthTab';
@@ -50,7 +51,7 @@ import VoicesTab from './VoicesTab';
 
 type TabKey =
   | 'tenants' | 'health' | 'users' | 'embeddings' | 'anon' | 'storage'
-  | 'defrubric' | 'defbot' | 'ai' | 'integrations' | 'voices' | 'bot';
+  | 'defrubric' | 'defcrm' | 'defbot' | 'ai' | 'integrations' | 'voices' | 'bot';
 
 /* Tab strip order, from the legacy DOM. It is not alphabetical and not grouped by subject: it
    is roughly how often an operator reaches for each one. Health sits second because on a bad
@@ -63,6 +64,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'anon', label: 'adm.anon' },
   { key: 'storage', label: 'pb.storage' },
   { key: 'defrubric', label: 'pb.defrubric' },
+  { key: 'defcrm', label: 'crm.def.tab' },
   { key: 'defbot', label: 'pb.defbot' },
   { key: 'ai', label: 'ai.tab' },
   { key: 'integrations', label: 'adm.integrations' },
@@ -151,6 +153,9 @@ export default function ConsolePage() {
         <Panel id="anon" tab={tab}><AnonymousTab /></Panel>
         <Panel id="storage" tab={tab}><StorageTab /></Panel>
         <Panel id="defrubric" tab={tab}><DefaultRubricTab /></Panel>
+        {/* Mounted on activation, like the bot tabs: its routes ship with the CRM feature, and a
+            console one deploy ahead of its backend must still open. */}
+        <Panel id="defcrm" tab={tab}>{tab === 'defcrm' ? <DefaultCrmTab /> : null}</Panel>
         {/* Mounted on activation — see the note at the top of the file. */}
         <Panel id="defbot" tab={tab}>{tab === 'defbot' ? <DefaultBotTab /> : null}</Panel>
         <Panel id="ai" tab={tab}>

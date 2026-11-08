@@ -176,6 +176,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "sentiment": ("semantic_text", "sentiment", "voice_tone"),
     "score": ("scoring",),
     "summary": ("summarise",),
+    "crm": ("crm_fill",),
     "bot": ("autopilot", "triage", "handoff"),
     "copilot": ("copilot",),
     "tts": ("tts",),

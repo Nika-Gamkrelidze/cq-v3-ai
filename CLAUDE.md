@@ -249,6 +249,22 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   / user + a time series), Recordings (tokens per analyser per recording → each call), Chat bot
   (per conversation → per question), All calls. One filter bar (period or custom dates,
   workspace, analyser, provider, model, kind, status); the lists sort and page server-side.
+- **CRM analyser — fill the customer's CRM form from a call** (`services/crm_form.py` the
+  definition and its rules, `crm_extract.py` the fill, `crm_store.py`, `crm_xlsx.py`,
+  `crm_presets.py`, `routers/crm.py`, `db/crm.sql`; format reference **`docs/CRM_FORMS.md`**).
+  A workspace defines any number of **CRM forms** (workspace tab *CRM forms*; one is primary):
+  typed fields (text, number, money, percent, date/time, yes/no, phone, email, choice,
+  multi-choice, template), a value **source** per field (`ai` | `derived` via another option's
+  `implies` | `external` = the CRM fills it, never guessed | `fixed`), option **trees** with
+  descriptions and signal keywords, **conditions** (`when`), **dependent dropdowns**
+  (`filter_by`) and **text templates** rendered by code. Until a workspace saves a form it
+  fills the **default** (`app_settings['default_crm_form']`, console tab *Default CRM form*,
+  else `crm_presets.BUILTIN_DEFAULT`). Filling is ON DEMAND in *Analyse a call* → **CRM form**
+  (`POST /recordings/{id}/crm`, one `analyses` unit, feature `crm_fill`); the result is a
+  **draft** a person reviews and approves (`PATCH /crm/results/{id}`; the reviewer's values sit
+  in `crm_results.final` beside the model's, never over them). Import/export as JSON or Excel
+  with a preview + diff before anything is saved; the editor validates live through the same
+  `normalize_definition` every save runs.
 
 **All AI structured outputs use forced tool-use with `strict: true` schemas + array-normalization**
 (`_as_str_list`) so the model can't return a shape that crashes the UI.
@@ -278,7 +294,7 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `scoring.sql`, `partner.sql`, `chat.sql`, **`curation.sql`** (after `chat.sql` — same feature's
   second half), `kb_ops.sql`, `media.sql`, … in a **hardcoded** order — `analyzer.sql` first because
   it creates `app_settings`, read during startup; a new `db/*.sql` that is not added to that list
-  never runs; **`health.sql` is the last entry**). Only the api runs migrations — `cq-worker`
+  never runs; **`crm.sql` is the last entry**). Only the api runs migrations — `cq-worker`
   waits for its tables instead. No Alembic yet; column changes must stay `ADD COLUMN IF NOT EXISTS`.
 - **Server health sampler lives inside Docker.** psutil's CPU / load / memory numbers come from
   `/proc`, i.e. the **host** (all containers share the kernel), while the network counters are the
@@ -571,6 +587,23 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   /summaries` still takes files. **Not done:** the one-click flow handles one recording (a
   multi-file queue is refused with a pointer to Summarise), and a transcription that fails or is
   cancelled keeps its reserved unit, as every upload always has.
+- **2026-11-03 — the CRM analyser (built, NOT yet deployed).** The owner asked for AI that
+  labels a call and fills the tenant's own CRM form, configurable per workspace, with
+  import/export and a default for everyone; a medical-insurance call centre's spreadsheet was
+  the worked example (now the `insurance_ka` preset). Built as §3 describes. **Verified
+  2026-11-04:** the 105 CRM backend tests including `tests/test_crm_api.py` against a real
+  Postgres, the frontend tests, type-check, static build, and a browser pass over the console
+  tab, the editor, fill, review/approve and History. A pre-deploy review then confirmed 24
+  defects, all fixed with regression tests. The two that mattered let one workspace member
+  freeze the single API worker: a workbook is now refused while it is read past the row caps and
+  parsed in a thread (`crm_xlsx._rows`, `asyncio.to_thread`), and keyword lists are capped during
+  the scan. Do not undo: a review PATCH carries **only the changed fields** (both
+  `crm.py::review`, which merges over `final`, and `crmForm.ts::reviewValues`; sending the whole
+  `final` puts a stale tab's copy over a colleague's correction), and `save_form` reads the
+  default form **before** taking a connection (holding one while asking for another deadlocks the
+  pool). **Not verified:** a real model filling a form, because the local stack has no provider
+  key; the fill has only run against a scripted model. **Next:** the owner will supply customers'
+  CRM field lists to turn into import files (`docs/CRM_FORMS.md` §Onboarding).
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.

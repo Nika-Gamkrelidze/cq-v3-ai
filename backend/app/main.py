@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, chat_config,
-                     convert, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
+                     convert, crm, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
                      tenants, transcription as transcription_router, tts, usage_admin)
 from .config import settings
 from .services import ai_registry, ai_resolve, analysis, settings_store
@@ -330,6 +330,9 @@ app.include_router(transcription_router.router)
 # Call Workbench: /recordings + /summaries. Root only, never under /v1 — it admits registered
 # users and anonymous visitors, neither of which belongs on the partner surface.
 app.include_router(recordings.router)
+# CRM analyser: /crm/* (a workspace's forms, import/export, review), /recordings/{id}/crm (fill
+# one from a call) and /admin/crm/default-form. Root only: workspace and superadmin surfaces.
+app.include_router(crm.router)
 # AI provider registry: /admin/ai/* (connections, assignments, catalog — superadmin) and
 # /ai/config (the workspace's own keys — owner). Root only, like the other settings routers.
 app.include_router(ai_admin.router)

@@ -31,8 +31,13 @@ const fmtSecs = (v: number | null | undefined) =>
 function RanChips({ t, ran }: { t: T; ran: Recording['ran'] }) {
   const r = (ran && typeof ran === 'object') ? ran : {};
   const on = (['factcheck', 'score', 'semantic'] as const).filter(k => r[k]);
-  if (!on.length) return <span className="hint">—</span>;
-  return <>{on.map(k => <span className="chip" key={k}>{t('wb.tab.' + k)}</span>)}</>;
+  if (!on.length && !r.crm) return <span className="hint">—</span>;
+  return (
+    <>
+      {on.map(k => <span className="chip" key={k}>{t('wb.tab.' + k)}</span>)}
+      {r.crm ? <span className="chip">{t('crm.tab')}</span> : null}
+    </>
+  );
 }
 
 /* Who ran it. Every user in the workspace sees the same History, so the author is what makes a

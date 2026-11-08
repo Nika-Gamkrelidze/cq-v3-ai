@@ -20,7 +20,7 @@ import {
 
 export type T = (key: string, vars?: Record<string, string | number>) => string;
 
-export type TabName = 'kb' | 'analyze' | 'rubric' | 'sentiment' | 'transcription' | 'ai' | 'health' | 'bot' | 'history';
+export type TabName = 'kb' | 'analyze' | 'rubric' | 'crm' | 'sentiment' | 'transcription' | 'ai' | 'health' | 'bot' | 'history';
 
 /** Every tenant-scoped call this page makes runs at this scope. Named once so a call site
  *  cannot quietly pick a different credential — see `lib/session.ts` §Scope. */
@@ -36,6 +36,8 @@ export interface Sent<D = unknown> {
   data: D | null;
   /** Already rendered in the visitor's language: the server's own words when it sent any. */
   error: string;
+  /** The server's structured refusal, when it sent one (`ApiError.body`). */
+  body?: unknown;
 }
 
 export interface Ws {
@@ -131,7 +133,8 @@ export function makeSend(funnel: (e: unknown) => void, t: T) {
     } catch (e) {
       funnel(e);
       const status = e instanceof ApiError ? e.status : 0;
-      return { ok: false, status, data: null, error: apiMessage(e, t) };
+      return { ok: false, status, data: null, error: apiMessage(e, t),
+               body: e instanceof ApiError ? e.body : undefined };
     }
   };
 }
