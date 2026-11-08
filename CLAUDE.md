@@ -609,7 +609,7 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   /summaries` still takes files. **Not done:** the one-click flow handles one recording (a
   multi-file queue is refused with a pointer to Summarise), and a transcription that fails or is
   cancelled keeps its reserved unit, as every upload always has.
-- **2026-11-03 — the CRM analyser (built, NOT yet deployed).** The owner asked for AI that
+- **2026-11-03 — the CRM analyser (deployed 2026-11-08).** The owner asked for AI that
   labels a call and fills the tenant's own CRM form, configurable per workspace, with
   import/export and a default for everyone; a medical-insurance call centre's spreadsheet was
   the worked example (now the `insurance_ka` preset). Built as §3 describes. **Verified
@@ -623,9 +623,27 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `crm.py::review`, which merges over `final`, and `crmForm.ts::reviewValues`; sending the whole
   `final` puts a stale tab's copy over a colleague's correction), and `save_form` reads the
   default form **before** taking a connection (holding one while asking for another deadlocks the
-  pool). **Not verified:** a real model filling a form, because the local stack has no provider
-  key; the fill has only run against a scripted model. **Next:** the owner will supply customers'
-  CRM field lists to turn into import files (`docs/CRM_FORMS.md` §Onboarding).
+  pool). **Verified with a real model 2026-11-09:** `backend/scripts/crm_scenarios.py` traces
+  the call centre's spreadsheet to `insurance_ka` (`coverage`: 130 requirements, 0 gaps) and
+  fills 23 written Georgian calls with the deployment's model (`run --from-settings`, on the
+  server inside the api image): 19/23 → **23/23** after the preset's descriptions were
+  sharpened. What the misses taught, do not undo: option descriptions decide most choices
+  (reaction "monitoring" only when a follow-up is SAID; "% confirmed" only when a CLINIC calls;
+  phone consult only when the doctor phones; a medicine-referral question is `medicines`), and
+  agents' shorthand from a "how they write it now" column (`100%`, `50%`) must not become
+  signal keywords — it drags every call that mentions a percentage. The calls were written by
+  us and the form tuned on them, so real reviewed drafts are the honest accuracy measure.
+  **Next:** the owner will supply customers' CRM field lists to turn into import files
+  (`docs/CRM_FORMS.md` §Onboarding).
+- **2026-11-09 — voice tone has a measurement, not yet a verdict.** The sidecar works (local
+  and production), but its checkpoint was trained on acted English studio speech with four
+  labels and has never been checked on Georgian phone calls; on calm IVR announcements it
+  painted 3 of 13 turns "angry", one at 91 %. `backend/scripts/voice_tone_eval.py` builds a
+  blind listening test from one workspace's real calls (`export`: clips + a sheet without the
+  model's answers + a separate answer key) and scores it (`score`: agreement vs. an
+  always-neutral baseline, kappa, precision/recall of "upset" by confidence). Read-only on the
+  product. Until it is run, the tooltip calls voice tone an early-stage hint and nothing
+  scores from it (the courtesy dimension reads the WORDS).
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.
