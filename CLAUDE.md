@@ -247,8 +247,22 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `turn_id` (the customer message that caused it) + `suggest_ref` (tells a regeneration from
   the original). Tabs: Overview (breakdowns by workspace / analyser / provider / model / feature
   / user + a time series), Recordings (tokens per analyser per recording → each call), Chat bot
-  (per conversation → per question), All calls. One filter bar (period or custom dates,
-  workspace, analyser, provider, model, kind, status); the lists sort and page server-side.
+  (per conversation → per question), All calls, **Prices & markup**. One filter bar (period or
+  custom dates, workspace, analyser, provider, model, kind, status); the lists sort and page
+  server-side. **Superadmin only at every layer** — `require_admin` on the router (pinned by
+  `tests/test_usage_superadmin_only.py`), the nav link, and the page itself sends a signed-in
+  tenant to `/workspace`.
+- **AI cost in USD, for billing** (`services/pricing.py`, `db/pricing.sql`, `/usage` →
+  *Prices & markup*; decided 2026-11-09: historical price, raw cost + markup, superadmin only,
+  USD only). The operator keeps a **versioned price list** (`ai_prices`: provider + model or
+  `*` + optional kind; USD per 1M input/output/cache-write/cache-read tokens, per hour of audio,
+  per 1K characters; `effective_from`) and **versioned markup** (`ai_markups`: a default plus
+  per-workspace overrides; a NULL pct on an override = "back to the default from this date").
+  Every call is costed at the price and markup **in force when it ran**; the result is stored
+  on the call (`llm_usage.cost_usd / markup_pct / billed_usd / price_id`) and every report
+  sums it — cost to us, to bill, margin, per workspace / analyser / model / recording /
+  conversation / call, plus a cost-per-day chart. The tab also lists **models that made calls
+  with no price** (pre-filled with the first call's date so a back-dated price covers them).
 - **CRM analyser — fill the customer's CRM form from a call** (`services/crm_form.py` the
   definition and its rules, `crm_extract.py` the fill, `crm_store.py`, `crm_xlsx.py`,
   `crm_presets.py`, `routers/crm.py`, `db/crm.sql`; format reference **`docs/CRM_FORMS.md`**).
@@ -294,7 +308,8 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   `scoring.sql`, `partner.sql`, `chat.sql`, **`curation.sql`** (after `chat.sql` — same feature's
   second half), `kb_ops.sql`, `media.sql`, … in a **hardcoded** order — `analyzer.sql` first because
   it creates `app_settings`, read during startup; a new `db/*.sql` that is not added to that list
-  never runs; **`crm.sql` is the last entry**). Only the api runs migrations — `cq-worker`
+  never runs; **`pricing.sql` is the last entry** and must stay last — its costing function
+takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   waits for its tables instead. No Alembic yet; column changes must stay `ADD COLUMN IF NOT EXISTS`.
 - **Server health sampler lives inside Docker.** psutil's CPU / load / memory numbers come from
   `/proc`, i.e. the **host** (all containers share the kernel), while the network counters are the
@@ -369,6 +384,21 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   account behind the key is empty (prepay is the default for AI Studio accounts since 2026-03-23,
   and every key on that billing account stops at once) and 429 for a named per-minute/per-day/spend
   cap — our wording alone cannot say which account or which limit.
+- **Money on `/usage` — rules that must not regress** (`db/pricing.sql`, `services/pricing.py`).
+  The costing rule lives ONCE, in SQL `usage_price(llm_usage)`: exact model beats `*`, a named
+  kind beats "any kind", then the newest version with `effective_from <= created_at`. A call
+  with **no price for what it consumed is `cost_usd` NULL, never 0** — it shows as "no price",
+  is counted in `unpriced_calls`, and the totals say they are a floor; that includes a price row
+  that bills none of the call's units (an audio-only transcription against a tokens-only row).
+  Calls on a workspace's **own key** (`byo`) and the **local** voice-tone model cost 0. Cost is
+  **stored, not computed on read**: a trigger costs each call as it is inserted (or when a
+  column it depends on changes), and each price/markup write re-costs only the calls it can
+  reach (that provider's calls / that workspace's, from the earliest date involved; writing
+  only rows whose answer changed) in the same transaction. Costing on read — the first
+  version, a view — made the overview 44 s at 200k calls; stored, 3 s (the token baseline).
+  Editing a price row in place re-prices what it covered (that is a correction); a price change
+  from now on is a NEW row dated today. Provider prices are entered by the operator — **never
+  hardcode a list price** in code.
 - **Usage units and attribution (`/usage`).** Providers bill in different units and the page
   never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
   carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has
@@ -644,6 +674,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   always-neutral baseline, kappa, precision/recall of "upset" by confidence). Read-only on the
   product. Until it is run, the tooltip calls voice tone an early-stage hint and nothing
   scores from it (the courtesy dimension reads the WORDS).
+- **2026-11-09 — `/usage` turned into a billing report.** The owner asked for dollar costs
+  from dynamic token prices so customers can be billed per workspace, per AI service and per
+  recording; decisions: price at the time of the call, raw cost + markup, superadmin only, USD.
+  Built as §3/§4 describe, plus the page now refuses tenants on the screen as well as the API.
+  The slowness the owner reported in the filters could not be reproduced on production (every
+  filter, tab and search under 0.3 s at ~900 calls). **Not done:** the price list starts
+  EMPTY — every call reads "no price" until the operator enters real provider prices in
+  *Prices & markup* (back-dated to cover history); no invoice export (CSV/PDF) yet; no GEL.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.

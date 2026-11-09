@@ -4,8 +4,8 @@ import type { JSX, KeyboardEvent, ReactNode } from 'react';
 import { LineChart, type ChartPoint, type ChartSeries } from '@/components/ui/LineChart';
 import { loadOverview } from './Filters';
 import { LoadError } from './listKit';
-import { cached, duration, fmt, nextSort, providerModel, sortRows, usageQuery, when } from './logic';
-import { SortTh, Stat, groupLabel } from './parts';
+import { cached, duration, fmt, markupOf, nextSort, providerModel, sortRows, usageQuery, usd, when } from './logic';
+import { MoneySum, SortTh, Stat, groupLabel } from './parts';
 import type { Overview, SortState, T, TabProps, Totals } from './types';
 
 /* Overview: the totals for whatever the filter bar selects, the token curve over the range,
@@ -26,9 +26,9 @@ const MAX_POINTS = 2000;
     across the quiet week in between. Buckets are `date_trunc` in UTC, i.e. whole multiples of
     the step in epoch milliseconds, so they can be regenerated exactly. `to` is exclusive (a
     custom range ends at the next midnight), hence the millisecond back. */
-function tokenPoints(ov: Overview): ChartPoint[] {
+function seriesPoints(ov: Overview, value: (p: Overview['series'][number]) => number): ChartPoint[] {
   const step = STEP_MS[ov.bucket] ?? STEP_MS.day;
-  const raw = ov.series.map(p => ({ t: Date.parse(p.t), v: p.total_tokens }));
+  const raw = ov.series.map(p => ({ t: Date.parse(p.t), v: value(p) }));
   const start = Math.floor(Date.parse(ov.from) / step) * step;
   const end = Math.floor((Date.parse(ov.to) - 1) / step) * step;
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || (end - start) / step > MAX_POINTS) {
@@ -41,8 +41,13 @@ function tokenPoints(ov: Overview): ChartPoint[] {
 }
 
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const money = (v: number) => (Math.abs(v) >= 1000 ? `$${compact.format(v)}` : usd(v));
 
-export default function OverviewTab({ filters, onFilter, t }: TabProps): JSX.Element {
+type Metric = 'cost' | 'tokens';
+
+export default function OverviewTab({ filters, onFilter, onPrices, t }: TabProps): JSX.Element {
+  // Money is what the page is for once prices exist; until then the curve stays in tokens.
+  const [metric, setMetric] = useState<Metric | null>(null);
   const [data, setData] = useState<Overview | null>(null);
   // null = no error. The thrown value itself is kept and worded at render time (`LoadError`
   // -> apiMessage), so the operator reads the server's sentence or a translated one — never a
@@ -77,7 +82,8 @@ export default function OverviewTab({ filters, onFilter, t }: TabProps): JSX.Ele
     // Hour buckets on a range that crosses midnight repeat their HH:MM, so the day is added;
     // day buckets are UTC days and are labelled as such, or a viewer west of UTC would see
     // every bar one day early.
-    const pts = tokenPoints(data);
+    const show: Metric = metric ?? (data.total.cost_usd > 0 ? 'cost' : 'tokens');
+    const pts = seriesPoints(data, p => (show === 'cost' ? p.cost_usd : p.total_tokens));
     const multiDay = pts.length > 1 && pts[pts.length - 1].t - pts[0].t >= STEP_MS.day;
     const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
     const dayLocal = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -85,9 +91,14 @@ export default function OverviewTab({ filters, onFilter, t }: TabProps): JSX.Ele
     const formatX = data.bucket === 'hour'
       ? (ts: number) => (multiDay ? `${dayLocal.format(ts)} ${time.format(ts)}` : time.format(ts))
       : (ts: number) => dayUtc.format(ts);
-    const series: ChartSeries[] = [{ name: t('usage.th.total'), color: 'var(--beam)', points: pts }];
-    return { series, formatX };
-  }, [data, t]);
+    const series: ChartSeries[] = show === 'cost'
+      ? [
+        { name: t('um.th.billed'), color: 'var(--beam)', points: seriesPoints(data, p => p.billed_usd) },
+        { name: t('um.th.cost'), color: 'var(--muted)', points: pts, dashed: true },
+      ]
+      : [{ name: t('usage.th.total'), color: 'var(--beam)', points: pts }];
+    return { series, formatX, show };
+  }, [data, metric, t]);
 
   if (error !== null) {
     return (
@@ -122,10 +133,30 @@ export default function OverviewTab({ filters, onFilter, t }: TabProps): JSX.Ele
     );
   }
 
+  const avgMarkup = markupOf(tot);
   return (
     <>
       <div className="card">
         {heading}
+        <div className="stat-row">
+          <Stat label={t('um.th.cost')} hint={t('um.cost.hint')}
+            value={<MoneySum m={tot} field="cost_usd" t={t} />} />
+          <Stat label={t('um.markup')} hint={t('um.markup.hint')}
+            value={avgMarkup === null ? '—' : `${avgMarkup.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`} />
+          <Stat label={t('um.th.billed')} hint={t('um.billed.hint')}
+            value={<MoneySum m={tot} field="billed_usd" t={t} strong />} />
+          <Stat label={t('um.margin')} value={usd(tot.billed_usd - tot.cost_usd)} />
+        </div>
+        {tot.unpriced_calls ? (
+          <p className="msg warn" style={{ marginTop: 12 }}>
+            {t('um.unpriced.banner', { n: fmt(tot.unpriced_calls), total: fmt(tot.calls) })}{' '}
+            {onPrices ? <button type="button" className="ghost" onClick={onPrices}>{t('um.unpriced.fix')}</button> : null}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="card">
+        <h3 style={{ margin: '0 0 8px' }}>{t('um.consumption')}</h3>
         <div className="stat-row">
           <Stat label={t('usage.th.total')} value={fmt(tot.total_tokens)} />
           <Stat label={t('usage.th.in')} value={fmt(tot.input_tokens)} />
@@ -147,13 +178,27 @@ export default function OverviewTab({ filters, onFilter, t }: TabProps): JSX.Ele
 
       {chart ? (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px' }}>{t(data.bucket === 'hour' ? 'usage.chart.hour' : 'usage.chart.day')}</h3>
+          <div className="inline wrap" style={{ justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>
+              {chart.show === 'cost'
+                ? t(data.bucket === 'hour' ? 'um.chart.hour' : 'um.chart.day')
+                : t(data.bucket === 'hour' ? 'usage.chart.hour' : 'usage.chart.day')}
+            </h3>
+            <div className="inline" role="group" aria-label={t('um.chart.metric')} style={{ gap: 6 }}>
+              {(['cost', 'tokens'] as const).map(m => (
+                <button key={m} type="button" className={chart.show === m ? 'primary' : 'ghost'}
+                  aria-pressed={chart.show === m} onClick={() => setMetric(m)}>
+                  {t(`um.metric.${m}`)}
+                </button>
+              ))}
+            </div>
+          </div>
           {/* Tokens only: calls are two or three orders of magnitude smaller and would lie flat
               along the axis on a shared scale, so they are given as a figure instead. */}
           <LineChart
             series={chart.series}
             formatX={chart.formatX}
-            formatY={v => compact.format(v)}
+            formatY={v => (chart.show === 'cost' ? money(v) : compact.format(v))}
             emptyText={t('usage.empty.section')}
           />
           <p className="hint" style={{ margin: '8px 0 0' }}>
@@ -247,7 +292,11 @@ interface NumCol {
     width a phone does not have. */
 function totalsColumns(rows: Totals[], t: T): NumCol[] {
   const cols: NumCol[] = [
-    { key: 'total_tokens', label: t('usage.th.total'), value: r => r.total_tokens, render: r => <b>{fmt(r.total_tokens)}</b>, num: true },
+    { key: 'billed_usd', label: t('um.th.billed'), value: r => r.billed_usd,
+      render: r => <MoneySum m={r} field="billed_usd" t={t} strong />, num: true },
+    { key: 'cost_usd', label: t('um.th.cost'), value: r => r.cost_usd,
+      render: r => <MoneySum m={r} field="cost_usd" t={t} />, num: true },
+    { key: 'total_tokens', label: t('usage.th.total'), value: r => r.total_tokens, render: r => fmt(r.total_tokens), num: true },
     { key: 'input_tokens', label: t('usage.th.in'), value: r => r.input_tokens, render: r => fmt(r.input_tokens), num: true },
     { key: 'output_tokens', label: t('usage.th.out'), value: r => r.output_tokens, render: r => fmt(r.output_tokens), num: true },
     { key: 'cached', label: t('usage.th.cache'), value: r => cached(r), render: r => fmt(cached(r)), num: true },
@@ -286,7 +335,10 @@ function AggTable<R extends Totals>({
   onRow?: (r: R) => (() => void) | null;
   t: T;
 }): JSX.Element {
-  const [sort, setSort] = useState<SortState>({ key: 'total_tokens', dir: 'desc' });
+  // Biggest bill first once anything is priced; by tokens while nothing is.
+  const [sort, setSort] = useState<SortState>(() => ({
+    key: rows.some(r => r.cost_usd > 0) ? 'billed_usd' : 'total_tokens', dir: 'desc',
+  }));
   const nums = useMemo(() => totalsColumns(rows, t), [rows, t]);
 
   // Not memoised: the parent rebuilds `name`/`extra` every render, and a table of a few dozen

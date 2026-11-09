@@ -4,7 +4,7 @@ import type { CSSProperties, JSX, KeyboardEvent, MouseEvent, ReactNode, RefObjec
 import { Tip } from '@/components/ui/Tip';
 import { apiGet, apiMessage } from '@/lib/session';
 import { cached, duration, fmt } from './logic';
-import { Stat } from './parts';
+import { MoneySum, Stat } from './parts';
 import type { SortState, T, Totals } from './types';
 
 /* The plumbing the three server-sorted lists and the two drill-downs share: one fetch hook,
@@ -282,6 +282,8 @@ export const KV_GRID = {
 export function TotalsStats({ total, t, extra }: { total: Totals; t: T; extra?: ReactNode }): JSX.Element {
   return (
     <div className="stat-row">
+      <Stat label={t('um.th.cost')} value={<MoneySum m={total} field="cost_usd" t={t} />} />
+      <Stat label={t('um.th.billed')} value={<MoneySum m={total} field="billed_usd" t={t} />} />
       <Stat label={t('usage.th.total')} value={fmt(total.total_tokens)} />
       <Stat label={t('usage.th.in')} value={fmt(total.input_tokens)} />
       <Stat label={t('usage.th.out')} value={fmt(total.output_tokens)} />

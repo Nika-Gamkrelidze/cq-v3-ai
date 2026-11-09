@@ -57,32 +57,32 @@ async def overview(f: usage.UsageFilter) -> dict:
     grp, prov, cap = usage.group_sql(), usage.provider_sql(), usage.capability_sql()
 
     async with pool().acquire() as conn:
-        total = await conn.fetchrow(f"SELECT {totals} FROM llm_usage u WHERE {where}", *args)
+        total = await conn.fetchrow(f"SELECT {totals} FROM {usage.PRICED} u WHERE {where}", *args)
 
         # LEFT JOIN from usage: `llm_usage.client_id` is ON DELETE SET NULL, so a deleted
         # workspace's calls survive with a null id and must still add up to the total.
         by_tenant = await conn.fetch(f"""
             SELECT u.client_id, COALESCE(c.name, '—') AS name, c.slug, {totals}
-              FROM llm_usage u LEFT JOIN clients c ON c.id = u.client_id
+              FROM {usage.PRICED} u LEFT JOIN clients c ON c.id = u.client_id
              WHERE {where}
              GROUP BY u.client_id, c.name, c.slug
              ORDER BY total_tokens DESC""", *args)
 
         by_group = await conn.fetch(f"""
-            SELECT {grp} AS "group", {totals} FROM llm_usage u WHERE {where}
+            SELECT {grp} AS "group", {totals} FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1 ORDER BY total_tokens DESC""", *args)
 
         by_feature = await conn.fetch(f"""
-            SELECT u.feature, {grp} AS "group", {totals} FROM llm_usage u WHERE {where}
+            SELECT u.feature, {grp} AS "group", {totals} FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1, 2 ORDER BY total_tokens DESC""", *args)
 
         by_provider = await conn.fetch(f"""
-            SELECT {prov} AS provider, {totals} FROM llm_usage u WHERE {where}
+            SELECT {prov} AS provider, {totals} FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1 ORDER BY total_tokens DESC""", *args)
 
         by_model = await conn.fetch(f"""
             SELECT {prov} AS provider, u.model, {cap} AS capability, {totals}
-              FROM llm_usage u WHERE {where}
+              FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1, 2, 3 ORDER BY total_tokens DESC""", *args)
 
         # Grouped by the COALESCEd actor, so a null actor and none at all are one row. The
@@ -90,7 +90,7 @@ async def overview(f: usage.UsageFilter) -> dict:
         by_user = await conn.fetch(f"""
             SELECT COALESCE(u.actor, 'unattributed') AS actor, u.client_id,
                    COALESCE(c.name, '—') AS name, {totals}
-              FROM llm_usage u LEFT JOIN clients c ON c.id = u.client_id
+              FROM {usage.PRICED} u LEFT JOIN clients c ON c.id = u.client_id
              WHERE {where}
              GROUP BY 1, 2, 3 ORDER BY total_tokens DESC LIMIT {TOP_USERS}""", *args)
 
@@ -102,8 +102,9 @@ async def overview(f: usage.UsageFilter) -> dict:
                    COALESCE(SUM(u.input_tokens), 0)::bigint       AS input_tokens,
                    COALESCE(SUM(u.output_tokens), 0)::bigint      AS output_tokens,
                    COUNT(*)::bigint                               AS calls,
-                   COUNT(*) FILTER (WHERE NOT u.ok)::bigint       AS failed
-              FROM llm_usage u WHERE {where}
+                   COUNT(*) FILTER (WHERE NOT u.ok)::bigint       AS failed,
+                   {usage.money_sql()}
+              FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1 ORDER BY 1""", *args, bucket)
 
         range_where, range_args = usage.where_sql(f, skip=_NON_RANGE)
@@ -155,8 +156,8 @@ async def overview(f: usage.UsageFilter) -> dict:
 # matches the same way, so the two tabs never disagree about one call). The recording join uses
 # IS NOT DISTINCT FROM because a registered user's or an anonymous visitor's recording has no
 # workspace. All four are joins on a primary key, so none of them can multiply a call.
-_CALL_FROM = """
-    FROM llm_usage u
+_CALL_FROM = f"""
+    FROM {usage.PRICED} u
     LEFT JOIN clients c             ON c.id = u.client_id
     LEFT JOIN audio_jobs j          ON j.id = u.job_id AND j.client_id IS NOT DISTINCT FROM u.client_id
     LEFT JOIN chat_conversations cv ON cv.id = u.conversation_id AND cv.client_id = u.client_id
@@ -182,6 +183,8 @@ CALL_SORTS = {
     # provider alone changed nothing.
     "model": f"({usage.provider_sql()} || '/' || u.model)",
     "tenant": "lower(c.name)",
+    "cost_usd": "u.cost_usd",
+    "billed_usd": "u.billed_usd",
 }
 DEFAULT_CALL_SORT = "created_at"
 
@@ -199,7 +202,7 @@ def call_columns() -> str:
         u.job_id, j.filename,
         u.conversation_id, cv.external_ref AS conversation_ref, cv.channel,
         u.turn_id, t.role AS turn_role, left(t.content, 160) AS turn_preview,
-        u.summary_id
+        u.summary_id, u.cost_usd, u.billed_usd, u.markup_pct, u.price_id
     """
 
 

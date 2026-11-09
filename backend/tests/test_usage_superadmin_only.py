@@ -13,7 +13,7 @@ from app.config import settings
 from app.services import auth
 from conftest import sql
 
-PATHS = ("overview", "calls", "recordings", "conversations",
+PATHS = ("overview", "calls", "recordings", "conversations", "pricing",
          f"recordings/{uuid.uuid4()}", f"conversations/{uuid.uuid4()}")
 LEGACY = ("/admin/usage/tenants", f"/admin/usage/tenants/{uuid.uuid4()}")
 

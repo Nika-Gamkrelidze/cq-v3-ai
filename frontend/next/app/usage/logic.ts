@@ -85,3 +85,23 @@ export function providerModel(provider: string | null | undefined, model: string
   const m = model || '—';
   return provider ? `${provider} / ${m}` : m;
 }
+
+/** US dollars, precise enough to tell calls apart: whole cents from $1 up, four decimals
+    below a dollar (always four, so a column of small amounts lines up) (one call often costs a fraction of a cent, and "$0.00" for every row hides
+    which ones are expensive), and anything above zero but under $0.0001 as "<$0.0001" rather
+    than a zero that reads as free. Null is a dash — no price, which is not the same as $0. */
+export function usd(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs > 0 && abs < 0.0001) return n < 0 ? '−<$0.0001' : '<$0.0001';
+  const digits = abs >= 1 || abs === 0 ? 2 : 4;
+  return n.toLocaleString('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits,
+  });
+}
+
+/** The markup a cost became, as a percentage: (billed − cost) / cost. Null without a cost. */
+export function markupOf(m: { cost_usd: number | null; billed_usd: number | null }): number | null {
+  if (!m.cost_usd || m.billed_usd === null || m.billed_usd === undefined) return null;
+  return ((m.billed_usd - m.cost_usd) / m.cost_usd) * 100;
+}

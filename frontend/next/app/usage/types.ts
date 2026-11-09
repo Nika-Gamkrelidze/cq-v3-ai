@@ -35,7 +35,16 @@ export interface Totals {
   avg_latency_ms: number | null;
   first_used: string | null;
   last_used: string | null;
+  /** What these calls cost us in USD, at the price in force when each ran (unpriced calls add 0). */
+  cost_usd: number;
+  /** cost_usd plus the markup in force for each call: what to bill. */
+  billed_usd: number;
+  /** Calls with no price in force — while above zero, the money figures are incomplete. */
+  unpriced_calls: number;
 }
+
+/** The money every subtotal carries. */
+export type Money = Pick<Totals, 'cost_usd' | 'billed_usd' | 'unpriced_calls'>;
 
 /** One AI call. */
 export interface CallRow {
@@ -69,6 +78,11 @@ export interface CallRow {
   turn_role: string | null;
   turn_preview: string | null;
   summary_id: string | null;
+  /** USD at the price in force when the call ran; null = no price for it. */
+  cost_usd: number | null;
+  billed_usd: number | null;
+  markup_pct: number | null;
+  price_id: string | null;
 }
 
 /** A paginated, server-sorted list. */
@@ -106,12 +120,12 @@ export interface Overview {
   by_provider: (Totals & { provider: string })[];
   by_model: (Totals & { provider: string; model: string; capability: string })[];
   by_user: (Totals & { actor: string; client_id: string | null; name: string })[];
-  series: { t: string; total_tokens: number; input_tokens: number; output_tokens: number; calls: number; failed: number }[];
+  series: ({ t: string; total_tokens: number; input_tokens: number; output_tokens: number; calls: number; failed: number } & Money)[];
   facets: Facets;
 }
 
 /** Per-analyser subtotal inside a recording row. */
-export interface GroupCell {
+export interface GroupCell extends Money {
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
@@ -146,7 +160,7 @@ export interface RecordingDetail {
   summaries: (Totals & { summary_id: string; job_count: number; created_at: string | null })[];
 }
 
-export interface FeatureCell {
+export interface FeatureCell extends Money {
   total_tokens: number;
   input_tokens: number;
   output_tokens: number;
@@ -211,5 +225,62 @@ export interface TabProps {
   filters: Filters;
   /** Narrow the shared filters from inside a tab (e.g. clicking a workspace name). */
   onFilter: (patch: Partial<Filters>) => void;
+  /** Open the Prices tab (the overview's "set the missing prices" link). */
+  onPrices?: () => void;
   t: T;
+}
+
+/* ---- Prices and markup (`GET /admin/usage/pricing`) ---------------------------------------- */
+
+/** USD per unit, as the providers' price pages state them. */
+export const PRICE_FIELDS = [
+  'input_per_mtok', 'output_per_mtok', 'cache_write_per_mtok', 'cache_read_per_mtok',
+  'audio_per_hour', 'chars_per_k',
+] as const;
+export type PriceField = typeof PRICE_FIELDS[number];
+
+export type PriceRow = {
+  id: string;
+  provider: string;
+  /** An exact model id, or '*' for every model of the provider without its own row. */
+  model: string;
+  capability: string | null;
+  effective_from: string;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string | null;
+} & Record<PriceField, number | null>;
+
+export interface MarkupRow {
+  id: string;
+  /** null = the default for every workspace. */
+  client_id: string | null;
+  tenant_name: string | null;
+  /** null only on a workspace row: "back to the default from this date". */
+  pct: number | null;
+  effective_from: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface UnpricedRow {
+  provider: string;
+  model: string;
+  capability: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  audio_seconds: number;
+  characters: number;
+  first_used: string | null;
+  last_used: string | null;
+}
+
+export interface Pricing {
+  prices: PriceRow[];
+  markups: MarkupRow[];
+  unpriced: UnpricedRow[];
+  models: { provider: string; model: string; capability: string }[];
+  tenants: { client_id: string; name: string }[];
 }

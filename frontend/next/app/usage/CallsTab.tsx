@@ -17,7 +17,7 @@ const LIMIT = 50;
 const ASC_FIRST: ReadonlySet<string> = new Set(['feature', 'provider', 'model', 'tenant']);
 
 const COLS: CallCol[] = [
-  'time', 'tenant', 'analyser', 'kind', 'model', 'in', 'out', 'cached', 'total', 'consumed', 'latency',
+  'time', 'tenant', 'analyser', 'kind', 'model', 'in', 'out', 'cached', 'total', 'consumed', 'cost', 'billed', 'latency',
   'status', 'source',
 ];
 

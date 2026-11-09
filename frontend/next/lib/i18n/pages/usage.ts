@@ -5,7 +5,7 @@ import type { Dict } from '../index';
 
 export const en: Dict = {
   'usage.title': 'AI usage',
-  'usage.lead': 'What each workspace consumed: text models, speech-to-text (tokens or audio length), text-to-speech (characters) and the chat bot. Usage is counted, not priced — the rate depends on the model and your contract, so apply your own.',
+  'usage.lead': 'What each workspace consumed: text models, speech-to-text (tokens or audio length), text-to-speech (characters) and the chat bot. Money is costed from your own price list, at the price in force when each call ran, plus your markup.',
   'usage.window': 'Period',
   'usage.window.24h': 'Last 24 hours',
   'usage.window.7d': 'Last 7 days',
@@ -99,7 +99,7 @@ export const en: Dict = {
 
 export const ka: Dict = {
   'usage.title': 'AI-ს ხარჯვა',
-  'usage.lead': 'რამდენი დახარჯა თითოეულმა ორგანიზაციამ: ტექსტური მოდელები, მეტყველებიდან ტექსტი (ტოკენები ან აუდიოს ხანგრძლივობა), ტექსტიდან მეტყველება (სიმბოლოები) და ჩატ-ბოტი. ხარჯვა ითვლება, ფასი კი არ ედება — ტარიფი დამოკიდებულია მოდელსა და ხელშეკრულებაზე, ამიტომ თქვენი გამოიყენეთ.',
+  'usage.lead': 'რამდენი დახარჯა თითოეულმა ორგანიზაციამ: ტექსტური მოდელები, მეტყველებიდან ტექსტი (ტოკენები ან აუდიოს ხანგრძლივობა), ტექსტიდან მეტყველება (სიმბოლოები) და ჩატ-ბოტი. თანხა ითვლება თქვენი ფასების ცხრილით — თითოეული გამოძახების დროს მოქმედი ფასით — და თქვენი ფასნამატით.',
   'usage.window': 'პერიოდი',
   'usage.window.24h': 'ბოლო 24 საათი',
   'usage.window.7d': 'ბოლო 7 დღე',
@@ -193,7 +193,7 @@ export const ka: Dict = {
 
 export const ru: Dict = {
   'usage.title': 'Расход ИИ',
-  'usage.lead': 'Сколько израсходовала каждая организация: текстовые модели, распознавание речи (токены или длительность аудио), синтез речи (символы) и чат-бот. Расход считается, но не тарифицируется — ставка зависит от модели и договора, поэтому примените свою.',
+  'usage.lead': 'Сколько израсходовала каждая организация: текстовые модели, распознавание речи (токены или длительность аудио), синтез речи (символы) и чат-бот. Деньги считаются по вашему прайс-листу — по цене, действовавшей в момент каждого вызова, — плюс ваша наценка.',
   'usage.window': 'Период',
   'usage.window.24h': 'Последние 24 часа',
   'usage.window.7d': 'Последние 7 дней',

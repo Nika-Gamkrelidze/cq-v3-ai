@@ -159,6 +159,10 @@ async def run_startup_migrations() -> list[str]:
         # crm.sql: per-tenant CRM forms and the forms filled from calls. After analyzer.sql,
         # whose audio_jobs crm_results points at.
         await _apply(conn, "crm.sql")
+        # pricing.sql: the price list, the billing markup, and each call's cost stored on
+        # llm_usage by trigger. LAST, always: its costing function takes the llm_usage row
+        # type, so every column it reads must already exist.
+        await _apply(conn, "pricing.sql")
         log.append(await _migrate_tenant_ai_configs(conn))
         emb = await get_embedding_config()
         log.append(await _reconcile_embedding_dim(conn, int(emb["dim"])))

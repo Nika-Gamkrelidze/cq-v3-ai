@@ -1,7 +1,7 @@
 'use client';
 import type { JSX, ReactNode } from 'react';
-import { duration, fmt, pageRange } from './logic';
-import type { SortState, T } from './types';
+import { duration, fmt, pageRange, usd } from './logic';
+import type { Money, SortState, T } from './types';
 
 /* The pieces every usage table is built from, so a sortable header or a pager looks and
    behaves the same on all four tabs. */
@@ -92,4 +92,38 @@ export const groupLabel = (t: T, group: string): string => t(`usage.group.${grou
 /** A call's status pill. */
 export function StatusPill({ ok, t }: { ok: boolean; t: T }): JSX.Element {
   return <span className={`pill ${ok ? 'ready' : 'error'}`}>{t(ok ? 'usage.status.ok' : 'usage.status.failed')}</span>;
+}
+
+/** A sum of money with its caveat: when some of the calls behind it had no price, the figure
+    is a floor, and it says so (a "+?" flag, and the count in the tooltip) instead of passing for
+    the whole cost. `field` picks cost to us or the amount to bill. */
+export function MoneySum({ m, field, t, strong = false }: {
+  m: Money & { calls?: number }; field: 'cost_usd' | 'billed_usd'; t: T; strong?: boolean;
+}): JSX.Element {
+  // Not one call priced: there is no sum to show, only the fact that it is missing.
+  if (m.calls && m.unpriced_calls === m.calls) {
+    return <span className="hint" style={{ whiteSpace: 'nowrap' }}>{t('um.noprice')}</span>;
+  }
+  const value = usd(m[field]);
+  const tip = m.unpriced_calls ? t('um.unpriced.tip', { n: fmt(m.unpriced_calls) }) : undefined;
+  return (
+    <span style={{ whiteSpace: 'nowrap' }} title={tip}>
+      {strong ? <b>{value}</b> : value}
+      {m.unpriced_calls ? (
+        <span className="warn-flag" style={{ marginLeft: 4 }}>
+          +?<span className="cq-sr"> {tip}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** One call's money: what it cost and, on hover, the markup and the amount to bill. A call
+    with no price in force says "no price" — never $0, which would read as free. */
+export function CallMoney({ cost, billed, markup, t }: {
+  cost: number | null; billed: number | null; markup: number | null; t: T;
+}): JSX.Element {
+  if (cost === null) return <span className="hint" style={{ whiteSpace: 'nowrap' }}>{t('um.noprice')}</span>;
+  const tip = t('um.call.tip', { cost: usd(cost), pct: fmt(markup ?? 0), billed: usd(billed) });
+  return <span style={{ whiteSpace: 'nowrap' }} title={tip}>{usd(cost)}</span>;
 }

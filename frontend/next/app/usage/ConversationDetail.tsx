@@ -3,7 +3,7 @@ import type { CSSProperties, JSX } from 'react';
 import { CallsTable, type CallCol } from './CallsTable';
 import { BackButton, KV_GRID, Kv, LoadError, Loading, TotalsStats, useUsageGet } from './listKit';
 import { fmt, when } from './logic';
-import { Consumed, Stat } from './parts';
+import { Consumed, MoneySum, Stat } from './parts';
 import type { ConversationDetail as Detail, T } from './types';
 
 /* One chat conversation as it happened: every message in order, and under each one the AI
@@ -15,7 +15,7 @@ import type { ConversationDetail as Detail, T } from './types';
 /** The server caps the timeline at this many messages. */
 const TURN_CAP = 500;
 
-const TURN_COLS: CallCol[] = ['feature', 'model', 'in', 'out', 'cached', 'latency', 'status'];
+const TURN_COLS: CallCol[] = ['feature', 'model', 'in', 'out', 'cached', 'cost', 'latency', 'status'];
 
 /** Who spoke, told apart by the quote's rule as well as the badge, so a long exchange can be
     scanned without reading the badges. */
@@ -118,6 +118,7 @@ export default function ConversationDetail({ conversationId, t, onBack, backLabe
                   <div style={{ marginTop: 10 }}>
                     <div className="muted" style={{ marginBottom: 6 }}>
                       <b><Consumed tokens={turn.total.total_tokens} audioSeconds={turn.total.audio_seconds} characters={turn.total.characters} t={t} /></b>
+                      {' · '}<MoneySum m={turn.total} field="cost_usd" t={t} />
                       {' · '}{t('ul.calls.n', { n: fmt(turn.total.calls) })}
                       {turn.total.failed ? <> · <span className="warn-flag">{t('ul.failed.n', { n: fmt(turn.total.failed) })}</span></> : null}
                     </div>

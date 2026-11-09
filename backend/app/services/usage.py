@@ -11,8 +11,9 @@ needs when pricing a subscription or explaining an invoice:
 Everything is read-only and superadmin-scoped; the aggregation is done in SQL because the
 alternative is pulling a month of call rows into Python to add up.
 
-A NOTE ON "COST". Tokens are counted, not priced: a price per million varies by model and by
-contract, so the console shows tokens and lets the operator apply their own rate. Rows where
+A NOTE ON "COST". The rows count consumption; money comes from the operator's own price list
+(`ai_prices`, versioned, so each call is costed at the price in force when it ran) and markup
+(`ai_markups`), stored on each row by db/pricing.sql — see `services/pricing.py`. Rows where
 the tenant supplied their own key are still counted — "what did this workspace consume" is a
 support question even when the answer costs us nothing — and flagged so the two are never
 silently added together.
@@ -251,20 +252,38 @@ def totals_sql(alias: str = "u") -> str:
         COALESCE(SUM({a}.characters), 0)::bigint            AS characters,
         ROUND(AVG({a}.latency_ms))::bigint                  AS avg_latency_ms,
         MIN({a}.created_at)                                 AS first_used,
-        MAX({a}.created_at)                                 AS last_used
+        MAX({a}.created_at)                                 AS last_used,
+        {money_sql(a)}
     """
+
+
+# The table the reports read money from. Each call's cost is stored on its row (db/pricing.sql:
+# costed by trigger when recorded, re-costed by services/pricing.py when a price or markup
+# changes); costing on every read was a view, and 40 s slower at 200k calls. A call with no
+# price in force has cost NULL: it adds nothing to the sums and is counted in `unpriced_calls`
+# instead, so a total is never presented as complete when it is not.
+PRICED = "llm_usage"
+
+
+def money_sql(alias: str = "u") -> str:
+    a = alias
+    return f"""COALESCE(SUM({a}.cost_usd), 0)::numeric(20,6)           AS cost_usd,
+        COALESCE(SUM({a}.billed_usd), 0)::numeric(20,6)         AS billed_usd,
+        COUNT(*) FILTER (WHERE {a}.cost_usd IS NULL)::bigint    AS unpriced_calls"""
 
 
 TOTAL_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
               "total_tokens", "byo_tokens", "calls", "failed", "audio_seconds", "characters",
-              "avg_latency_ms", "first_used", "last_used")
+              "avg_latency_ms", "first_used", "last_used", "cost_usd", "billed_usd",
+              "unpriced_calls")
 
 
 def empty_totals() -> dict:
     return {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
             "cache_creation_tokens": 0, "total_tokens": 0, "byo_tokens": 0, "calls": 0,
             "failed": 0, "audio_seconds": 0.0, "characters": 0, "avg_latency_ms": None,
-            "first_used": None, "last_used": None}
+            "first_used": None, "last_used": None, "cost_usd": 0.0, "billed_usd": 0.0,
+            "unpriced_calls": 0}
 
 
 def split_totals(row: dict) -> tuple[dict, dict]:

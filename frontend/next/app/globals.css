@@ -290,6 +290,7 @@ hr.sep { border:none; border-top:1px solid color-mix(in oklab,var(--hairline) 80
 /* ---- Feedback ---- */
 .msg { margin-top:12px; font-size:13.5px; white-space:pre-wrap; }
 .msg.ok { color:var(--ok); } .msg.err, .err { color:var(--coral); }
+.msg.warn { color:var(--pending); }
 .test { margin-top:10px; padding:11px 13px; border-radius:var(--r-md); background:var(--input-bg);
   border:1px solid var(--hairline); font-size:13px; }
 .sub { background:var(--input-bg); border:1px solid var(--hairline); border-radius:var(--r-md); padding:12px; margin-top:8px; }
@@ -615,7 +616,7 @@ button.act.danger:hover { background:color-mix(in oklab,var(--alert) 20%,transpa
   border-radius:var(--r-md); background:color-mix(in oklab,var(--surface-2) 35%,transparent);
 }
 .stat b { font-size:20px; font-weight:700; line-height:1.15; font-variant-numeric:tabular-nums; }
-.stat span { color:var(--muted); font-size:12px; }
+.stat > span { color:var(--muted); font-size:12px; }
 
 /* A labelled form row. The label is a block so the control starts on its own line, and the
    trailing .hint sits under the control it explains — putting it above reads as a heading for

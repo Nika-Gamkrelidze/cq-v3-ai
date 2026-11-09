@@ -6,8 +6,8 @@ import { featureLabel } from './CallsTable';
 import {
   CLIP, HeadTh, ListBody, NUM, SearchBox, TenantCell, firstDir, revealTop, rowOpen, useDebounced, usePanel, useUsageGet,
 } from './listKit';
-import { fmt, nextSort, usageQuery, when } from './logic';
-import { Pager, SortTh } from './parts';
+import { fmt, nextSort, usageQuery, usd, when } from './logic';
+import { MoneySum, Pager, SortTh } from './parts';
 import { CHAT_FEATURES } from './types';
 import type { ConversationRow, FeatureCell, Page, SortState, T, TabProps } from './types';
 
@@ -25,6 +25,8 @@ function FeatureTd({ feature, cell, t }: { feature: string; cell: FeatureCell | 
     featureLabel(t, feature),
     t('ul.calls.n', { n: fmt(cell.calls) }),
     cell.failed ? t('ul.failed.n', { n: fmt(cell.failed) }) : '',
+    t('um.cell.tip', { cost: usd(cell.cost_usd), billed: usd(cell.billed_usd) }),
+    cell.unpriced_calls ? t('um.unpriced.tip', { n: fmt(cell.unpriced_calls) }) : '',
   ].filter(Boolean).join(' · ');
   return (
     <td style={NUM} title={title}>
@@ -35,6 +37,7 @@ function FeatureTd({ feature, cell, t }: { feature: string; cell: FeatureCell | 
           <span className="cq-sr">{t('ul.failed.n', { n: fmt(cell.failed) })}</span>
         </span>
       ) : null}
+      <div className="hint"><MoneySum m={cell} field="cost_usd" t={t} /></div>
     </td>
   );
 }
@@ -94,6 +97,8 @@ export default function ConversationsTab({ filters, onFilter, t }: TabProps): JS
                       <HeadTh key={f} label={featureLabel(t, f)} tip={t(`ul.feature.${f}.tip`)} sort={sort} onSort={onSort} />
                     ))}
                     <SortTh label={t('usage.th.total')} k="total_tokens" sort={sort} onSort={onSort} />
+                    <SortTh label={t('um.th.cost')} k="cost_usd" sort={sort} onSort={onSort} />
+                    <SortTh label={t('um.th.billed')} k="billed_usd" sort={sort} onSort={onSort} />
                     <SortTh label={t('usage.th.calls')} k="calls" sort={sort} onSort={onSort} />
                     <SortTh label={t('usage.th.last')} k="last_used" sort={sort} onSort={onSort} num={false} />
                   </tr>
@@ -118,6 +123,8 @@ export default function ConversationsTab({ filters, onFilter, t }: TabProps): JS
                         <td style={NUM}>{fmt(r.questions)}</td>
                         {CHAT_FEATURES.map(f => <FeatureTd key={f} feature={f} cell={r.features[f]} t={t} />)}
                         <td style={NUM}><b>{fmt(r.total.total_tokens)}</b></td>
+                        <td style={NUM}><MoneySum m={r.total} field="cost_usd" t={t} /></td>
+                        <td style={NUM}><MoneySum m={r.total} field="billed_usd" t={t} strong /></td>
                         <td style={NUM}>
                           {fmt(r.total.calls)}
                           {r.total.failed ? (

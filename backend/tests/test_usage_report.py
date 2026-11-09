@@ -42,7 +42,8 @@ def test_like_pattern_escapes_the_users_wildcards():
 def test_call_sorts_are_the_contract_keys():
     assert set(usage_report.CALL_SORTS) == {
         "created_at", "total_tokens", "input_tokens", "output_tokens", "latency_ms",
-        "audio_seconds", "consumed", "feature", "provider", "model", "tenant"}
+        "audio_seconds", "consumed", "feature", "provider", "model", "tenant", "cost_usd",
+        "billed_usd"}
     page = usage.page_params("1; DROP TABLE llm_usage", "sideways", 5, 0,
                              usage_report.CALL_SORTS, usage_report.DEFAULT_CALL_SORT)
     assert page["sort"] == "created_at" and page["dir"] == "desc"
@@ -282,7 +283,8 @@ CALL_KEYS = {
     "provider", "model", "input_tokens", "output_tokens", "cache_read_tokens",
     "cache_creation_tokens", "total_tokens", "audio_seconds", "characters", "latency_ms", "ok",
     "byo", "actor", "job_id", "filename", "conversation_id", "conversation_ref", "channel",
-    "turn_id", "turn_role", "turn_preview", "summary_id"}
+    "turn_id", "turn_role", "turn_preview", "summary_id", "cost_usd", "billed_usd", "markup_pct",
+    "price_id"}
 
 
 def test_call_rows_carry_their_recording_and_question(api, seeded):

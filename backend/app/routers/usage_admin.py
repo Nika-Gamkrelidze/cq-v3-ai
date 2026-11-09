@@ -11,9 +11,9 @@ sentence and never reaches SQL; sort keys are whitelisted inside the service mod
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from ..services import usage, usage_drill, usage_report
+from ..services import pricing, usage, usage_drill, usage_report
 from .admin import require_admin
 
 router = APIRouter(prefix="/admin/usage", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -117,3 +117,60 @@ async def conversation_detail(conversation_id: str):
     if out is None:
         raise HTTPException(status_code=404, detail="No usage recorded for that conversation.")
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# Prices and markup — what turns the usage above into money (services/pricing.py). Same
+# superadmin-only router: a workspace never sees what it costs us or what we add on top.
+# ---------------------------------------------------------------------------------------------
+_ACTOR = "superadmin"
+
+
+async def _priced(call):
+    try:
+        out = await call
+    except pricing.Conflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except pricing.PricingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if out is None or out is False:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return out
+
+
+@router.get("/pricing")
+async def pricing_overview():
+    """Every price and markup version, plus the models that have calls with no price."""
+    return await pricing.overview()
+
+
+@router.post("/prices", status_code=201)
+async def add_price(body: dict = Body(...)):
+    return await _priced(pricing.add_price(body, _ACTOR))
+
+
+@router.put("/prices/{price_id}")
+async def update_price(price_id: str, body: dict = Body(...)):
+    return await _priced(pricing.update_price(price_id, body, _ACTOR))
+
+
+@router.delete("/prices/{price_id}")
+async def delete_price(price_id: str):
+    await _priced(pricing.delete_price(price_id))
+    return {"deleted": True}
+
+
+@router.post("/markups", status_code=201)
+async def add_markup(body: dict = Body(...)):
+    return await _priced(pricing.add_markup(body, _ACTOR))
+
+
+@router.put("/markups/{markup_id}")
+async def update_markup(markup_id: str, body: dict = Body(...)):
+    return await _priced(pricing.update_markup(markup_id, body, _ACTOR))
+
+
+@router.delete("/markups/{markup_id}")
+async def delete_markup(markup_id: str):
+    await _priced(pricing.delete_markup(markup_id))
+    return {"deleted": True}

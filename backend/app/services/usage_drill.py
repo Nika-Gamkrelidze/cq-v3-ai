@@ -36,8 +36,8 @@ _CALL_SELECT = f"""
            u.job_id, j.filename,
            u.conversation_id, cv.external_ref AS conversation_ref, cv.channel,
            u.turn_id, t.role AS turn_role, left(t.content, 160) AS turn_preview,
-           u.summary_id
-      FROM llm_usage u
+           u.summary_id, u.cost_usd, u.billed_usd, u.markup_pct, u.price_id
+      FROM {usage.PRICED} u
       LEFT JOIN clients c ON c.id = u.client_id
       LEFT JOIN audio_jobs j
              ON j.id = u.job_id AND j.client_id IS NOT DISTINCT FROM u.client_id
@@ -56,7 +56,8 @@ _CELL_SQL = f"""
     COALESCE(SUM(u.input_tokens), 0)::bigint          AS input_tokens,
     COALESCE(SUM(u.output_tokens), 0)::bigint         AS output_tokens,
     COUNT(*)::bigint                                  AS calls,
-    COUNT(*) FILTER (WHERE NOT u.ok)::bigint          AS failed
+    COUNT(*) FILTER (WHERE NOT u.ok)::bigint          AS failed,
+    {usage.money_sql('u')}
 """
 
 
@@ -112,6 +113,8 @@ _RECORDING_SORTS = {
     "tenant": "lower(c.name)",
     "duration_s": "j.duration_s",
     "created_at": "j.created_at",
+    "cost_usd": "jobs.cost_usd",
+    "billed_usd": "jobs.billed_usd",
     **{f"group:{g}": "jobs.sort_group" for g in usage.GROUP_ORDER},
 }
 
@@ -163,7 +166,7 @@ async def recordings(f: usage.UsageFilter, *, sort: str | None, dir_: str | None
                 SELECT u.job_id, u.client_id, {usage.totals_sql('u')},
                        {sort_group} AS sort_group, {sort_audio} AS sort_audio,
                        {sort_chars} AS sort_chars
-                  FROM llm_usage u {join}
+                  FROM {usage.PRICED} u {join}
                  WHERE {cond_sql}
                  GROUP BY u.job_id, u.client_id
             )
@@ -187,14 +190,14 @@ async def recordings(f: usage.UsageFilter, *, sort: str | None, dir_: str | None
                        COALESCE(SUM(u.audio_seconds), 0)::float8 AS audio_seconds,
                        COALESCE(SUM(u.characters), 0)::bigint    AS characters,
                        array_agg(DISTINCT {_MODEL_LABEL})        AS models
-                  FROM llm_usage u
+                  FROM {usage.PRICED} u
                   JOIN unnest(${n + 1}::uuid[], ${n + 2}::uuid[]) AS p(job_id, client_id)
                     ON p.job_id = u.job_id AND p.client_id IS NOT DISTINCT FROM u.client_id
                  WHERE {where}
                  GROUP BY u.job_id, u.client_id, grp
             """, *base_args, [r["job_id"] for r in rows], [r["client_id"] for r in rows])
             for g in expanded:
-                cell = dict(g)
+                cell = usage.record(g)
                 cell["models"] = sorted(cell["models"] or [])
                 for k in ("job_id", "client_id", "grp"):
                     cell.pop(k)
@@ -230,7 +233,7 @@ async def recording_detail(job_id: str) -> dict | None:
              WHERE j.id = $1::uuid
         """, job_id)
         total = await conn.fetchrow(
-            f"SELECT {usage.totals_sql('u')} FROM llm_usage u WHERE u.job_id = $1::uuid", job_id)
+            f"SELECT {usage.totals_sql('u')} FROM {usage.PRICED} u WHERE u.job_id = $1::uuid", job_id)
         if rec is None and not total["calls"]:
             return None
 
@@ -247,7 +250,7 @@ async def recording_detail(job_id: str) -> dict | None:
         groups = await conn.fetch(f"""
             SELECT {usage.group_sql('u')} AS grp, {usage.totals_sql('u')},
                    array_agg(DISTINCT {_MODEL_LABEL}) AS models
-              FROM llm_usage u WHERE u.job_id = $1::uuid
+              FROM {usage.PRICED} u WHERE u.job_id = $1::uuid
              GROUP BY grp
         """, job_id)
         calls = await conn.fetch(
@@ -266,7 +269,7 @@ async def recording_detail(job_id: str) -> dict | None:
                  WHERE {owner_cond} AND $1::uuid = ANY(job_ids) AND cardinality(job_ids) > 1
             ), t AS (
                 SELECT u.summary_id, {usage.totals_sql('u')}
-                  FROM llm_usage u
+                  FROM {usage.PRICED} u
                   JOIN s ON s.id = u.summary_id AND s.client_id IS NOT DISTINCT FROM u.client_id
                  GROUP BY u.summary_id
             )
@@ -306,6 +309,8 @@ _CONVERSATION_SORTS = {
     "questions": "convs.questions",
     "tenant": "lower(c.name)",
     "channel": "cv.channel",
+    "cost_usd": "convs.cost_usd",
+    "billed_usd": "convs.billed_usd",
     "created_at": "cv.created_at",
 }
 
@@ -350,7 +355,7 @@ async def conversations(f: usage.UsageFilter, *, channel: str | None, sort: str 
             WITH convs AS (
                 SELECT u.conversation_id, u.client_id, {usage.totals_sql('u')},
                        COUNT(DISTINCT u.turn_id)::bigint AS questions
-                  FROM llm_usage u {join}
+                  FROM {usage.PRICED} u {join}
                  WHERE {cond_sql}
                  GROUP BY u.conversation_id, u.client_id
             ), page AS (
@@ -375,7 +380,7 @@ async def conversations(f: usage.UsageFilter, *, channel: str | None, sort: str 
             expanded = await conn.fetch(f"""
                 SELECT u.conversation_id, u.client_id, u.feature, {_CELL_SQL},
                        array_agg(DISTINCT {_MODEL_LABEL}) AS models
-                  FROM llm_usage u
+                  FROM {usage.PRICED} u
                   JOIN unnest(${n + 1}::uuid[], ${n + 2}::uuid[]) AS p(conversation_id, client_id)
                     ON p.conversation_id = u.conversation_id
                    AND p.client_id IS NOT DISTINCT FROM u.client_id
@@ -398,8 +403,9 @@ async def conversations(f: usage.UsageFilter, *, channel: str | None, sort: str 
             "subject": rest["subject"], "created_at": rest["started_at"],
             "last_message_at": rest["last_message_at"],
             "turns": rest["turns"], "questions": rest["questions"], "total": tot,
-            "features": {e["feature"]: {k: e[k] for k in ("total_tokens", "input_tokens",
-                                                          "output_tokens", "calls", "failed")}
+            "features": {e["feature"]: {k: usage.serialise(e[k]) for k in (
+                             "total_tokens", "input_tokens", "output_tokens", "calls", "failed",
+                             "cost_usd", "billed_usd", "unpriced_calls")}
                          for e in mine},
             "models": _models(e["models"] for e in mine),
         })
@@ -423,7 +429,7 @@ async def conversation_detail(conversation_id: str) -> dict | None:
              WHERE cv.id = $1::uuid
         """, conversation_id)
         total = await conn.fetchrow(
-            f"SELECT {usage.totals_sql('u')} FROM llm_usage u WHERE u.conversation_id = $1::uuid",
+            f"SELECT {usage.totals_sql('u')} FROM {usage.PRICED} u WHERE u.conversation_id = $1::uuid",
             conversation_id)
         if conv is None and not total["calls"]:
             return None
@@ -443,7 +449,7 @@ async def conversation_detail(conversation_id: str) -> dict | None:
             if turns:
                 per_turn = {str(r["turn_id"]): r for r in await conn.fetch(f"""
                     SELECT u.turn_id, {usage.totals_sql('u')}
-                      FROM llm_usage u
+                      FROM {usage.PRICED} u
                      WHERE u.conversation_id = $1::uuid AND u.client_id = $2::uuid
                        AND u.turn_id = ANY($3::uuid[])
                      GROUP BY u.turn_id

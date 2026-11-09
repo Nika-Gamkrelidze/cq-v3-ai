@@ -3,7 +3,7 @@ import type { JSX } from 'react';
 import { CallsTable, modelLabel } from './CallsTable';
 import { BackButton, KV_GRID, Kv, LoadError, Loading, NUM, TotalsStats, useUsageGet } from './listKit';
 import { duration, fmt, when } from './logic';
-import { Consumed, groupLabel } from './parts';
+import { Consumed, MoneySum, groupLabel } from './parts';
 import type { RecordingDetail as Detail, T } from './types';
 
 /* One recording, analyser by analyser: what transcription, analysis, fact-check, sentiment,
@@ -58,6 +58,7 @@ export default function RecordingDetail({ jobId, t, onBack, backLabel }: {
               <h3 style={{ margin: 0 }}>{groupLabel(t, g.group)}</h3>
               <span className="inline wrap" style={{ gap: '2px 12px', alignItems: 'baseline' }}>
                 <b><Consumed tokens={g.total_tokens} audioSeconds={g.audio_seconds} characters={g.characters} t={t} /></b>
+                <MoneySum m={g} field="cost_usd" t={t} strong />
                 <span className="muted" style={{ whiteSpace: 'nowrap' }}>
                   {t('ul.calls.n', { n: fmt(g.calls) })}
                   {g.failed ? <> · <span className="warn-flag">{t('ul.failed.n', { n: fmt(g.failed) })}</span></> : null}
@@ -73,7 +74,7 @@ export default function RecordingDetail({ jobId, t, onBack, backLabel }: {
               <div style={{ marginTop: 12 }}>
                 <CallsTable
                   rows={own}
-                  cols={['time', 'feature', 'model', 'in', 'out', 'cached', 'consumed', 'latency', 'status']}
+                  cols={['time', 'feature', 'model', 'in', 'out', 'cached', 'consumed', 'cost', 'latency', 'status']}
                   t={t}
                   compact
                 />
@@ -94,6 +95,7 @@ export default function RecordingDetail({ jobId, t, onBack, backLabel }: {
                   <th>{t('ul.th.summary')}</th>
                   <th style={NUM}>{t('ul.th.recordings')}</th>
                   <th style={NUM}>{t('usage.th.total')}</th>
+                  <th style={NUM}>{t('um.th.cost')}</th>
                   <th style={NUM}>{t('usage.th.calls')}</th>
                   <th>{t('usage.th.last')}</th>
                 </tr>
@@ -107,6 +109,7 @@ export default function RecordingDetail({ jobId, t, onBack, backLabel }: {
                     </td>
                     <td style={NUM}>{fmt(s.job_count)}</td>
                     <td style={NUM}><Consumed tokens={s.total_tokens} audioSeconds={s.audio_seconds} characters={s.characters} t={t} /></td>
+                    <td style={NUM}><MoneySum m={s} field="cost_usd" t={t} /></td>
                     <td style={NUM}>
                       {fmt(s.calls)}
                       {s.failed ? <> <span className="warn-flag" title={t('ul.failed.n', { n: fmt(s.failed) })}>{fmt(s.failed)}</span></> : null}

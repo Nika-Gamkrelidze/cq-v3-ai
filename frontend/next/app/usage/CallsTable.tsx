@@ -1,8 +1,8 @@
 'use client';
 import type { JSX, ReactNode } from 'react';
 import { CLIP, LINK, NUM, TenantCell } from './listKit';
-import { cached, fmt, providerModel, when } from './logic';
-import { Consumed, SortTh, StatusPill, groupLabel } from './parts';
+import { cached, fmt, providerModel, usd, when } from './logic';
+import { CallMoney, Consumed, SortTh, StatusPill, groupLabel } from './parts';
 import type { CallRow, SortState, T } from './types';
 
 /* One table of AI calls, three places: the call log (every column, server-sorted), a
@@ -12,7 +12,7 @@ import type { CallRow, SortState, T } from './types';
 
 export type CallCol =
   | 'time' | 'tenant' | 'analyser' | 'feature' | 'kind' | 'model' | 'in' | 'out' | 'cached'
-  | 'total' | 'consumed' | 'latency' | 'status' | 'source';
+  | 'total' | 'consumed' | 'cost' | 'billed' | 'latency' | 'status' | 'source';
 
 /** A feature's readable name ("Claim verdicts"); a label added on the server after this
     dictionary was written shows as the raw label rather than as a key name. */
@@ -92,6 +92,14 @@ const COLS: Record<CallCol, ColDef> = {
   consumed: {
     head: 'ul.th.consumed', sort: 'consumed', num: true,
     cell: (r, c) => <Consumed tokens={null} audioSeconds={r.audio_seconds} characters={r.characters} t={c.t} />,
+  },
+  cost: {
+    head: 'um.th.cost', sort: 'cost_usd', num: true,
+    cell: (r, c) => <CallMoney cost={r.cost_usd} billed={r.billed_usd} markup={r.markup_pct} t={c.t} />,
+  },
+  billed: {
+    head: 'um.th.billed', sort: 'billed_usd', num: true,
+    cell: r => <span style={{ whiteSpace: 'nowrap' }}>{usd(r.billed_usd)}</span>,
   },
   latency: { head: 'ul.th.latency', sort: 'latency_ms', num: true, cell: r => count(r.latency_ms) },
   status: {

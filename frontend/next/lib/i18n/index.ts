@@ -52,6 +52,7 @@
      pages/home.ts          hero.          (index.html    -> /)
      pages/usage.ts         usage.         (new page      -> /usage)
      pages/usageLists.ts    ul.            (the /usage lists and drill-downs)
+     pages/usageMoney.ts    um.            (the /usage cost columns and Prices tab)
      pages/workspace.ts     tn. con.       (tenant.html   -> /workspace)
 
    features/ vs pages/ is not a filing preference: a prefix is a FEATURE when more than one
@@ -87,6 +88,7 @@ import * as copilot from './pages/copilot';
 import * as home from './pages/home';
 import * as usage from './pages/usage';
 import * as usageLists from './pages/usageLists';
+import * as usageMoney from './pages/usageMoney';
 import * as workspace from './pages/workspace';
 
 export type Lang = 'en' | 'ka' | 'ru';
@@ -99,7 +101,7 @@ const MODULES: Record<Lang, Dict>[] = [
   ai, analysis, bot, convert, crm, curation, editor, kb, retrieval, scoring, sentimentTab, timeline,
   transcription,
   tts, workbench,
-  account, aicfg, consolePage, copilot, home, usage, usageLists, workspace,
+  account, aicfg, consolePage, copilot, home, usage, usageLists, usageMoney, workspace,
 ];
 
 function assemble(lang: Lang): Dict {

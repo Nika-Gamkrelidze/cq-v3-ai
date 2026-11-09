@@ -7,6 +7,7 @@ import CallsTab from './CallsTab';
 import ConversationsTab from './ConversationsTab';
 import FilterBar from './Filters';
 import OverviewTab from './OverviewTab';
+import PricesTab from './PricesTab';
 import RecordingsTab from './RecordingsTab';
 import { EMPTY_FILTERS, type Filters, type TabProps } from './types';
 
@@ -18,15 +19,16 @@ import { EMPTY_FILTERS, type Filters, type TabProps } from './types';
    each chat conversation, and every call — so a figure on the overview can be followed down
    to the calls that make it up without re-choosing the period or the workspace.
 
-   It shows USAGE, not money. A price per million depends on the model and on the contract,
-   and a console that multiplies by a hardcoded rate is a console that quotes the wrong number
-   confidently. Operators apply their own rate to these figures. */
+   Money comes from the operator's own price list and markup (the Prices tab): every call is
+   costed at the price in force when it ran, so a price change never re-prices last month, and
+   a call with no price is shown as unpriced rather than free. Superadmin only, like the API. */
 
 const TABS = [
   { key: 'overview', label: 'usage.tab.overview' },
   { key: 'recordings', label: 'usage.tab.recordings' },
   { key: 'bot', label: 'usage.tab.bot' },
   { key: 'calls', label: 'usage.tab.calls' },
+  { key: 'prices', label: 'um.tab.prices' },
 ] as const;
 type TabKey = typeof TABS[number]['key'];
 
@@ -98,7 +100,7 @@ export default function UsagePage() {
     );
   }
 
-  const props: TabProps = { filters, onFilter, t };
+  const props: TabProps = { filters, onFilter, onPrices: () => choose('prices'), t };
 
   return (
     <>
@@ -126,7 +128,8 @@ export default function UsagePage() {
           ))}
         </div>
 
-        <FilterBar {...props} />
+        {/* The price list is not filtered by period or workspace: it is the whole list. */}
+        {tab !== 'prices' ? <FilterBar {...props} /> : null}
 
         {/* Only the active tab is mounted. Every tab refetches when the shared filters change,
             and a hidden one doing so would multiply the heaviest queries for a view nobody is
@@ -136,6 +139,7 @@ export default function UsagePage() {
           {tab === 'recordings' ? <RecordingsTab {...props} /> : null}
           {tab === 'bot' ? <ConversationsTab {...props} /> : null}
           {tab === 'calls' ? <CallsTab {...props} /> : null}
+          {tab === 'prices' ? <PricesTab t={t} /> : null}
         </section>
       </main>
     </>

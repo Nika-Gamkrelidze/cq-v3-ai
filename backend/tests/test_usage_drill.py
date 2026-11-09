@@ -157,7 +157,8 @@ def test_recordings_group_subtotals(api, world):
     assert g["transcription"]["models"] == ["elevenlabs/scribe_v1"]
     assert g["factcheck"] == {"total_tokens": 550, "input_tokens": 500, "output_tokens": 50,
                               "calls": 2, "failed": 1, "audio_seconds": 0.0, "characters": 0,
-                              "models": ["anthropic/claude-x"]}
+                              "models": ["anthropic/claude-x"], "cost_usd": 0.0,
+                              "billed_usd": 0.0, "unpriced_calls": 2}
     assert g["sentiment"]["total_tokens"] == 50
     assert g["sentiment"]["models"] == ["gemini/gemini-2.5-flash"]
     assert g["summary"]["total_tokens"] == 15   # the one-recording summary counts here
@@ -249,7 +250,10 @@ def test_conversations_list(api, world):
     assert row["total"]["calls"] == 4 and row["total"]["total_tokens"] == 25 + 140 + 60 + 40
     assert set(row["features"]) == {"triage", "autopilot", "copilot", "handoff"}
     assert row["features"]["autopilot"] == {"total_tokens": 140, "input_tokens": 100,
-                                            "output_tokens": 40, "calls": 1, "failed": 0}
+                                            "output_tokens": 40, "calls": 1, "failed": 0,
+                                            # No price set for these models: unpriced, not free.
+                                            "cost_usd": 0.0, "billed_usd": 0.0,
+                                            "unpriced_calls": 1}
     assert row["models"] == ["anthropic/claude-x"]
 
     assert _get(api, "/admin/usage/conversations", client_id=world["a"],

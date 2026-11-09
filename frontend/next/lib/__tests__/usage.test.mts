@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { duration, nextSort, pageRange, sortRows, usageQuery } from '../../app/usage/logic.ts';
+import { duration, markupOf, nextSort, pageRange, sortRows, usageQuery, usd } from '../../app/usage/logic.ts';
 import { EMPTY_FILTERS, type Filters } from '../../app/usage/types.ts';
 
 /* The usage page's pure half. Each of these decides what the operator is shown as a number
@@ -163,4 +163,27 @@ test('duration: rounds to the second before splitting, so 59.6 s is 1:00 and not
   assert.equal(duration(59.6), '1:00');
   assert.equal(duration(0.4), '0:00');
   assert.equal(duration(3599.5), '1:00:00');
+});
+
+/* ------------------------------------------------------------------ usd / markupOf */
+
+test('usd: cents from a dollar up, four decimals below, never a zero for a tiny cost', () => {
+  assert.equal(usd(1234.5), '$1,234.50');
+  assert.equal(usd(1), '$1.00');
+  assert.equal(usd(0.0123), '$0.0123');
+  assert.equal(usd(0.5), '$0.5000');
+  assert.equal(usd(0), '$0.00');
+  assert.equal(usd(0.00001), '<$0.0001');
+});
+
+test('usd: no price is a dash, not $0', () => {
+  assert.equal(usd(null), '—');
+  assert.equal(usd(undefined), '—');
+  assert.equal(usd(Number.NaN), '—');
+});
+
+test('markupOf: the percentage a cost became, and nothing without a cost', () => {
+  assert.equal(markupOf({ cost_usd: 2, billed_usd: 2.5 }), 25);
+  assert.equal(markupOf({ cost_usd: 0, billed_usd: 0 }), null);
+  assert.equal(markupOf({ cost_usd: null, billed_usd: null }), null);
 });

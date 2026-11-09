@@ -6,8 +6,8 @@ import { modelLabel } from './CallsTable';
 import {
   CLIP, HeadTh, ListBody, NUM, SearchBox, TenantCell, firstDir, revealTop, rowOpen, useDebounced, usePanel, useUsageGet,
 } from './listKit';
-import { duration, fmt, nextSort, usageQuery, when } from './logic';
-import { Consumed, Pager, SortTh, groupLabel } from './parts';
+import { duration, fmt, nextSort, usageQuery, usd, when } from './logic';
+import { Consumed, MoneySum, Pager, SortTh, groupLabel } from './parts';
 import { RECORDING_GROUPS } from './types';
 import type { GroupCell, Page, RecordingRow, SortState, T, TabProps } from './types';
 
@@ -28,6 +28,8 @@ function GroupTd({ group, cell, t }: { group: string; cell: GroupCell | undefine
     t('ul.calls.n', { n: fmt(cell.calls) }),
     cell.failed ? t('ul.failed.n', { n: fmt(cell.failed) }) : '',
     cell.models.length ? t('ul.models', { list: cell.models.map(modelLabel).join(', ') }) : '',
+    t('um.cell.tip', { cost: usd(cell.cost_usd), billed: usd(cell.billed_usd) }),
+    cell.unpriced_calls ? t('um.unpriced.tip', { n: fmt(cell.unpriced_calls) }) : '',
   ].filter(Boolean).join(' · ');
   return (
     <td style={NUM} title={title}>
@@ -40,6 +42,7 @@ function GroupTd({ group, cell, t }: { group: string; cell: GroupCell | undefine
           <span className="cq-sr">{t('ul.failed.n', { n: fmt(cell.failed) })}</span>
         </span>
       ) : null}
+      <div className="hint"><MoneySum m={cell} field="cost_usd" t={t} /></div>
     </td>
   );
 }
@@ -96,6 +99,8 @@ export default function RecordingsTab({ filters, onFilter, t }: TabProps): JSX.E
                       <SortTh key={g} label={groupLabel(t, g)} k={`group:${g}`} sort={sort} onSort={onSort} />
                     ))}
                     <SortTh label={t('usage.th.total')} k="total_tokens" sort={sort} onSort={onSort} />
+                    <SortTh label={t('um.th.cost')} k="cost_usd" sort={sort} onSort={onSort} />
+                    <SortTh label={t('um.th.billed')} k="billed_usd" sort={sort} onSort={onSort} />
                     <SortTh label={t('usage.th.calls')} k="calls" sort={sort} onSort={onSort} />
                     <SortTh label={t('usage.th.last')} k="last_used" sort={sort} onSort={onSort} num={false} />
                   </tr>
@@ -116,6 +121,8 @@ export default function RecordingsTab({ filters, onFilter, t }: TabProps): JSX.E
                       <td style={NUM}>{duration(r.duration_s)}</td>
                       {RECORDING_GROUPS.map(g => <GroupTd key={g} group={g} cell={r.groups[g]} t={t} />)}
                       <td style={NUM}><b>{fmt(r.total.total_tokens)}</b></td>
+                      <td style={NUM}><MoneySum m={r.total} field="cost_usd" t={t} /></td>
+                      <td style={NUM}><MoneySum m={r.total} field="billed_usd" t={t} strong /></td>
                       <td style={NUM}>
                         {fmt(r.total.calls)}
                         {r.total.failed ? (
