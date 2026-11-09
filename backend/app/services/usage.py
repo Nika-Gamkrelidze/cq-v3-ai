@@ -183,6 +183,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "tts": ("tts",),
     "kb": ("kb_restructure", "curation_propose"),
     "rubric": ("scoring_import",),
+    "pricing": ("price_lookup",),
     "test": ("probe",),
 }
 OTHER_GROUP = "other"

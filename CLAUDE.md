@@ -263,6 +263,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   sums it — cost to us, to bill, margin, per workspace / analyser / model / recording /
   conversation / call, plus a cost-per-day chart. The tab also lists **models that made calls
   with no price** (pre-filled with the first call's date so a back-dated price covers them).
+  **"Look up official prices"** (`services/price_lookup.py`, `POST /admin/usage/prices/lookup`,
+  `OfficialPrices.tsx`; added 2026-11-09 at the owner's request) reads each provider's OWN
+  pricing page (`price_lookup.SOURCES`: Anthropic and Google serve Markdown, OpenAI and
+  ElevenLabs HTML), one AI call per provider (feature `price_lookup`, analyser group
+  `pricing`), and proposes input / output / cache / audio / character prices per model beside
+  the price in force; nothing is saved until the operator ticks rows. Dated changes on the page
+  ("$1.50 starting January 1, 2027") come back as **scheduled versions** and are saved as
+  future rows. The price form has the same lookup for one model (*Fill from the official page*).
 - **CRM analyser — fill the customer's CRM form from a call** (`services/crm_form.py` the
   definition and its rules, `crm_extract.py` the fill, `crm_store.py`, `crm_xlsx.py`,
   `crm_presets.py`, `routers/crm.py`, `db/crm.sql`; format reference **`docs/CRM_FORMS.md`**).
@@ -399,6 +407,19 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   Editing a price row in place re-prices what it covered (that is a correction); a price change
   from now on is a NEW row dated today. Provider prices are entered by the operator — **never
   hardcode a list price** in code.
+  **A call is charged ONE way:** by its tokens when it reported tokens and the row prices
+  tokens, otherwise by audio length and characters. Gemini Transcribe and OpenAI transcribe
+  list both a token price and a per-minute one that ESTIMATES it; adding both would bill a
+  transcription twice.
+  **The official-price lookup never trusts the model:** each price must come with the verbatim
+  line it was read from; `price_lookup.verify` keeps it only if that quote is on the fetched
+  page (case, whitespace, table pipes and Markdown punctuation ignored; Google's Markdoc
+  `{% … %}` tags stripped) and contains the number, and code (not the model) converts the
+  unit (per minute → per hour, per token → per 1M). Redirects are followed only within the
+  providers' hosts. The page is untrusted input — schema-bound answer, quote check, human
+  approval. Verified 2026-11-09 against the live pages for every model production uses (dry
+  run with hand-written answers: no provider key locally); **the real model's extraction has
+  not yet been run** — the first press on production is that test.
 - **Usage units and attribution (`/usage`).** Providers bill in different units and the page
   never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
   carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has
@@ -682,6 +703,8 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   filter, tab and search under 0.3 s at ~900 calls). **Not done:** the price list starts
   EMPTY — every call reads "no price" until the operator enters real provider prices in
   *Prices & markup* (back-dated to cover history); no invoice export (CSV/PDF) yet; no GEL.
+  Same day: the **official-price lookup** button (§3/§4), and the rule that a call is charged
+  by tokens or by audio/characters, never both.
 - **Deployed to the server:** the full app — audio analysis, TTS, KB + KB-admin console, fact-check,
   rubric scoring, the whole Next.js frontend — **including the QA fixes below** (pushed + deployed), plus the
   **registered auto-deploy webhook**. `origin/main` and the server are in sync.

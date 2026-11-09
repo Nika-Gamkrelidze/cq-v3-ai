@@ -131,25 +131,29 @@ LANGUAGE sql STABLE AS $fn$
                WHEN k.provider = 'local' THEN 0::numeric
                -- No price in force: unknown, never a silent zero.
                WHEN p.id IS NULL THEN NULL::numeric
-               -- A price in force that bills none of the units this call consumed (an audio-
-               -- only transcription against a tokens-only row) is just as unknown. A call that
-               -- consumed nothing at all (most failures) is priced, at zero.
-               WHEN NOT (
-                      (k.tokens > 0 AND COALESCE(p.input_per_mtok, p.output_per_mtok,
-                                                 p.cache_write_per_mtok, p.cache_read_per_mtok) IS NOT NULL)
-                   OR (k.secs > 0 AND p.audio_per_hour IS NOT NULL)
-                   OR (k.chars > 0 AND p.chars_per_k IS NOT NULL)
-                   OR (k.tokens + k.secs + k.chars = 0)
-                    ) THEN NULL::numeric
-               ELSE ( COALESCE(u.input_tokens, 0)  * COALESCE(p.input_per_mtok, 0)
+               -- Tokens win. A provider that lists both a token price and a per-minute price
+               -- (Gemini Transcribe, OpenAI transcribe) quotes the second as an ESTIMATE of the
+               -- first, so a call is charged one way only: by its tokens when it reported tokens
+               -- and the row prices tokens; otherwise by audio length and characters (ElevenLabs
+               -- reports no tokens at all).
+               WHEN k.tokens > 0 AND COALESCE(p.input_per_mtok, p.output_per_mtok,
+                                              p.cache_write_per_mtok, p.cache_read_per_mtok) IS NOT NULL
+               THEN ( COALESCE(u.input_tokens, 0)  * COALESCE(p.input_per_mtok, 0)
                     + COALESCE(u.output_tokens, 0) * COALESCE(p.output_per_mtok, 0)
                     + COALESCE(u.cache_creation_tokens, 0)
                         * COALESCE(p.cache_write_per_mtok, p.input_per_mtok, 0)
                     + COALESCE(u.cache_read_tokens, 0)
                         * COALESCE(p.cache_read_per_mtok, p.input_per_mtok, 0)
                     ) / 1000000
-                    + k.secs::numeric  * COALESCE(p.audio_per_hour, 0) / 3600
-                    + k.chars::numeric * COALESCE(p.chars_per_k, 0) / 1000
+               WHEN (k.secs > 0 AND p.audio_per_hour IS NOT NULL)
+                 OR (k.chars > 0 AND p.chars_per_k IS NOT NULL)
+               THEN k.secs::numeric  * COALESCE(p.audio_per_hour, 0) / 3600
+                  + k.chars::numeric * COALESCE(p.chars_per_k, 0) / 1000
+               -- A call that consumed nothing at all (most failures) is priced, at zero.
+               WHEN k.tokens + k.secs + k.chars = 0 THEN 0::numeric
+               -- A price in force that bills none of the units this call consumed (an audio-
+               -- only transcription against a tokens-only row): unknown, like no price at all.
+               ELSE NULL::numeric
              END AS cost_usd,
              -- The workspace's own markup in force, else the default in force. An override whose
              -- pct is NULL means "back to the default from this date", so ending one never needs

@@ -168,6 +168,40 @@ async def overview() -> dict:
     }
 
 
+MAX_LOOKUP_ITEMS = 40
+# Nothing to look up: our own server's model costs nothing, and "unknown" names no provider.
+_NOT_LOOKED_UP = ("local", "unknown")
+
+
+async def lookup_items(raw) -> list[dict]:
+    """The (provider, model, capability) list to look prices up for: the caller's, validated,
+    or — when none is given — every combination that has made calls."""
+    if raw is None:
+        prov, cap = usage.provider_sql(), usage.capability_sql()
+        async with pool().acquire() as conn:
+            rows = await conn.fetch(f"""
+                SELECT DISTINCT {prov} AS provider, u.model, {cap} AS capability
+                  FROM llm_usage u
+                 WHERE {prov} <> ALL($1::text[]) AND u.model IS NOT NULL
+                 ORDER BY 1, 2, 3""", list(_NOT_LOOKED_UP))
+        return [dict(r) for r in rows][:MAX_LOOKUP_ITEMS]
+    if not isinstance(raw, list) or len(raw) > MAX_LOOKUP_ITEMS:
+        raise PricingError(f"`items` must be a list of at most {MAX_LOOKUP_ITEMS}.")
+    out = []
+    for it in raw:
+        if not isinstance(it, dict):
+            raise PricingError("Each item needs provider, model and capability.")
+        provider = _text(it.get("provider"), "provider", 64).lower()
+        model = _text(it.get("model"), "model", 200)
+        if model == "*":
+            raise PricingError("Look prices up for a named model, not '*'.")
+        capability = _text(it.get("capability"), "capability", 20, required=False) or "llm"
+        if capability not in usage.CAPABILITIES:
+            raise PricingError(f"Unknown kind {capability!r}.")
+        out.append({"provider": provider, "model": model, "capability": capability})
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # Re-costing
 # ---------------------------------------------------------------------------------------------

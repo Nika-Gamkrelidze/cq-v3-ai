@@ -5,10 +5,11 @@ import { confirmDialog } from '@/components/ui/Modal';
 import { Select, type Option } from '@/components/ui/Select';
 import { toast } from '@/components/ui/Toast';
 import { apiMessage, apiSend } from '@/lib/session';
+import OfficialPrices from './OfficialPrices';
 import { LoadError, Loading, NUM, useUsageGet } from './listKit';
 import { duration, fmt, providerModel, when } from './logic';
 import { CAPABILITIES, PRICE_FIELDS } from './types';
-import type { MarkupRow, PriceField, PriceRow, Pricing, T, UnpricedRow } from './types';
+import type { LookupResponse, LookupResult, MarkupRow, PriceField, PriceRow, Pricing, T, UnpricedRow } from './types';
 
 /* Prices and markup: what turns the usage on the other tabs into money.
 
@@ -66,6 +67,7 @@ export default function PricesTab({ t }: { t: T }): JSX.Element {
   const reload = () => setNonce(n => n + 1);
   const [priceForm, setPriceForm] = useState<PriceForm | null>(null);
   const [markupForm, setMarkupForm] = useState<MarkupForm | null>(null);
+  const [official, setOfficial] = useState(false);
 
   if (data.error && !data.data) return <div className="card"><LoadError error={data.error} onRetry={data.retry} t={t} /></div>;
   if (!data.data) return <div className="card"><Loading t={t} /></div>;
@@ -73,7 +75,7 @@ export default function PricesTab({ t }: { t: T }): JSX.Element {
 
   const startPrice = (u?: UnpricedRow) => {
     setPriceForm(u
-      ? { ...EMPTY_PRICE, provider: u.provider, model: u.model, capability: '', from: day(u.first_used) || today() }
+      ? { ...EMPTY_PRICE, provider: u.provider, model: u.model, capability: u.capability, from: day(u.first_used) || today() }
       : { ...EMPTY_PRICE });
     requestAnimationFrame(() => document.getElementById('price-form')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
   };
@@ -81,8 +83,14 @@ export default function PricesTab({ t }: { t: T }): JSX.Element {
   return (
     <>
       <div className="card">
-        <h3 style={{ margin: '0 0 4px' }}>{t('um.prices.title')}</h3>
-        <p className="hint" style={{ margin: 0 }}>{t('um.prices.lead')}</p>
+        <div className="inline wrap" style={{ justifyContent: 'space-between', gap: 10 }}>
+          <h3 style={{ margin: 0 }}>{t('um.prices.title')}</h3>
+          {!official ? (
+            <button type="button" className="primary" onClick={() => setOfficial(true)}>{t('um.official.open')}</button>
+          ) : null}
+        </div>
+        <p className="hint" style={{ margin: '4px 0 0' }}>{t('um.prices.lead')}</p>
+        {official ? <OfficialPrices d={d} t={t} onSaved={reload} onClose={() => setOfficial(false)} /> : null}
       </div>
 
       <MarkupCard d={d} t={t} form={markupForm} setForm={setMarkupForm} onSaved={reload} />
@@ -304,6 +312,8 @@ function PriceEditor({ form, setForm, d, t, onSaved }: {
   const uid = useId();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [found, setFound] = useState<LookupResult | null>(null);
   const providers = useMemo(() => [...new Set(d.models.map(m => m.provider))].sort(), [d.models]);
   const models = useMemo(() => [...new Set(d.models.filter(m => !form.provider || m.provider === form.provider).map(m => m.model))].sort(),
     [d.models, form.provider]);
@@ -326,6 +336,40 @@ function PriceEditor({ form, setForm, d, t, onSaved }: {
       setErr(apiMessage(x, t));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // "Any kind" asks for the kind this model's calls actually were (one kind: that one; a
+  // text model otherwise), so a speech model is not looked up as a text model.
+  const kindFor = (): string => {
+    if (form.capability) return form.capability;
+    const kinds = [...new Set(d.models.filter(m => m.provider === form.provider && m.model === form.model).map(m => m.capability))];
+    return kinds.length === 1 ? kinds[0] : 'llm';
+  };
+
+  // Read this one model's prices off its provider's official page into the form, for the
+  // operator to check and save; the quotes it was read from are listed under the button.
+  const fillOfficial = async () => {
+    setLooking(true);
+    setFound(null);
+    setErr('');
+    try {
+      const out = await apiSend<LookupResponse>('POST', '/admin/usage/prices/lookup', {
+        items: [{ provider: form.provider, model: form.model, capability: kindFor() }],
+      }, { scope: 'admin' });
+      const r = out.results[0] ?? null;
+      setFound(r);
+      if (r && r.status === 'found') {
+        setForm({
+          ...form,
+          ...Object.fromEntries(PRICE_FIELDS.map(f => [f, r.prices[f] ? String(r.prices[f]!.value) : ''])) as Record<PriceField, string>,
+          note: form.note || t('um.official.note', { url: r.source_url ?? '', date: r.fetched_at.slice(0, 10) }).slice(0, 500),
+        });
+      }
+    } catch (x) {
+      setErr(apiMessage(x, t));
+    } finally {
+      setLooking(false);
     }
   };
 
@@ -364,6 +408,35 @@ function PriceEditor({ form, setForm, d, t, onSaved }: {
             onChange={e => setForm({ ...form, note: e.target.value })} />
         </Field>
       </div>
+      <div className="actions" style={{ marginTop: 10 }}>
+        <button type="button" className="ghost" disabled={looking || !form.provider || !form.model || form.model === '*'}
+          title={t('um.official.fill.tip')} onClick={fillOfficial}>
+          {looking ? <><span className="spinner" aria-hidden="true" /> {t('um.official.reading')}</> : t('um.official.fill')}
+        </button>
+      </div>
+      {found ? (
+        <div className="hint" style={{ marginTop: 6 }}>
+          {found.status === 'found' ? (
+            <>
+              {t('um.official.filled', { name: found.page_model_name || found.model })}{' '}
+              {found.source_url ? <a href={found.source_url} target="_blank" rel="noopener noreferrer">{new URL(found.source_url).hostname}</a> : null}
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {PRICE_FIELDS.filter(f => found.prices[f]).map(f => (
+                  <li key={f}><b>{t(FIELD_LABEL[f])}</b>: {found.prices[f]!.stated} — “{found.prices[f]!.quote}”</li>
+                ))}
+              </ul>
+              {found.notes ? <div>{found.notes}</div> : null}
+              {(found.scheduled ?? []).map(v => (
+                <div key={v.effective_from}>
+                  {t('um.official.scheduled', { date: v.effective_from })}:{' '}
+                  {PRICE_FIELDS.filter(f => v.prices[f]).map(f => `${t(FIELD_LABEL[f])} ${v.prices[f]!.stated}`).join(' · ')}
+                  {' '}{t('um.official.scheduled.form')}
+                </div>
+              ))}
+            </>
+          ) : <span className="err">{found.error || t(`um.official.st.${found.status}`)}</span>}
+        </div>
+      ) : null}
       <p className="hint" style={{ margin: '8px 0 0' }}>{t('um.price.hint')}</p>
       <p className="hint" style={{ margin: '4px 0 0' }}>{t(form.id ? 'um.price.edit.hint' : 'um.from.hint')}</p>
       {err ? <p className="msg err">{err}</p> : null}

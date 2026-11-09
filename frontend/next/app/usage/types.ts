@@ -6,7 +6,7 @@
     `feature` to one of these (`usage.GROUPS`); `other` catches a label added later. */
 export const GROUPS = [
   'transcription', 'analysis', 'factcheck', 'sentiment', 'score', 'summary',
-  'bot', 'copilot', 'tts', 'kb', 'rubric', 'test', 'other',
+  'crm', 'bot', 'copilot', 'tts', 'kb', 'rubric', 'pricing', 'test', 'other',
 ] as const;
 export type Group = typeof GROUPS[number];
 
@@ -283,4 +283,35 @@ export interface Pricing {
   unpriced: UnpricedRow[];
   models: { provider: string; model: string; capability: string }[];
   tenants: { client_id: string; name: string }[];
+}
+
+/* ---- Official price lookup (`POST /admin/usage/prices/lookup`) ----------------------------- */
+
+export interface LookupPrice {
+  /** In our column's unit (per 1M tokens, per hour, per 1K characters). */
+  value: number;
+  /** The line of the provider's page the price was read from (verified to be on the page). */
+  quote: string;
+  /** The price as the page states it, e.g. "0.006 per minute". */
+  stated: string;
+}
+
+export interface LookupResult {
+  provider: string;
+  model: string;
+  capability: string;
+  status: 'found' | 'unverified' | 'not_listed' | 'unsupported' | 'error';
+  source_url: string | null;
+  fetched_at: string;
+  page_model_name?: string;
+  notes?: string;
+  error?: string;
+  prices: Partial<Record<PriceField, LookupPrice>>;
+  /** Changes the page announces for a later date ("$1.50 starting January 1, 2027"). */
+  scheduled?: { effective_from: string; prices: Partial<Record<PriceField, LookupPrice>> }[];
+}
+
+export interface LookupResponse {
+  results: LookupResult[];
+  sources: Record<string, string>;
 }

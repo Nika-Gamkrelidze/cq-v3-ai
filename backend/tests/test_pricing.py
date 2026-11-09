@@ -259,3 +259,26 @@ def test_a_call_recorded_after_the_price_is_costed_as_it_lands(api, world):
     row = _calls(api, world)[new_id]
     assert row["cost_usd"] == pytest.approx(1.0)          # 0.5M input @ $2 (v2)
     assert row["billed_usd"] == pytest.approx(1.5)        # default 50% from 3 days ago
+
+
+def test_tokens_win_over_a_per_minute_estimate_and_audio_bills_tokenless_calls(api, world):
+    """Gemini/OpenAI transcribe list a token price AND a per-minute one; a call is charged once."""
+    prov = world["prov"]
+
+    async def seed(conn):
+        await conn.execute("""
+            INSERT INTO ai_prices (provider, model, capability, effective_from, input_per_mtok,
+                                   output_per_mtok, audio_per_hour)
+            VALUES ($1, 'm-both', 'stt', now() - interval '30 days', 2, 12, 0.3)""", prov)
+        ids = []
+        for tokens, secs in ((1_000_000, 600.0), (None, 600.0)):
+            ids.append(str(await conn.fetchval("""
+                INSERT INTO llm_usage (client_id, feature, model, provider, capability,
+                                       input_tokens, audio_seconds, ok, latency_ms)
+                VALUES ($1, 'transcribe', 'm-both', $2, 'stt', $3, $4, true, 5) RETURNING id""",
+                world["cid"], prov, tokens, secs)))
+        return ids
+    with_tokens, tokenless = sql(seed)
+    rows = _calls(api, world)
+    assert rows[with_tokens]["cost_usd"] == pytest.approx(2.0)     # 1M input @ $2, no audio on top
+    assert rows[tokenless]["cost_usd"] == pytest.approx(0.05)      # 10 min @ $0.30/hour

@@ -13,7 +13,7 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from ..services import pricing, usage, usage_drill, usage_report
+from ..services import price_lookup, pricing, usage, usage_drill, usage_report
 from .admin import require_admin
 
 router = APIRouter(prefix="/admin/usage", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -147,6 +147,19 @@ async def pricing_overview():
 @router.post("/prices", status_code=201)
 async def add_price(body: dict = Body(...)):
     return await _priced(pricing.add_price(body, _ACTOR))
+
+
+@router.post("/prices/lookup")
+async def lookup_prices(body: dict = Body(default={})):
+    """PROPOSED prices read from each provider's official pricing page, for the operator to
+    review — nothing is saved. Without `items`, every model that has made calls."""
+    try:
+        items = await pricing.lookup_items(body.get("items") if isinstance(body, dict) else None)
+    except pricing.PricingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not items:
+        return {"results": [], "sources": price_lookup.SOURCES}
+    return await price_lookup.lookup(items)
 
 
 @router.put("/prices/{price_id}")
