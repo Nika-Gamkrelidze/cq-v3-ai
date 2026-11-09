@@ -47,7 +47,15 @@ export default function UsagePage() {
   // first request a tab makes already carries the deep-linked workspace instead of fetching
   // the unfiltered page and then throwing it away.
   useEffect(() => {
-    setIsOperator(readSession().role === 'superadmin');
+    const { role } = readSession();
+    // Every workspace's spend side by side: a signed-in tenant or user is sent to their own
+    // page rather than shown even the shell of this one. The API refuses them regardless
+    // (`require_admin`, pinned by tests/test_usage_superadmin_only.py); this is the screen.
+    if (role === 'tenant' || role === 'user') {
+      window.location.replace(role === 'tenant' ? '/workspace' : '/account');
+      return;
+    }
+    setIsOperator(role === 'superadmin');
     try {
       const stored = localStorage.getItem(TAB_STORE);
       if (isTab(stored)) setTab(stored);
