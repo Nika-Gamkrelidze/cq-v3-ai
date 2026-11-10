@@ -129,6 +129,14 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   (**PDF/DOCX/TXT/MD**), paste text, CSV (Q&A / key-value), plus API-key ingestion. Chunk → embed →
   `ready`. Semantic (pgvector cosine) retrieval with a **keyword (pg_trgm) fallback** for
   low-resource languages.
+  **Without the AI restructure option** (`kb_ingest.chunk_text`): text is cut into ~1,000-char
+  pieces — packed at blank lines, then at line breaks (Word/PDF/Excel text has no blank lines),
+  and only a single over-long line is cut by character. CRLF is normalised first (a Windows
+  .txt/.md used to have no paragraph breaks at all and was sliced mid-word). CSV is one entry
+  per row. **Sample files** for every format (PDF, DOCX, XLSX, CSV Q&A + table, TXT, MD; en + ka,
+  Russian shows the English ones) sit under Import in the workspace; they live in
+  `frontend/public/guides/templates`, are built by `backend/scripts/build_kb_samples.py` (do not
+  hand-edit) and `tests/test_kb_samples.py` runs each through the real extractor and chunker.
 - **KB admin console** (the KB tab of `/workspace` under operator scope, `routers/kb_admin.py`): superadmin operator
   command center across tenants — tenant selector, stats + params (embedding dim match), documents
   list/filter/search, edit doc (re-chunk/re-embed), chunk-level edit/delete, retrieval **playground**,
@@ -413,15 +421,28 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   tokens, otherwise by audio length and characters. Gemini Transcribe and OpenAI transcribe
   list both a token price and a per-minute one that ESTIMATES it; adding both would bill a
   transcription twice.
-  **The official-price lookup never trusts the model:** each price must come with the verbatim
-  line it was read from; `price_lookup.verify` keeps it only if that quote is on the fetched
-  page (case, whitespace, table pipes and Markdown punctuation ignored; Google's Markdoc
-  `{% … %}` tags stripped) and contains the number, and code (not the model) converts the
-  unit (per minute → per hour, per token → per 1M). Redirects are followed only within the
-  providers' hosts. The page is untrusted input — schema-bound answer, quote check, human
-  approval. Verified 2026-11-09 against the live pages for every model production uses (dry
-  run with hand-written answers: no provider key locally); **the real model's extraction has
-  not yet been run** — the first press on production is that test.
+  **The official-price lookup never trusts the model, and never asks it twice for the same
+  answer** (`services/price_lookup.py`). Prices come ONLY from each provider's own pricing
+  page (`SOURCES`), fetched and flattened to text; the AI reads it and cites the LINE NUMBERS
+  each price is on (the page is shown as `[12] text` — it never copies text, because a
+  misquoted row used to make a correct price "could not verify"), and code reads those lines,
+  checks the number is in them, and converts the unit (per minute → per hour, per token → per
+  1M). A model is read once for EVERYTHING its page row says (text tokens, audio tokens,
+  `audio_total` / `audio_input` / `audio_output` per length, characters), kind-independent;
+  `columns_for(kind, …)` then decides in code which reading fills which column (a speech model
+  takes the audio-token input price and the all-in per-hour price, a text model the text
+  prices) — so a chat model used as a stand-in transcriber is found, and the choice cannot
+  differ between runs. Each page is read `READINGS` = 2 times and a price is proposed only if
+  every reading found it with the same number (`consolidate`); the rest come back as `unstable`
+  with each reading's value. A page that is byte-for-byte unchanged is answered from an
+  in-process cache for 6 h (`fresh: true` = the *Read again* button; bump `PROMPT_VERSION` when
+  the prompt or schema changes), so two presses a minute apart show the same numbers. Redirects
+  are followed only within the providers' hosts. The page is untrusted input — schema-bound
+  answer, cited-line check, two agreeing readings, human approval. Verified 2026-11-09/10
+  against the live pages with hand-cited lines (no provider key locally); the first real
+  presses on production (2026-11-10) showed three faults — an ambiguous audio rule picked a
+  different per-minute figure each time, a chat model used for transcription was looked up as
+  speech-only, and misquoted rows were rejected — which this design fixes.
 - **Usage units and attribution (`/usage`).** Providers bill in different units and the page
   never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
   carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has

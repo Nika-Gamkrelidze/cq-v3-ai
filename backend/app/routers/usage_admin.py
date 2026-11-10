@@ -152,14 +152,16 @@ async def add_price(body: dict = Body(...)):
 @router.post("/prices/lookup")
 async def lookup_prices(body: dict = Body(default={})):
     """PROPOSED prices read from each provider's official pricing page, for the operator to
-    review — nothing is saved. Without `items`, every model that has made calls."""
+    review — nothing is saved. Without `items`, every model that has made calls. A page that has
+    not changed since it was last read gets the SAME answer (so two presses a minute apart cannot
+    disagree); `fresh: true` asks the AI to read it again."""
     try:
         items = await pricing.lookup_items(body.get("items") if isinstance(body, dict) else None)
     except pricing.PricingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not items:
         return {"results": [], "sources": price_lookup.SOURCES}
-    return await price_lookup.lookup(items)
+    return await price_lookup.lookup(items, fresh=bool(isinstance(body, dict) and body.get("fresh")))
 
 
 @router.put("/prices/{price_id}")

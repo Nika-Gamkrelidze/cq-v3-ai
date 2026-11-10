@@ -300,13 +300,20 @@ export interface LookupResult {
   provider: string;
   model: string;
   capability: string;
-  status: 'found' | 'unverified' | 'not_listed' | 'unsupported' | 'error';
+  status: 'found' | 'unstable' | 'unverified' | 'not_listed' | 'unsupported' | 'error';
   source_url: string | null;
   fetched_at: string;
   page_model_name?: string;
   notes?: string;
   error?: string;
   prices: Partial<Record<PriceField, LookupPrice>>;
+  /** True when this is an earlier reading of a page that has not changed (`fetched_at` is when
+      it was read). */
+  cached?: boolean;
+  /** Figures the AI's independent readings of the page did NOT agree on: not proposed. */
+  unstable?: { field: PriceField; when: string; values: (number | null)[]; quote: string }[];
+  /** Prices the AI named that the page does not back, with why. */
+  rejected?: { field: string | null; value: unknown; unit: string | null; reason: string }[];
   /** Changes the page announces for a later date ("$1.50 starting January 1, 2027"). */
   scheduled?: { effective_from: string; prices: Partial<Record<PriceField, LookupPrice>> }[];
 }

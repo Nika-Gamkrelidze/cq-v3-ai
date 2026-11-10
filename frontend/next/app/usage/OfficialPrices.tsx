@@ -52,12 +52,14 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
   const firstCall = (r: LookupResult) =>
     d.unpriced.find(u => u.provider === r.provider && u.model === r.model && u.capability === r.capability)?.first_used;
 
-  const run = async () => {
+  /* `fresh` is the "Read again" button: without it the server hands back the earlier reading of
+     a page that has not changed, so two presses a minute apart cannot disagree. */
+  const run = async (fresh = false) => {
     setState('loading');
     setErr('');
     setRowErr({});
     try {
-      const out = await apiSend<LookupResponse>('POST', '/admin/usage/prices/lookup', {}, { scope: 'admin' });
+      const out = await apiSend<LookupResponse>('POST', '/admin/usage/prices/lookup', fresh ? { fresh: true } : {}, { scope: 'admin' });
       setRes(out);
       const p: Record<string, boolean> = {};
       const dt: Record<string, string> = {};
@@ -120,6 +122,7 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
 
   const results = res?.results ?? [];
   const nPicked = results.filter(r => picked[key(r)] && r.status === 'found').length;
+  const cachedAt = results.find(r => r.cached)?.fetched_at;
   const sources = [...new Set(results.map(r => r.source_url).filter(Boolean))] as string[];
 
   return (
@@ -129,7 +132,7 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
 
       {state !== 'done' ? (
         <div className="actions" style={{ marginTop: 12 }}>
-          <button type="button" className="primary" disabled={state === 'loading'} onClick={run}>
+          <button type="button" className="primary" disabled={state === 'loading'} onClick={() => void run()}>
             {state === 'loading' ? <><span className="spinner" aria-hidden="true" /> {t('um.official.reading')}</> : t('um.official.run')}
           </button>
           <button type="button" className="ghost" onClick={onClose}>{t('um.cancel')}</button>
@@ -145,6 +148,11 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
               {sources.map((u, i) => (
                 <span key={u}>{i ? ' · ' : ''}<a href={u} target="_blank" rel="noopener noreferrer">{new URL(u).hostname}</a></span>
               ))}
+            </p>
+          ) : null}
+          {cachedAt ? (
+            <p className="hint" style={{ margin: '8px 0 0' }}>
+              {t('um.official.cached', { time: new Date(cachedAt).toLocaleTimeString() })}
             </p>
           ) : null}
           {!results.length ? <div className="empty">{t('um.official.none')}</div> : (
@@ -182,6 +190,16 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
                               {PRICE_FIELDS.filter(f => v.prices[f]).map(f => `${t(`um.f.${FIELD_KEY[f]}`)} ${money(v.prices[f]!.value)}`).join(' · ')}
                             </div>
                           ))}
+                          {(r.unstable ?? []).map(u => (
+                            <div key={`${u.when}${u.field}`} className="hint" style={{ maxWidth: 320, whiteSpace: 'normal' }}
+                              title={u.quote ? `“${u.quote}”` : undefined}>
+                              <span className="pill pending">⚠</span>{' '}
+                              {t('um.official.unstable', {
+                                what: `${t(`um.f.${FIELD_KEY[u.field]}`)}${u.when ? ` (${u.when})` : ''}`,
+                                values: u.values.map(v => money(v)).join(' / '),
+                              })}
+                            </div>
+                          ))}
                           {rowErr[k] ? <div className="msg err" style={{ margin: 0 }}>{rowErr[k]}</div> : null}
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>{t(`usage.cap.${r.capability}`)}</td>
@@ -190,6 +208,11 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
                             {usable ? t(differs(r, cur) ? (cur ? 'um.official.changed' : 'um.official.new') : 'um.official.same') : t(`um.official.st.${r.status}`)}
                           </span>
                           {r.error ? <div className="hint">{r.error}</div> : null}
+                          {r.status === 'unverified' && r.rejected?.length ? (
+                            <div className="hint" style={{ whiteSpace: 'normal' }}>
+                              {t('um.official.why', { reasons: [...new Set(r.rejected.map(x => x.reason))].join('; ') })}
+                            </div>
+                          ) : null}
                         </td>
                         {PRICE_FIELDS.map(f => {
                           const p = r.prices[f];
@@ -218,7 +241,7 @@ export default function OfficialPrices({ d, t, onSaved, onClose }: {
             <button type="button" className="primary" disabled={!nPicked || saving} onClick={save}>
               {t('um.official.save', { n: nPicked })}
             </button>
-            <button type="button" className="ghost" onClick={run} disabled={saving}>{t('um.official.again')}</button>
+            <button type="button" className="ghost" onClick={() => void run(true)} disabled={saving}>{t('um.official.again')}</button>
             <button type="button" className="ghost" onClick={onClose}>{t('um.cancel')}</button>
           </div>
         </>

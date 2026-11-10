@@ -8,7 +8,7 @@ export const en: Dict = {
   'um.official.scheduled.form': '— add it as a second price dated that day, or use “Look up official prices”, which saves both.',
   'um.official.open': 'Look up official prices',
   'um.official.title': 'Official prices',
-  'um.official.lead': 'Reads each provider’s own pricing page (Anthropic, Google, OpenAI, ElevenLabs) for every model that has made calls, and lists its input, output, cache, audio and character prices next to the price in force. Every number is checked against the line of the page it came from — hover a price to see it. Nothing is saved until you tick rows and press Save.',
+  'um.official.lead': 'Reads each provider’s own pricing page (Anthropic, Google, OpenAI, ElevenLabs) for every model that has made calls, and lists its input, output, cache, audio and character prices next to the price in force. Every number is checked against the line of the page it came from — hover a price to see it. Nothing is saved until you tick rows and press Save. Each page is read twice and a price is proposed only when both readings agree on it.',
   'um.official.run': 'Read the official pricing pages',
   'um.official.reading': 'Reading the official pricing pages…',
   'um.official.sources': 'Read from:',
@@ -101,6 +101,10 @@ export const en: Dict = {
   'um.edit': 'Edit',
   'um.delete': 'Delete',
   'um.saved': 'Saved',
+  'um.official.st.unstable': 'Readings differ',
+  'um.official.unstable': '{what}: two readings of the page gave {values}. Not proposed — check it on the page.',
+  'um.official.cached': 'The page has not changed since it was read at {time}, so this is the same reading as before. Press “Read again” to have the AI read it afresh.',
+  'um.official.why': 'Why: {reasons}',
 };
 
 export const ka: Dict = {
@@ -108,7 +112,7 @@ export const ka: Dict = {
   'um.official.scheduled.form': '— დაამატეთ მეორე ფასად ამ თარიღით, ან გამოიყენეთ „ოფიციალური ფასების მოძიება“, რომელიც ორივეს ინახავს.',
   'um.official.open': 'ოფიციალური ფასების მოძიება',
   'um.official.title': 'ოფიციალური ფასები',
-  'um.official.lead': 'კითხულობს თითოეული პროვაიდერის საკუთარ ფასების გვერდს (Anthropic, Google, OpenAI, ElevenLabs) ყველა მოდელისთვის, რომელსაც გამოძახებები ჰქონდა, და აჩვენებს შემავალის, გამომავალის, ქეშის, აუდიოს და სიმბოლოების ფასებს მოქმედი ფასის გვერდით. ყოველი რიცხვი მოწმდება გვერდის იმ ხაზით, საიდანაც აიღო — დაადეთ კურსორი ფასს მის სანახავად. არაფერი ინახება, სანამ სტრიქონებს არ მონიშნავთ და „შენახვას“ არ დააჭერთ.',
+  'um.official.lead': 'კითხულობს თითოეული პროვაიდერის საკუთარ ფასების გვერდს (Anthropic, Google, OpenAI, ElevenLabs) ყველა მოდელისთვის, რომელსაც გამოძახებები ჰქონდა, და აჩვენებს შემავალის, გამომავალის, ქეშის, აუდიოს და სიმბოლოების ფასებს მოქმედი ფასის გვერდით. ყოველი რიცხვი მოწმდება გვერდის იმ ხაზით, საიდანაც აიღო — დაადეთ კურსორი ფასს მის სანახავად. არაფერი ინახება, სანამ სტრიქონებს არ მონიშნავთ და „შენახვას“ არ დააჭერთ. ყოველი გვერდი ორჯერ იკითხება და ფასი მხოლოდ მაშინ შემოთავაზდება, როცა ორივე წაკითხვა ერთმანეთს ემთხვევა.',
   'um.official.run': 'ოფიციალური ფასების გვერდების წაკითხვა',
   'um.official.reading': 'ოფიციალური ფასების გვერდები იკითხება…',
   'um.official.sources': 'წყარო:',
@@ -201,6 +205,10 @@ export const ka: Dict = {
   'um.edit': 'რედაქტირება',
   'um.delete': 'წაშლა',
   'um.saved': 'შენახულია',
+  'um.official.st.unstable': 'წაკითხვები განსხვავდება',
+  'um.official.unstable': '{what}: გვერდის ორმა წაკითხვამ სხვადასხვა შედეგი მისცა — {values}. არ არის შემოთავაზებული; გადაამოწმეთ გვერდზე.',
+  'um.official.cached': 'გვერდი {time}-ზე წაკითხვის შემდეგ არ შეცვლილა, ამიტომ ეს იგივე წაკითხვაა. AI-ს თავიდან წასაკითხად დააჭირეთ „თავიდან წაკითხვას“.',
+  'um.official.why': 'მიზეზი: {reasons}',
 };
 
 export const ru: Dict = {
@@ -208,7 +216,7 @@ export const ru: Dict = {
   'um.official.scheduled.form': '— добавьте её второй ценой с этой датой или воспользуйтесь «Найти официальные цены», который сохранит обе.',
   'um.official.open': 'Найти официальные цены',
   'um.official.title': 'Официальные цены',
-  'um.official.lead': 'Читает собственную страницу цен каждого провайдера (Anthropic, Google, OpenAI, ElevenLabs) для всех моделей, которые делали вызовы, и показывает цены за вход, выход, кэш, аудио и символы рядом с действующей ценой. Каждое число проверяется по строке страницы, из которой оно взято, — наведите на цену, чтобы её увидеть. Ничего не сохраняется, пока вы не отметите строки и не нажмёте «Сохранить».',
+  'um.official.lead': 'Читает собственную страницу цен каждого провайдера (Anthropic, Google, OpenAI, ElevenLabs) для всех моделей, которые делали вызовы, и показывает цены за вход, выход, кэш, аудио и символы рядом с действующей ценой. Каждое число проверяется по строке страницы, из которой оно взято, — наведите на цену, чтобы её увидеть. Ничего не сохраняется, пока вы не отметите строки и не нажмёте «Сохранить». Каждая страница читается дважды, и цена предлагается, только если оба прочтения совпали.',
   'um.official.run': 'Прочитать официальные страницы цен',
   'um.official.reading': 'Читаем официальные страницы цен…',
   'um.official.sources': 'Источник:',
@@ -301,4 +309,8 @@ export const ru: Dict = {
   'um.edit': 'Изменить',
   'um.delete': 'Удалить',
   'um.saved': 'Сохранено',
+  'um.official.st.unstable': 'Прочтения расходятся',
+  'um.official.unstable': '{what}: два прочтения страницы дали разное — {values}. Не предлагается; проверьте на странице.',
+  'um.official.cached': 'Страница не менялась с момента чтения в {time}, поэтому это то же самое прочтение. Нажмите «Прочитать ещё раз», чтобы ИИ прочитал её заново.',
+  'um.official.why': 'Почему: {reasons}',
 };
