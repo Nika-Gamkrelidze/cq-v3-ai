@@ -120,11 +120,11 @@ async def overview(f: usage.UsageFilter) -> dict:
                    ARRAY(SELECT DISTINCT actor FROM r
                           WHERE actor IS NOT NULL ORDER BY 1)                AS actors""",
                                     *range_args)
-        tenants = await conn.fetch(f"""
-            SELECT DISTINCT u.client_id, COALESCE(c.name, '—') AS name
-              FROM llm_usage u LEFT JOIN clients c ON c.id = u.client_id
-             WHERE {range_where} AND u.client_id IS NOT NULL
-             ORDER BY 2, 1""", *range_args)
+        # EVERY workspace, not only those with calls in this range: the dropdown is a way to
+        # pick a workspace, and with the range's callers alone it came up empty whenever the
+        # last 30 days held only unattributed calls (price lookups, console tests, anonymous
+        # visitors), leaving no way to choose one. A workspace with no calls simply shows zeros.
+        tenants = await conn.fetch("SELECT id AS client_id, name FROM clients ORDER BY lower(name), id")
 
     tot, _ = usage.split_totals(usage.record(total))
     return {

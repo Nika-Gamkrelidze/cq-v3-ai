@@ -263,6 +263,17 @@ def test_overview_filters_narrow_the_total_but_not_the_facets(api, seeded):
     assert {"llm", "stt", "tts", "voice_tone"} <= set(facets["capabilities"])
 
 
+def test_the_workspace_filter_lists_every_workspace_even_with_no_calls_in_range(api, seeded):
+    """An empty dropdown (last 30 days held only unattributed calls) left no way to pick a
+    workspace at all. The list is the workspaces themselves, not the callers in the range."""
+    quiet = _get(api, "/admin/usage/overview", **{"from": "2001-01-01", "to": "2001-01-02"})
+    assert quiet["total"]["calls"] == 0
+    listed = {t["client_id"]: t["name"] for t in quiet["facets"]["tenants"]}
+    assert {seeded["a"], seeded["b"]} <= set(listed) and all(listed.values())
+    names = [t["name"].lower() for t in quiet["facets"]["tenants"]]
+    assert names == sorted(names)
+
+
 def test_overview_buckets_and_explicit_range(api, seeded):
     day = _get(api, "/admin/usage/overview", client_id=seeded["a"], window="24h")
     assert day["bucket"] == "hour" and day["total"]["calls"] == len(A_CALLS)
