@@ -164,11 +164,44 @@ _XLSX_FORMULA_ERRORS = {"#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#N/A", "#NULL!
 
 
 # ---- chunking --------------------------------------------------------------
+def _wrap_long(paragraph: str, size: int, overlap: int) -> list[str]:
+    """A block longer than one chunk, cut at the kindest place available.
+
+    Word, PDF and Excel text arrives with single line breaks and no blank lines (there is no
+    paragraph gap to split on), so the old hard cut every `size` characters sliced those
+    documents mid-word. Lines are packed whole instead; only a single line longer than a chunk
+    is cut by character, with the overlap, as before.
+    """
+    out: list[str] = []
+    buf = ""
+    for line in (ln.strip() for ln in paragraph.split("\n")):
+        if not line:
+            continue
+        if len(line) > size:
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.extend(line[i:i + size] for i in range(0, len(line), size - overlap))
+        elif not buf:
+            buf = line
+        elif len(buf) + len(line) + 1 <= size:
+            buf = f"{buf}\n{line}"
+        else:
+            out.append(buf)
+            buf = line
+    if buf:
+        out.append(buf)
+    return out
+
+
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    text = (text or "").strip()
+    # A file written on Windows separates its paragraphs with CR LF CR LF, which the blank-line
+    # split below would never see: the whole document became one block and was cut every
+    # `size` characters, mid-sentence.
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return []
-    # Prefer paragraph boundaries, then hard-wrap oversized paragraphs.
+    # Prefer paragraph boundaries, then line boundaries, and only then a hard cut.
     paras = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[str] = []
     buf = ""
@@ -181,8 +214,7 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
             if len(p) <= size:
                 buf = p
             else:
-                for i in range(0, len(p), size - overlap):
-                    chunks.append(p[i:i + size])
+                chunks.extend(_wrap_long(p, size, overlap))
                 buf = ""
     if buf:
         chunks.append(buf)

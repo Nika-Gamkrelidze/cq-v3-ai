@@ -14,7 +14,21 @@ import { SCOPE, useWs } from '../ctx';
 
 type Mode = 'file' | 'text' | 'csv';
 
-const TEMPLATE_KINDS = ['pdf', 'docx', 'txt', 'md', 'csv'] as const;
+/* One sample per format the importer reads (backend/scripts/build_kb_samples.py builds them, and
+   backend/tests/test_kb_samples.py runs each through the real extractor). `file` is the name
+   after `kb-template-<lang>`; `note` is the dictionary key saying how that format is read. */
+type Sample = { label: string; labelKey?: string; file: string; note: string };
+const FILE_SAMPLES: Sample[] = [
+  { label: 'PDF', file: '.pdf', note: 'kb.fmt.pdf' },
+  { label: 'DOCX', file: '.docx', note: 'kb.fmt.docx' },
+  { label: 'XLSX', file: '.xlsx', note: 'kb.fmt.xlsx' },
+  { label: 'TXT', file: '.txt', note: 'kb.fmt.txt' },
+  { label: 'MD', file: '.md', note: 'kb.fmt.md' },
+];
+const CSV_SAMPLES: Sample[] = [
+  { label: 'CSV', file: '.csv', note: 'kb.fmt.csv' },
+  { label: 'CSV', labelKey: 'kb.fmt.csv2.label', file: '-table.csv', note: 'kb.fmt.csv2' },
+];
 const ACCEPT = '.pdf,.docx,.xlsx,.xlsm,.csv,.txt,.md';
 
 export function Import({ onImported }: { onImported: () => void }) {
@@ -38,20 +52,27 @@ export function Import({ onImported }: { onImported: () => void }) {
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
-  /* Template downloads under the importer: users copy a working structure instead of guessing.
-     Language-matched (KA files for the Georgian UI, EN otherwise). */
+  /* Sample files under the importer: one per format, with how that format is read. Language-
+     matched (Georgian samples for the Georgian UI, English otherwise — Russian says so). */
   const tplLang = lang === 'ka' ? 'ka' : 'en';
-  const templates = (
-    <div className="hint" style={{ marginTop: 8 }}>
-      <span>{t('kb.templates')}</span>{' '}
-      <span>
-        {TEMPLATE_KINDS.map((x, i) => (
-          <span key={x}>
-            {i ? ' · ' : ''}
-            <a href={`/guides/templates/kb-template-${tplLang}.${x}`} download>{x.toUpperCase()}</a>
-          </span>
+  const samples = (list: Sample[]) => (
+    <div className="hint" style={{ marginTop: 10 }}>
+      <strong>{t('kb.fmt.title')}</strong>
+      <div style={{ marginTop: 4 }}>{t('kb.fmt.lead')}</div>
+      <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'grid', gap: 6 }}>
+        {list.map(x => (
+          <li
+            key={x.label + x.file}
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, auto) 1fr', gap: 10, alignItems: 'baseline' }}
+          >
+            <a href={`/guides/templates/kb-template-${tplLang}${x.file}`} download aria-label={`${t('kb.fmt.get')} ${x.labelKey ? t(x.labelKey) : x.label}`}>
+              ⬇ {x.labelKey ? t(x.labelKey) : x.label}
+            </a>
+            <span>{t(x.note)}</span>
+          </li>
         ))}
-      </span>
+      </ul>
+      {lang === 'ru' ? <div style={{ marginTop: 6 }}>{t('kb.fmt.ru')}</div> : null}
     </div>
   );
 
@@ -180,7 +201,7 @@ export function Import({ onImported }: { onImported: () => void }) {
       <div className={mode === 'file' ? undefined : 'hidden'}>
         <label htmlFor="i_file">{t('kb.filelabel')}</label>
         <input type="file" id="i_file" ref={fileRef} accept={ACCEPT} multiple />
-        {templates}
+        {samples(FILE_SAMPLES)}
         <label className="inline" style={{ gap: 8, marginTop: 12 }}>
           <input
             type="checkbox" style={{ width: 'auto' }} checked={restructure}
@@ -198,7 +219,7 @@ export function Import({ onImported }: { onImported: () => void }) {
       <div className={mode === 'csv' ? undefined : 'hidden'}>
         <label htmlFor="i_csv"><span>{t('kb.csvlabel')}</span><Tip text={t('kb.csvhint')} /></label>
         <input type="file" id="i_csv" ref={csvRef} accept=".csv" multiple />
-        {templates}
+        {samples(CSV_SAMPLES)}
       </div>
 
       <div className="actions">

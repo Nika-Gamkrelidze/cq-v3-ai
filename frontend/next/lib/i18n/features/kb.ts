@@ -205,7 +205,6 @@ export const en: Dict = {
 
   'kba.notenants': 'No organizations yet — create one in the Console.',
 
-  'kb.templates': 'Sample files to copy:',
   'kb.restr': 'My file does not follow the template — restructure it with AI',
   'kb.restr.done': 'AI restructuring finished — the document is ready.',
   'kb.restr.fail': 'AI restructuring failed.',
@@ -215,6 +214,19 @@ export const en: Dict = {
   'kb.files.failed': 'Failed:',
 
   'kb.restr.hint': 'During import, Claude reads the document and rewrites it as clean, self-contained entries — every amount, term and number is kept exactly as written. The import takes a little longer.',
+
+  'kb.fmt.title': 'Sample files — one for every format',
+  'kb.fmt.lead': 'The same content in each format. Every sample imports as it is, without the AI option, so you can see the pattern we cut by: a file becomes pieces of about 1,000 characters, split at blank lines in TXT and MD, at line breaks in PDF, DOCX and Excel, and one entry per row in CSV. A short file is only one or two pieces.',
+  'kb.fmt.pdf': 'A text PDF, not a scan. It is read line by line, so start every paragraph with what it is about.',
+  'kb.fmt.docx': 'Paragraphs and tables in order; a table row becomes “cell | cell”. Start every paragraph with its topic.',
+  'kb.fmt.xlsx': 'Every sheet, row by row, as “cell | cell”; the sheet name is kept when there are several. Repeat the subject in each row (the plan name in every plan row) and avoid merged cells.',
+  'kb.fmt.txt': 'A blank line ends a topic. Put a heading directly above its text, with no blank line between them.',
+  'kb.fmt.md': 'Like TXT: a blank line ends a topic; keep each “## heading” directly above its text.',
+  'kb.fmt.csv': 'First row = column headers. Every other row becomes one entry, one “header: value” line per column. Best for questions and answers.',
+  'kb.fmt.csv2': 'More than two columns work the same way: one entry per row, so each row must make sense on its own.',
+  'kb.fmt.get': 'Download',
+  'kb.fmt.csv2.label': 'CSV (table)',
+  'kb.fmt.ru': 'The samples are in English and Georgian; Russian text imports exactly the same way.',
 };
 
 export const ka: Dict = {
@@ -404,7 +416,6 @@ export const ka: Dict = {
 
   'kba.notenants': 'ორგანიზაციები ჯერ არ არის — შექმენით კონსოლში.',
 
-  'kb.templates': 'ნიმუშის ფაილები:',
   'kb.restr': 'ფაილი შაბლონს არ მიჰყვება — AI-მ გადააწყოს იმპორტისას',
   'kb.restr.done': 'AI-გადაწყობა დასრულდა — დოკუმენტი მზადაა.',
   'kb.restr.fail': 'AI-გადაწყობა ვერ შესრულდა.',
@@ -414,6 +425,19 @@ export const ka: Dict = {
   'kb.files.failed': 'ვერ დაიმპორტდა:',
 
   'kb.restr.hint': 'იმპორტისას Claude წაიკითხავს დოკუმენტს და გადააწყობს მას მკაფიო, დამოუკიდებელ ჩანაწერებად — ყველა თანხა, ვადა და რიცხვი ზუსტად ისე რჩება, როგორც წერია. იმპორტს ცოტა მეტი დრო სჭირდება.',
+
+  'kb.fmt.title': 'ნიმუშის ფაილები — თითო ყველა ფორმატისთვის',
+  'kb.fmt.lead': 'ერთი და იგივე შინაარსი ყველა ფორმატში. ყველა ნიმუში AI-ს გარეშე, როგორც არის, შემოდის — ასე ხედავთ, რა წესით ვჭრით: ფაილი იყოფა დაახლოებით 1000 სიმბოლოიან ნაწილებად — TXT-სა და MD-ში ცარიელი სტრიქონის მიხედვით, PDF-ში, DOCX-სა და Excel-ში — სტრიქონის გასწვრივ, CSV-ში კი ერთი რიგი ერთი ჩანაწერია. მოკლე ფაილი მხოლოდ ერთი-ორი ნაწილია.',
+  'kb.fmt.pdf': 'ტექსტური PDF და არა სკანი. იკითხება სტრიქონ-სტრიქონ, ამიტომ ყოველი აბზაცი დაიწყეთ იმით, რაზეცაა.',
+  'kb.fmt.docx': 'აბზაცები და ცხრილები თანმიმდევრობით; ცხრილის რიგი „უჯრა | უჯრა“ ხდება. ყოველი აბზაცი თემით დაიწყეთ.',
+  'kb.fmt.xlsx': 'ყოველი ფურცელი რიგ-რიგობით, როგორც „უჯრა | უჯრა“; რამდენიმე ფურცლის შემთხვევაში ფურცლის სახელი ინახება. ყოველ რიგში გაიმეორეთ საგანი (გეგმის სახელი თითოეულ გეგმის რიგში) და ერიდეთ გაერთიანებულ უჯრებს.',
+  'kb.fmt.txt': 'ცარიელი სტრიქონი თემას ამთავრებს. სათაური პირდაპირ ტექსტის ზემოთ დაწერეთ, მათ შორის ცარიელი სტრიქონის გარეშე.',
+  'kb.fmt.md': 'როგორც TXT-ში: ცარიელი სტრიქონი თემას ამთავრებს; ყოველი „## სათაური“ პირდაპირ თავის ტექსტზე მაღლა იყოს.',
+  'kb.fmt.csv': 'პირველი რიგი = სვეტების სათაურები. დანარჩენი რიგებიდან თითო ჩანაწერი ხდება, ყოველი სვეტი — ერთი „სათაური: მნიშვნელობა“ სტრიქონი. საუკეთესოა კითხვა-პასუხისთვის.',
+  'kb.fmt.csv2': 'ორზე მეტი სვეტიც ასევე მუშაობს: თითო რიგი — თითო ჩანაწერი, ამიტომ ყოველი რიგი თავისთავად გასაგები უნდა იყოს.',
+  'kb.fmt.get': 'ჩამოტვირთვა',
+  'kb.fmt.csv2.label': 'CSV (ცხრილი)',
+  'kb.fmt.ru': 'ნიმუშები ინგლისურ და ქართულ ენაზეა; რუსული ტექსტი ზუსტად ასევე შემოდის.',
 };
 
 export const ru: Dict = {
@@ -603,7 +627,6 @@ export const ru: Dict = {
 
   'kba.notenants': 'Организаций пока нет — создайте в Консоли.',
 
-  'kb.templates': 'Файлы-образцы:',
   'kb.restr': 'Файл не соответствует шаблону — переструктурировать с помощью ИИ',
   'kb.restr.done': 'ИИ-переструктурирование завершено — документ готов.',
   'kb.restr.fail': 'Не удалось переструктурировать документ с помощью ИИ.',
@@ -613,4 +636,17 @@ export const ru: Dict = {
   'kb.files.failed': 'Не удалось:',
 
   'kb.restr.hint': 'При импорте Claude читает документ и переписывает его в виде отдельных, понятных записей — все суммы, сроки и числа сохраняются ровно как написано. Импорт занимает немного больше времени.',
+
+  'kb.fmt.title': 'Файлы-образцы — по одному для каждого формата',
+  'kb.fmt.lead': 'Одно и то же содержимое в каждом формате. Каждый образец импортируется как есть, без опции ИИ, — так видно, по какому принципу мы режем файл: на части примерно по 1000 символов, по пустым строкам в TXT и MD, по переносам строк в PDF, DOCX и Excel, а в CSV одна строка — одна запись. Короткий файл — это всего одна-две части.',
+  'kb.fmt.pdf': 'Текстовый PDF, а не скан. Читается построчно, поэтому начинайте каждый абзац с того, о чём он.',
+  'kb.fmt.docx': 'Абзацы и таблицы по порядку; строка таблицы превращается в «ячейка | ячейка». Начинайте каждый абзац с его темы.',
+  'kb.fmt.xlsx': 'Каждый лист построчно, как «ячейка | ячейка»; название листа сохраняется, если листов несколько. Повторяйте предмет в каждой строке (название тарифа в каждой строке тарифа) и избегайте объединённых ячеек.',
+  'kb.fmt.txt': 'Пустая строка завершает тему. Заголовок пишите прямо над его текстом, без пустой строки между ними.',
+  'kb.fmt.md': 'Как в TXT: пустая строка завершает тему; каждый «## заголовок» должен стоять прямо над своим текстом.',
+  'kb.fmt.csv': 'Первая строка — заголовки столбцов. Каждая следующая строка становится одной записью, по строке «заголовок: значение» на столбец. Лучше всего для вопросов и ответов.',
+  'kb.fmt.csv2': 'Больше двух столбцов работает так же: одна запись на строку, поэтому каждая строка должна быть понятна сама по себе.',
+  'kb.fmt.get': 'Скачать',
+  'kb.fmt.csv2.label': 'CSV (таблица)',
+  'kb.fmt.ru': 'Образцы на английском и грузинском языках; русский текст импортируется точно так же.',
 };
