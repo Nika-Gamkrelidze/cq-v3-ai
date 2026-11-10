@@ -66,7 +66,7 @@ const NEXT_OK = ['admin.html', 'kb-admin.html', '/console'];
    deleted yet. */
 const CONSOLE_HREF = '/console';
 
-const TABS: { key: TabName; icon: string; label: string }[] = [
+const TABS: { key: TabName; icon: string; label: string; operatorOnly?: boolean }[] = [
   { key: 'kb', icon: '📚', label: 'tab.kb' },
   { key: 'analyze', icon: '🎧', label: 'tab.analyze' },
   { key: 'rubric', icon: '🎯', label: 'tab.scoring' },
@@ -87,9 +87,11 @@ const TABS: { key: TabName; icon: string; label: string }[] = [
   /* Same KIND of thing again — a per-workspace AI setting with an inherited default — and the
      one underneath all the others: which provider key the text and voice models run on. It
      sits right after transcription so the three settings tabs read as a group. `ai.tab` is the
-     shared vocabulary the console's registry uses, so the customer and the operator call the
-     surface the same thing. */
-  { key: 'ai', icon: '🔑', label: 'ai.tab' },
+     shared vocabulary the console's registry uses.
+     OPERATOR ONLY since 2026-11-10 (the owner's decision): which provider and whose key a
+     workspace spends on is CommuniQ's call, so a workspace's own users never see this tab and
+     `/ai/config` refuses them (403) — the superadmin, acting on a workspace, still does. */
+  { key: 'ai', icon: '🔑', label: 'ai.tab', operatorOnly: true },
   { key: 'health', icon: '🩺', label: 'cur.tab' },
   { key: 'bot', icon: '🤖', label: 'tab.bot' },
   { key: 'history', icon: '🗂', label: 'tab.history' },
@@ -282,6 +284,13 @@ export default function WorkspacePage() {
 
   /* ------------------------------------------------------------------ tab plumbing */
 
+  const tabs = useMemo(() => TABS.filter(x => !x.operatorOnly || operator), [operator]);
+  /* A `#ai` bookmark (or a sign-out from operator mode) must not leave a workspace user on a
+     tab they have no button for: back to the first one. */
+  useEffect(() => {
+    if (!operator && TABS.some(x => x.key === tab && x.operatorOnly)) setTab('kb');
+  }, [operator, tab]);
+
   const showTab = useCallback((next: TabName) => { setTab(next); }, []);
 
   /* The workbench's "edit the rubric" and "edit the forms" are <a href="/workspace#rubric">
@@ -382,7 +391,7 @@ export default function WorkspacePage() {
         )}
 
         <div className="tabs">
-          {TABS.map(x => (
+          {tabs.map(x => (
             <div
               key={x.key}
               className={`tab${tab === x.key ? ' active' : ''}`}
@@ -406,7 +415,9 @@ export default function WorkspacePage() {
           <section className={`panel${tab === 'crm' ? ' active' : ''}`}><CrmTab on={tab === 'crm'} gen={genState} /></section>
           <section className={`panel${tab === 'sentiment' ? ' active' : ''}`}><SentimentTab on={tab === 'sentiment'} gen={genState} /></section>
           <section className={`panel${tab === 'transcription' ? ' active' : ''}`}><TranscriptionTab on={tab === 'transcription'} gen={genState} /></section>
-          <section className={`panel${tab === 'ai' ? ' active' : ''}`}><AiTab on={tab === 'ai'} gen={genState} /></section>
+          {operator
+            ? <section className={`panel${tab === 'ai' ? ' active' : ''}`}><AiTab on={tab === 'ai'} gen={genState} /></section>
+            : null}
           <section className={`panel${tab === 'health' ? ' active' : ''}`}><HealthTab on={tab === 'health'} gen={genState} /></section>
           <section className={`panel${tab === 'bot' ? ' active' : ''}`}><BotTab on={tab === 'bot'} gen={genState} /></section>
           <section className={`panel${tab === 'history' ? ' active' : ''}`}><HistoryTab on={tab === 'history'} gen={genState} /></section>

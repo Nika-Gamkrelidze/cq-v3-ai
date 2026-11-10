@@ -36,6 +36,12 @@ def _key(seed, label: str) -> dict:
     return {"X-API-Key": seed[label]["api_key"]}
 
 
+def _op(seed, label: str) -> dict:
+    """The operator acting on one workspace: since 2026-11-10 the only principal the
+    workspace AI-provider routes (/ai/config) answer."""
+    return {**_admin(), "X-Act-As-Tenant": seed[label]["client_id"]}
+
+
 def resolve(api, client_id, capability, **kw) -> ai_resolve.Resolved:
     """`ai_resolve.resolve` on the app's loop, cache dropped first so the test sees the row
     it just wrote rather than the 30 s cache."""
@@ -237,7 +243,7 @@ def test_four_layer_chain_each_layer_overrides_only_what_it_sets(api, seed, regi
         ("assigned", "anthropic", "claude-sonnet-5", k1, d3["id"])
 
     # 3. The tenant's own row with a model only: source is honest (byo), spend is ours.
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "model": "claude-haiku-4-5"})
     assert r.status_code == 200, r.text
     view = r.json()
@@ -249,7 +255,7 @@ def test_four_layer_chain_each_layer_overrides_only_what_it_sets(api, seed, regi
         ("byo", False, "claude-haiku-4-5", k1, d3["id"])
 
     # 4. Their own key: byo, no connection paid, the model they chose is kept (absent = keep).
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "api_key": k4})
     assert r.status_code == 200, r.text
     assert r.json()["override"]["has_key"] and r.json()["override"]["model"] == "claude-haiku-4-5"
@@ -260,14 +266,14 @@ def test_four_layer_chain_each_layer_overrides_only_what_it_sets(api, seed, regi
     assert resolve(api, B, "llm").api_key == k1
 
     # 5. Switched off: the row stays (key on file) but the chain stops at the assignment.
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "enabled": False})
     assert r.status_code == 200 and r.json()["override"]["has_key"] is True
     r = resolve(api, A, "llm")
     assert r.source == "assigned" and r.api_key == k1 and r.byo is False
 
     # 6. Removed: same answer, and the row is gone.
-    r = api.delete("/ai/config/llm", headers=_key(seed, "a"))
+    r = api.delete("/ai/config/llm", headers=_op(seed, "a"))
     assert r.status_code == 200 and r.json()["deleted"] is True
     assert r.json()["override"] is None
     assert resolve(api, A, "llm").source == "assigned"
@@ -352,15 +358,15 @@ def test_a_key_never_appears_in_any_response(api, seed, registry, probes):
     d = registry.create(capability="llm", provider="anthropic", api_key=k_conn)
     registry.make_default(d["id"])
     bodies = [api.post(f"/admin/ai/connections/{d['id']}/test", headers=_admin()).text]
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "api_key": k_byo})
     bodies.append(r.text)
-    bodies.append(api.post("/ai/config/llm/test", headers=_key(seed, "a")).text)
+    bodies.append(api.post("/ai/config/llm/test", headers=_op(seed, "a")).text)
     bodies += [
         api.get("/admin/ai/connections", headers=_admin()).text,
         api.put(f"/admin/ai/connections/{d['id']}", headers=_admin(), json={"name": "renamed"}).text,
         api.get(f"/admin/ai/assignments/{A}", headers=_admin()).text,
-        api.get("/ai/config", headers=_key(seed, "a")).text,
+        api.get("/ai/config", headers=_op(seed, "a")).text,
         api.get(f"/admin/ai-config/{A}", headers=_admin()).text,
         api.get("/health").text,
     ]
@@ -381,22 +387,22 @@ def test_a_key_never_appears_in_any_response(api, seed, registry, probes):
 # Routes: validation, authority, the Test button
 # --------------------------------------------------------------------------- #
 def test_tenant_cannot_set_a_base_url(api, seed, registry):
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "base_url": "https://evil.example/v1"})
     assert r.status_code == 400, r.text
     assert r.json()["code"] == "base_url_not_allowed" and r.json()["field"] == "base_url"
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "settings": {"base_url": "https://evil.example"}})
     assert r.status_code == 400 and r.json()["code"] == "base_url_not_allowed"
     # Nothing was written.
-    assert api.get("/ai/config", headers=_key(seed, "a")).json()["llm"]["override"] is None
+    assert api.get("/ai/config", headers=_op(seed, "a")).json()["llm"]["override"] is None
     # An operator's base_url on the row survives a tenant save that (correctly) omits it.
     A = seed["a"]["client_id"]
     r = api.put(f"/admin/ai-config/{A}", headers=_admin(),
                 json={"enabled": True, "provider": "anthropic",
                       "base_url": "https://gateway.example.test", "model": "claude-sonnet-5"})
     assert r.status_code == 200 and r.json()["base_url"] == "https://gateway.example.test"
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"),
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"),
                 json={"provider": "anthropic", "model": "claude-haiku-4-5"})
     assert r.status_code == 200 and "base_url" not in r.json()["override"]
     assert api.get(f"/admin/ai-config/{A}", headers=_admin()).json()["base_url"] == \
@@ -429,9 +435,9 @@ def test_validation_names_the_field(api, seed, registry):
     assert r.status_code == 404 and r.json()["code"] == "not_found"
     r = api.get("/admin/ai/connections?capability=vision", headers=_admin())
     assert r.status_code == 400
-    r = api.put("/ai/config/vision", headers=_key(seed, "a"), json={"provider": "anthropic"})
+    r = api.put("/ai/config/vision", headers=_op(seed, "a"), json={"provider": "anthropic"})
     assert r.status_code == 400 and r.json()["code"] == "invalid_capability"
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"), json={"provider": "nope"})
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"), json={"provider": "nope"})
     assert r.status_code == 400 and r.json()["code"] == "unknown_provider"
 
 
@@ -458,25 +464,30 @@ def test_assignment_validation(api, seed, registry):
 
 
 def test_who_may_read_and_write_the_tenant_config(api, seed, member_login, registry):
+    """Only the operator acting on a workspace (2026-11-10): its owner, members and API key
+    are refused every verb, so the workspace page shows the tab to the superadmin alone."""
     assert api.get("/ai/config").status_code == 401
     assert api.put("/ai/config/llm", json={"provider": "anthropic"}).status_code == 401
     user = {"Authorization": f"Bearer {auth.make_user_token(uuid.uuid4())}"}
-    assert api.get("/ai/config", headers=user).status_code == 403
-    assert api.put("/ai/config/llm", headers=user, json={"provider": "anthropic"}).status_code == 403
-    r = api.get("/ai/config", headers=member_login)
+    tenants = {"user": user, "member": member_login, "apikey": _key(seed, "a")}
+    for who, h in tenants.items():
+        assert api.get("/ai/config", headers=h).status_code == 403, who
+        assert api.put("/ai/config/llm", headers=h,
+                       json={"provider": "anthropic"}).status_code == 403, who
+        assert api.delete("/ai/config/llm", headers=h).status_code == 403, who
+        assert api.post("/ai/config/llm/test", headers=h).status_code == 403, who
+    # An operator acting as the workspace may, and is named.
+    op = _op(seed, "a")
+    r = api.get("/ai/config", headers=op)
     assert r.status_code == 200 and set(r.json()) == set(CAPS)
-    assert api.put("/ai/config/llm", headers=member_login,
-                   json={"provider": "anthropic"}).status_code == 403
-    assert api.delete("/ai/config/llm", headers=member_login).status_code == 403
-    assert api.post("/ai/config/llm/test", headers=member_login).status_code == 403
-    # An operator acting as the workspace is an owner-shaped principal here, and is named.
-    op = {**_admin(), "X-Act-As-Tenant": seed["a"]["client_id"]}
     r = api.put("/ai/config/llm", headers=op, json={"provider": "anthropic", "model": "claude-sonnet-5"})
     assert r.status_code == 200 and r.json()["override"]["updated_by"] == "tenant:superadmin"
+    # A superadmin who did NOT pick a workspace is not a workspace.
+    assert api.get("/ai/config", headers=_admin()).status_code == 401
     # The integration credential is not a tenant here.
     integ = {"X-CQ-Key": seed["integration"]["api_key"], "X-CQ-Tenant": seed["a"]["client_id"]}
     assert api.get("/ai/config", headers=integ).status_code == 401
-    # /admin/ai is the superadmin's alone — a scoped operator is refused like on every /admin.
+    # /admin/ai is the superadmin's alone — a tenant key is refused like on every /admin.
     assert api.get("/admin/ai/connections", headers=_key(seed, "a")).status_code == 401
 
 
@@ -516,12 +527,12 @@ def test_test_button_stores_last_test_and_probes_the_right_layer(api, seed, regi
     assert r.status_code == 400 and r.json()["code"] == "capability_immutable"
 
     # The tenant's own Test: 404 without a row, then probes their row even while disabled.
-    r = api.post("/ai/config/llm/test", headers=_key(seed, "a"))
+    r = api.post("/ai/config/llm/test", headers=_op(seed, "a"))
     assert r.status_code == 404 and r.json()["code"] == "no_override"
     own = "sk-own-" + uuid.uuid4().hex
-    api.put("/ai/config/llm", headers=_key(seed, "a"),
+    api.put("/ai/config/llm", headers=_op(seed, "a"),
             json={"provider": "anthropic", "api_key": own, "enabled": False})
-    r = api.post("/ai/config/llm/test", headers=_key(seed, "a"))
+    r = api.post("/ai/config/llm/test", headers=_op(seed, "a"))
     assert r.status_code == 200 and r.json()["ok"] is True
     assert probes["llm"][-1].api_key == own and probes["llm"][-1].byo is True
     assert probes["llm_client"][-1] == A, "an owner's own Test is metered as that workspace"
@@ -640,7 +651,7 @@ def test_legacy_tenant_ai_configs_are_copied_once(api, seed, registry):
         if ai_registry.secrets_status()["mode"] == "encrypted":
             assert row["api_key_enc"] != legacy_key
         # The owner edits the copied row; a second boot must not overwrite their edit.
-        r = api.put("/ai/config/llm", headers=_key(seed, "b"),
+        r = api.put("/ai/config/llm", headers=_op(seed, "b"),
                     json={"provider": "anthropic", "model": "claude-sonnet-5"})
         assert r.status_code == 200
         line = api.portal.call(run)
@@ -669,7 +680,7 @@ def test_compat_route_is_a_shim_over_the_llm_override(api, seed, registry):
     assert r.status_code == 200, r.text
     assert r.json()["has_key"] and r.json()["updated_by"] == "superadmin"
     assert r.json()["key_hint"] == "…" + key[-4:] and key not in r.text
-    view = api.get("/ai/config", headers=_key(seed, "a")).json()["llm"]
+    view = api.get("/ai/config", headers=_op(seed, "a")).json()["llm"]
     assert view["override"]["has_key"] and view["override"]["notes"] == "billed to them"
     assert view["effective"]["source"] == "byo" and view["effective"]["byo"] is True
     res = resolve(api, A, "llm")
@@ -724,7 +735,7 @@ def test_keys_are_sealed_at_rest_when_the_vault_encrypts(api, seed, registry, mo
     assert resolve(api, seed["a"]["client_id"], "llm").api_key == raw
     # The tenant's own key takes the same path.
     own = "sk-own-sealed-" + uuid.uuid4().hex
-    r = api.put("/ai/config/llm", headers=_key(seed, "a"), json={"provider": "anthropic", "api_key": own})
+    r = api.put("/ai/config/llm", headers=_op(seed, "a"), json={"provider": "anthropic", "api_key": own})
     assert r.status_code == 200 and own not in r.text
     stored = sql(lambda x: x.fetchval(
         "SELECT api_key_enc FROM tenant_ai_overrides WHERE client_id = $1 AND capability = 'llm'",

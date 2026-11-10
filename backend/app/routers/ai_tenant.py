@@ -1,14 +1,18 @@
-"""The workspace's own AI settings: /ai/config — bring-your-own provider keys, per capability.
+"""A workspace's own AI settings: /ai/config — its own provider keys, per capability.
 
-The tenant twin of /admin/ai/assignments: a workspace OWNER (or its API key, or an operator
-acting as it) can put its own subscription key under any of the three capabilities, so the
-spend lands on their account. Members may read what the workspace runs on; registered users
-(kind "user") get a 403 — a subscription belongs to a workspace, and they have none.
+OPERATOR ONLY (since 2026-11-10, at the owner's request). These are the ordinary tenant-shaped
+routes, but the only principal they answer is a superadmin acting on one workspace
+(`X-Act-As-Tenant`, `Principal.is_operator`) — that is how the console's workspace page sets a
+workspace's own key. A workspace's owner, members and API key get a 403: which provider and
+whose key a workspace spends on is CommuniQ's decision, not the customer's. Registered users
+(kind "user") get a 403 as before; no credential is a 401.
 
-One thing a tenant can never do here, whatever the catalog says: set a `base_url`. An endpoint
-a tenant chooses is an endpoint that could keep every transcript it is handed, so that field
-is the superadmin's alone (/admin/ai-config/{tenant_id}). A PUT that carries it — top-level or
-smuggled inside `settings` — is a 400 with code `base_url_not_allowed`, before any write.
+Keys an owner saved before the change stay on file and keep resolving
+(`ai_resolve.resolve`); the operator sees and removes them here.
+
+One thing this route never sets, whoever calls it: a `base_url`. A PUT that carries it —
+top-level or smuggled inside `settings` — is a 400 with code `base_url_not_allowed`, before
+any write; routing a workspace through a gateway is /admin/ai-config/{tenant_id}.
 
 Nothing here returns a key: the override view carries `has_key` and a masked `key_hint`.
 """
@@ -24,20 +28,20 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 
 def _reader(principal: Principal = Depends(resolve_principal)) -> Principal:
-    """Any credential of the workspace may read what it runs on."""
-    if principal.is_tenant:
+    """The operator acting on the workspace — nobody else, not even its owner."""
+    if principal.is_operator:
         return principal
-    if principal.is_user:
-        raise HTTPException(status_code=403, detail="AI provider settings belong to a workspace.")
-    raise HTTPException(status_code=401, detail="Tenant login or API key required")
-
-
-def _editor(principal: Principal = Depends(_reader)) -> Principal:
-    """Changing whose key the workspace spends on needs its full authority — the same
-    owner|apikey|superadmin predicate the rubric and the bot settings use."""
-    if not principal.may_configure_workspace:
+    if principal.is_tenant or principal.is_user:
         raise HTTPException(status_code=403,
-                            detail="Owner role required to change the AI provider settings")
+                            detail="AI provider settings are managed by CommuniQ.")
+    raise HTTPException(status_code=401, detail="Superadmin login required")
+
+
+# Every reader is an operator, and an operator may configure the workspace; the predicate
+# stays so that widening `_reader` again can never widen the writes with it.
+def _editor(principal: Principal = Depends(_reader)) -> Principal:
+    if not principal.may_configure_workspace:
+        raise HTTPException(status_code=403, detail="AI provider settings are managed by CommuniQ.")
     return principal
 
 

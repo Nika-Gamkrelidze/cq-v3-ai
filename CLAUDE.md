@@ -180,8 +180,10 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   named **connections** — `ai_connections(name, capability llm|stt|tts, provider, model,
   base_url, sealed key, settings)`, one **default per capability** — plus per-workspace
   **assignment** (`tenant_ai_assignments`, a dropdown on `/ai-config`) and a workspace's **own
-  key** (`tenant_ai_overrides`, the portal's *Your own AI subscription* tab; owners only, never
-  a base URL). Text providers: Anthropic, OpenAI, Gemini; speech-to-text: ElevenLabs, OpenAI, Gemini
+  key** (`tenant_ai_overrides`, the workspace page's *AI providers* tab; **superadmin only**
+  since 2026-11-10 — the tab is mounted only in operator mode and `/ai/config` answers only
+  `Principal.is_operator`, 403 for the workspace's owner, members and API key; never a base
+  URL; keys owners saved earlier still resolve until the operator removes them). Text providers: Anthropic, OpenAI, Gemini; speech-to-text: ElevenLabs, OpenAI, Gemini
   (`gemini-3.5-transcribe`, the default, on Google's Interactions API — native diarization +
   word timestamps, BCP-47 language hints, key terms never sent (timings win — §4); any other
   Gemini id is a chat model asked for a transcript through `generateContent` — segment-level

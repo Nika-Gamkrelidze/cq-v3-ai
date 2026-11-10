@@ -23,9 +23,10 @@
    THERE IS NO ENDPOINT FIELD, and the card says why: a tenant-set base URL could keep every
    transcript it is handed. Only the operator can route a workspace through a gateway.
 
-   Writes are for owners (and an operator acting on the workspace — the server's
-   `may_configure_workspace`). A member sees the same card read-only: the saved provider and
-   model in disabled controls, no key box, no buttons. */
+   OPERATOR ONLY since 2026-11-10: the page mounts this tab only in operator mode and
+   `/ai/config` answers nobody else (403 for the workspace's owner, members and API key). The
+   read-only rendering below stays as the fail-closed answer if the server ever says
+   `can_edit: false`. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { confirmDialog } from '@/components/ui/Modal';
