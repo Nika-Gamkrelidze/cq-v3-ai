@@ -187,6 +187,15 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "test": ("probe",),
 }
 OTHER_GROUP = "other"
+
+# "What does an audio minute cost us": the cost of the groups that analyse a recording, over the
+# minutes of recordings actually transcribed. Two traps the plain totals fall into, hence a
+# dedicated measure: `audio_seconds` is also written by the voice-tone run on the SAME recording
+# (summing it counts a call twice), and the total cost holds text-to-speech, the chat bot,
+# knowledge-base work and price lookups, none of which is a function of how long a call was.
+PER_MINUTE_COST_GROUPS: tuple[str, ...] = (
+    "transcription", "analysis", "factcheck", "sentiment", "score", "summary", "crm")
+PER_MINUTE_AUDIO_GROUP = "transcription"
 GROUP_ORDER: tuple[str, ...] = (*GROUPS, OTHER_GROUP)
 KNOWN_FEATURES: tuple[str, ...] = tuple(f for fs in GROUPS.values() for f in fs)
 CAPABILITIES = ("llm", "stt", "tts", "voice_tone")

@@ -218,6 +218,40 @@ def test_overview_breakdowns_add_up_to_the_total(api, seeded):
     assert body["bucket"] == "day" and body["window"] == "30d"
 
 
+def test_per_minute_is_cost_over_minutes_and_never_zero_for_unknown():
+    assert usage_report._per_minute({"audio_seconds": 120.0, "cost_usd": 0.5,
+                                     "unpriced_calls": 2}) == {
+        "audio_seconds": 120.0, "cost_usd": 0.5, "unpriced_calls": 2, "usd_per_minute": 0.25}
+    # No audio in the view (text-to-speech only, a chat-only workspace): unknown, not "free".
+    none = usage_report._per_minute({"audio_seconds": 0, "cost_usd": 3.0, "unpriced_calls": 0})
+    assert none["usd_per_minute"] is None
+    assert usage_report._per_minute({})["usd_per_minute"] is None
+
+
+def test_per_minute_groups_are_real_groups():
+    assert set(usage.PER_MINUTE_COST_GROUPS) <= set(usage.GROUPS)
+    assert usage.PER_MINUTE_AUDIO_GROUP in usage.PER_MINUTE_COST_GROUPS
+    # Text-to-speech and the bot are not a function of how long a call was.
+    assert not {"tts", "bot", "copilot", "pricing", "rubric", "kb"} & set(usage.PER_MINUTE_COST_GROUPS)
+
+
+def test_overview_per_minute_counts_a_recording_once(api, seeded):
+    """The voice-tone run writes `audio_seconds` for the SAME recording: the divisor is the
+    transcription's 62.5 s alone, and the cost is that of the recording-analysis groups only."""
+    body = _get(api, "/admin/usage/overview", client_id=seeded["a"])
+    pm = body["per_minute"]
+    assert pm["audio_seconds"] == pytest.approx(62.5)
+    assert body["total"]["audio_seconds"] == pytest.approx(92.5)   # the plain total double counts
+    in_scope = sum(r["cost_usd"] for r in body["by_group"]
+                   if r["group"] in usage.PER_MINUTE_COST_GROUPS)
+    assert pm["cost_usd"] == pytest.approx(in_scope)
+    if pm["cost_usd"]:
+        assert pm["usd_per_minute"] == pytest.approx(pm["cost_usd"] / (62.5 / 60))
+    # Narrowed to text-to-speech there is no audio to divide by: a dash, not $0.
+    tts = _get(api, "/admin/usage/overview", client_id=seeded["a"], group="tts")
+    assert tts["per_minute"]["usd_per_minute"] is None
+
+
 def test_overview_maps_features_to_groups_and_null_providers(api, seeded):
     body = _get(api, "/admin/usage/overview", client_id=seeded["a"])
     groups = {r["group"]: r for r in body["by_group"]}

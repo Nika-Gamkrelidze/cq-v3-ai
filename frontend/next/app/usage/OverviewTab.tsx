@@ -146,6 +146,9 @@ export default function OverviewTab({ filters, onFilter, onPrices, t }: TabProps
           <Stat label={t('um.th.billed')} hint={t('um.billed.hint')}
             value={<MoneySum m={tot} field="billed_usd" t={t} strong />} />
           <Stat label={t('um.margin')} value={usd(tot.billed_usd - tot.cost_usd)} />
+          <Stat label={t('um.permin')}
+            hint={t('um.permin.hint', { audio: duration(data.per_minute?.audio_seconds), cost: usd(data.per_minute?.cost_usd) })}
+            value={usd(data.per_minute?.usd_per_minute ?? null)} />
         </div>
         {tot.unpriced_calls ? (
           <p className="msg warn" style={{ marginTop: 12 }}>

@@ -48,6 +48,17 @@ def _flat(r) -> dict:
     return {**rest, **tot}
 
 
+def _per_minute(row: dict) -> dict:
+    """USD per minute of transcribed audio, or None while there is no audio to divide by (a
+    filter on text-to-speech, a workspace that only chatted, rows written before audio was
+    metered). Never 0 for "unknown": the page shows a dash."""
+    secs = float(row.get("audio_seconds") or 0)
+    cost = float(row.get("cost_usd") or 0)
+    return {"audio_seconds": secs, "cost_usd": cost,
+            "unpriced_calls": int(row.get("unpriced_calls") or 0),
+            "usd_per_minute": (cost / (secs / 60)) if secs > 0 else None}
+
+
 async def overview(f: usage.UsageFilter) -> dict:
     now = datetime.now(timezone.utc)
     rng = usage.range_of(f, now)
@@ -107,6 +118,16 @@ async def overview(f: usage.UsageFilter) -> dict:
               FROM {usage.PRICED} u WHERE {where}
              GROUP BY 1 ORDER BY 1""", *args, bucket)
 
+        # Code constants, never request values, so listing them in the SQL is safe.
+        cost_groups = ", ".join(f"'{g}'" for g in usage.PER_MINUTE_COST_GROUPS)
+        per_min = await conn.fetchrow(f"""
+            SELECT COALESCE(SUM(u.audio_seconds) FILTER (
+                       WHERE {grp} = '{usage.PER_MINUTE_AUDIO_GROUP}' AND u.ok), 0)::float8 AS audio_seconds,
+                   COALESCE(SUM(u.cost_usd) FILTER (WHERE {grp} IN ({cost_groups})), 0)::numeric(20,6) AS cost_usd,
+                   COUNT(*) FILTER (WHERE {grp} IN ({cost_groups})
+                                      AND u.cost_usd IS NULL)::bigint AS unpriced_calls
+              FROM {usage.PRICED} u WHERE {where}""", *args)
+
         range_where, range_args = usage.where_sql(f, skip=_NON_RANGE)
         facet = await conn.fetchrow(f"""
             WITH r AS (SELECT u.feature, u.model, u.actor, {grp} AS grp, {prov} AS provider,
@@ -131,6 +152,7 @@ async def overview(f: usage.UsageFilter) -> dict:
         **rng,
         "bucket": bucket,
         "total": tot,
+        "per_minute": _per_minute(usage.record(per_min)),
         "by_tenant": [_flat(r) for r in by_tenant],
         "by_group": [_flat(r) for r in by_group],
         "by_feature": [_flat(r) for r in by_feature],

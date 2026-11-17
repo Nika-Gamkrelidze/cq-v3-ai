@@ -114,6 +114,10 @@ export interface Overview {
   to: string;
   bucket: 'hour' | 'day';
   total: Totals;
+  /** What a minute of transcribed audio costs us: the cost of the groups that analyse a
+      recording over the minutes actually transcribed. `usd_per_minute` is null when no audio
+      was metered in this view (never 0 for "unknown"). */
+  per_minute: { audio_seconds: number; cost_usd: number; unpriced_calls: number; usd_per_minute: number | null };
   by_tenant: (Totals & { client_id: string | null; name: string; slug: string | null })[];
   by_group: (Totals & { group: Group })[];
   by_feature: (Totals & { feature: string; group: Group })[];
