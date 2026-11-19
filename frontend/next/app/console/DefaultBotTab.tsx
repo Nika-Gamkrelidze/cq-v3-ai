@@ -241,6 +241,19 @@ export default function DefaultBotTab() {
       <div className="card">
         <AnswerPolicyField form={form.scope} update={setScope} t={t} idPrefix="db" />
         <BusinessScopeField form={form.scope} update={setScope} t={t} idPrefix="db" />
+        {/* The bot's own model. A customer waits through every call it makes, so it defaults to a
+            fast one while call analysis keeps its own; empty means that default. */}
+        <label htmlFor="db_chat_model" style={{ marginTop: 14 }}>
+          <span>{t('bot.chatmodel')}</span> <Tip text={t('bot.chatmodel.hint')} />
+        </label>
+        <input
+          id="db_chat_model"
+          value={form.chatModel}
+          placeholder={cfg?.chat_model_default || ''}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={e => set('chatModel', e.target.value)}
+        />
         <CheckRow
           checked={form.handoffSummary}
           onChange={v => set('handoffSummary', v)}

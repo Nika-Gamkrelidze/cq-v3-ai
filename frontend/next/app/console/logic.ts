@@ -141,6 +141,8 @@ export interface BotForm {
       form the workspace BOT tab renders through the same components (see `ScopeForm`). */
   scope: ScopeForm;
   handoffSummary: boolean;
+  /** The bot's own model id; empty means the deployment's fast default (`chat_model_default`). */
+  chatModel: string;
 }
 
 /** What the route returns. Everything is optional because a server older than this console may
@@ -159,6 +161,7 @@ export interface BotConfig {
   /** `{refusal, off_topic_warning, off_topic_cutoff}`, each `{en, ka, ru}`: the engine's own
       wording, shown as the placeholder of the box that would override it. */
   builtin_copy?: unknown;
+  chat_model_default?: string;
   source?: string;
   updated_at?: string | null;
   updated_by?: string | null;
@@ -229,6 +232,7 @@ export function formFromConfig(cfg: BotConfig | null | undefined): BotForm {
       : 'first',
     scope: scopeFormFrom(s),
     handoffSummary: s.handoff_summary !== false,
+    chatModel: text(s.chat_model),
   };
 }
 
@@ -291,6 +295,7 @@ export function payloadFromForm(form: BotForm, cfg: BotConfig | null | undefined
       max_reply_chars: num(form.maxChars, 1200),
       escalation_keywords: form.escalation.split(',').map(s => s.trim()).filter(Boolean),
       handoff_summary: form.handoffSummary,
+      chat_model: form.chatModel.trim(),
       disclosure_mode: form.disclosureMode,
       disclosure: nonEmpty(form.disclosure),
       limits,

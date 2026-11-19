@@ -41,6 +41,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, Header, HTTPException,
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import settings as app_settings
 from ..services import attribution, chat, chat_copy, chat_store, limits, llm, settings_store
 from ..services.auth import (Principal, assert_expected_tenant, make_token,
                              resolve_principal, verify_token)
@@ -619,7 +620,10 @@ async def _build_context(client_id: str, conversation_id: str, suggest_ref: str,
         conversation_ref=conversation_ref, turn_ref=turn_ref, channel=channel,
         turn_id=str(turn_id) if turn_id else None, envelope=envelope or {},
         business_name=extra.get("business_name"), industry=extra.get("industry"),
-        off_topic_count=int(extra.get("off_topic_count") or 0))
+        off_topic_count=int(extra.get("off_topic_count") or 0),
+        # The Default bot tab's model, else the deployment's fast chat default.
+        chat_model=str((cfg.get("settings") or {}).get("chat_model")
+                       or app_settings.chat_llm_model or "").strip() or None)
 
 
 # --------------------------------------------------------------------------- #

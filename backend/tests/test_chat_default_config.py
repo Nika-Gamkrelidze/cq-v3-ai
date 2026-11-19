@@ -164,6 +164,7 @@ def test_a_default_can_never_switch_autopilot_on(api):
      "off_topic_cutoff_after"),
     ({"settings": {"off_topic_warning": {"de": "Hallo"}}}, "off_topic_warning"),
     ({"settings": {"emergency_number": "call us"}}, "emergency_number"),
+    ({"settings": {"chat_model": "claude haiku!"}}, "chat_model"),
     ({"languages": []}, "languages"),
     ({"languages": ["de"]}, "languages"),
     ({"greeting": {"fr": "Bonjour"}}, "greeting"),

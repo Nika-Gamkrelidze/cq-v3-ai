@@ -11,6 +11,8 @@
 import type { Dict } from '../index';
 
 export const en: Dict = {
+  'bot.chatmodel': 'Chat model',
+  'bot.chatmodel.hint': 'The AI model the bot uses for every reply, every question it sorts and every handover summary. A customer waits for each of those, so leave this empty to use the fast default shown in the box; call analysis keeps its own model. Applies only to workspaces on the CommuniQ Anthropic connection: a workspace on its own subscription or another provider keeps its model.',
   'bot.heading': 'Public bot',
   'bot.autopilot': 'Autopilot — the bot answers customers with no human in the loop',
   'bot.autopilot.hint': 'With autopilot off the bot only drafts replies for an operator to review and send. Nothing reaches a customer unread.',
@@ -127,6 +129,8 @@ export const en: Dict = {
 };
 
 export const ka: Dict = {
+  'bot.chatmodel': 'ჩატის მოდელი',
+  'bot.chatmodel.hint': 'AI მოდელი, რომელსაც ბოტი იყენებს ყველა პასუხისთვის, ყოველი კითხვის დასახარისხებლად და ყოველი გადაცემის შეჯამებისთვის. მომხმარებელი თითოეულ მათგანს ელოდება, ამიტომ დატოვეთ ცარიელი, რათა ველში ნაჩვენები სწრაფი ნაგულისხმევი მოდელი გამოიყენოს; ზარების ანალიზი საკუთარ მოდელს ინარჩუნებს. მოქმედებს მხოლოდ იმ სამუშაო სივრცეებზე, რომლებიც CommuniQ-ის Anthropic კავშირს იყენებენ: საკუთარი გამოწერით ან სხვა პროვაიდერით მომუშავე სივრცე თავის მოდელს ინარჩუნებს.',
   'bot.heading': 'საჯარო ბოტი',
   'bot.autopilot': 'ავტოპილოტი — ბოტი პასუხობს კლიენტს ადამიანის ჩარევის გარეშე',
   'bot.autopilot.hint': 'გამორთული ავტოპილოტის დროს ბოტი მხოლოდ ამზადებს პასუხის მონახაზს, რომელსაც ოპერატორი ამოწმებს და აგზავნის. კლიენტამდე წაუკითხავი არაფერი მიდის.',
@@ -243,6 +247,8 @@ export const ka: Dict = {
 };
 
 export const ru: Dict = {
+  'bot.chatmodel': 'Модель чата',
+  'bot.chatmodel.hint': 'Модель ИИ, которую бот использует для каждого ответа, сортировки каждого вопроса и каждой сводки при передаче. Клиент ждёт каждый из этих шагов, поэтому оставьте поле пустым, чтобы использовать быструю модель по умолчанию, указанную в нём; анализ звонков сохраняет свою модель. Действует только для рабочих пространств на подключении CommuniQ к Anthropic: пространство со своей подпиской или другим провайдером сохраняет свою модель.',
   'bot.heading': 'Публичный бот',
   'bot.autopilot': 'Автопилот — бот отвечает клиентам без участия человека',
   'bot.autopilot.hint': 'При выключенном автопилоте бот только готовит черновики ответов, которые оператор проверяет и отправляет. Клиенту не уходит ни одного непрочитанного сообщения.',

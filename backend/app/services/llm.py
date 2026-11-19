@@ -28,6 +28,7 @@ silently bypass a tenant's configuration, so new AI code goes through `llm.py`.
 """
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import time
 import uuid
@@ -147,6 +148,19 @@ async def _resolve(client_id: str | None, api_key: str, model: str) -> Resolved:
         res = Resolved("llm", legacy, model or None, api_key or "", None)
     if not res.model:
         raise LLMError(f"No model is configured for the {res.provider} text AI.")
+    return res
+
+
+def _with_model(res: Resolved, model: str | None) -> Resolved:
+    """A feature's own model (the chat bot's) in place of the resolved one: same provider, key
+    and base URL, so a call still runs on the connection the workspace resolved to.
+
+    Only on our own Anthropic connection. A workspace on its own subscription chose its model
+    and pays for it, and a Claude id sent to another provider would fail every call.
+    shortcut: Anthropic only; add a per-provider model map when another provider needs one.
+    """
+    if model and res.provider == "anthropic" and res.source != "byo":
+        return dataclasses.replace(res, model=model)
     return res
 
 
@@ -296,6 +310,7 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
                     system: str, user: str, tool: dict, opts: dict,
                     max_tokens: int = 4096, cache_system: bool = False,
                     integration_id: str | None = None,
+                    model_override: str | None = None,
                     admit_timeout_s: float = ADMIT_TIMEOUT_S,
                     stream: bool = False,
                     on_progress: Callable[[int], None] | None = None,
@@ -329,7 +344,7 @@ async def call_tool(*, feature: str, client_id: str | None, api_key: str, model:
     `conversation_id` / `turn_id` / `suggest_ref` attribute a chat call to the conversation and
     the message that caused it (usage only; nothing else reads them).
     """
-    res = await _resolve(client_id, api_key, model)
+    res = _with_model(await _resolve(client_id, api_key, model), model_override)
     adapter = _adapter(res)
     started = time.monotonic()
     async with _admit(feature, timeout_s=admit_timeout_s):
@@ -365,6 +380,7 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
                       system: str, user: str, opts: dict,
                       max_tokens: int = 1024,
                       integration_id: str | None = None,
+                      model_override: str | None = None,
                       conversation_id: str | None = None, turn_id: str | None = None,
                       suggest_ref: str | None = None) -> AsyncIterator[str]:
     """Yield plain text deltas. The admission slot is held for the whole stream, because an
@@ -376,7 +392,7 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
     pump) still writes its row, as failed and with whatever usage had arrived: those tokens
     were generated and billed, and a stream that vanished from the ledger would make the bot
     look cheaper than it is."""
-    res = await _resolve(client_id, api_key, model)
+    res = _with_model(await _resolve(client_id, api_key, model), model_override)
     adapter = _adapter(res)
     holder = StreamUsage()
     started = time.monotonic()

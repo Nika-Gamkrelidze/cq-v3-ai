@@ -202,6 +202,9 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
         handoff_summary: handoff,
         disclosure_mode: DISCLOSURE_MODES.includes(discMode as typeof DISCLOSURE_MODES[number]) ? discMode : 'first',
         disclosure, limits,
+        // The bot's model is the operator's choice (Default bot tab). The read is merged, so the
+        // spread above carries the default's value; dropping it keeps a save from freezing it here.
+        chat_model: undefined,
       }, botScope),
     };
 

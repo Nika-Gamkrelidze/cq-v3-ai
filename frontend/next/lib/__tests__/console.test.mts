@@ -84,6 +84,17 @@ test('formFromConfig: the answer policy is documents-only unless something liter
   assert.equal(formFromConfig({ settings: { handoff_summary: false } }).handoffSummary, false);
 });
 
+test('the chat model round-trips, and an emptied box goes back to the deployment default', () => {
+  assert.equal(formFromConfig({}).chatModel, '');
+  const form = formFromConfig({ settings: { chat_model: 'claude-haiku-4-5' } });
+  assert.equal(form.chatModel, 'claude-haiku-4-5');
+  assert.equal(payloadFromForm({ ...form, chatModel: '  claude-sonnet-5 ' }, null).settings.chat_model,
+    'claude-sonnet-5');
+  // Empty is sent as empty, not left as the old value by the `...prev` spread.
+  assert.equal(payloadFromForm({ ...form, chatModel: '' },
+    { settings: { chat_model: 'claude-haiku-4-5' } }).settings.chat_model, '');
+});
+
 test('formFromConfig: an unknown disclosure mode falls back to disclosing, never to silence', () => {
   assert.equal(formFromConfig({}).disclosureMode, 'first');
   assert.equal(formFromConfig({ settings: { disclosure_mode: 'sometimes' } }).disclosureMode, 'first');

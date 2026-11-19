@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+from ..config import settings as config_settings
 from ..db import pool
 from . import chat_copy, chat_hours, settings_store
 
@@ -673,6 +674,7 @@ def _validated_default_settings(settings) -> dict:
 
 
 ANSWER_POLICIES = ("kb_only", "general", "open")
+_MODEL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}")
 _EMERGENCY_NUMBER_RE = re.compile(r"\+?\d[\d \-]{0,14}")
 _COPY_LIMIT = 500
 
@@ -744,6 +746,12 @@ def _validated_scope_settings(settings) -> dict:
         if not _EMERGENCY_NUMBER_RE.fullmatch(number):
             raise ValueError("settings.emergency_number must be a phone number such as 112")
         out["emergency_number"] = number
+    if out.get("chat_model") is not None:
+        model = str(out["chat_model"]).strip()
+        # Empty is allowed and means "the deployment's default chat model".
+        if model and not _MODEL_ID_RE.fullmatch(model):
+            raise ValueError("settings.chat_model must be a model id such as claude-haiku-4-5")
+        out["chat_model"] = model
     return out
 
 
@@ -782,6 +790,8 @@ def _default_config_from(stored: dict) -> dict:
         # What a customer reads when a copy box is left empty — the console shows it as the
         # placeholder, so "empty" never looks like "silent". Rides along on tenant configs too.
         "builtin_copy": chat_copy.builtin_copy(),
+        # What an empty "Chat model" box resolves to — the console shows it as the placeholder.
+        "chat_model_default": config_settings.chat_llm_model,
     })
     for knob in _LIFTED_KNOBS:
         if settings_blob.get(knob) is not None:

@@ -527,6 +527,12 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
     warning / cut-off). Escalations send the handoff or safety notice, not the refusal copy.
     `GET /v1/chat/config` carries `handoff_notice`, which Swift Chat sends on its own failure
     handoffs; config reads carry `builtin_copy` for the console placeholders.
+  - **The bot has its own model** (`config.chat_llm_model`, default `claude-haiku-4-5`; the
+    Default bot tab's `settings.chat_model` overrides it). Every chat-engine call passes it as
+    `model_override`, and `llm._with_model` swaps it in AFTER resolution, keeping the
+    connection and key, only on our own Anthropic connection: a workspace on its own
+    subscription (`source == "byo"`) or another provider keeps its model. Passing a model into
+    `_resolve` would do nothing — it is the bottom of the chain, under the default connection.
   - **Envelope:** `turn.scope` (policy, source, kind, answered, off_topic); `state` is `ready`
     when grounded OR `scope.answered`. New handoff reasons `risky`, `related_not_in_kb`; new
     grounding reason `weak_match`; `ungrounded_answer` is no longer produced.
@@ -677,6 +683,13 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   read defensively (its field names are unconfirmed, so a Gemini transcription may show audio
   length but no tokens until checked against a real response); rows written before this change
   have no conversation, summary or speech data, so older periods look lighter than they were.
+- **2026-11-19 — the bot gets its own, fast model.** The owner reported very slow bot replies.
+  One customer message cost up to three model calls in a row (triage, answer, handover summary)
+  on the deployment's call-analysis model (Opus), and Swift Chat waits for the whole answer.
+  The bot now runs on `claude-haiku-4-5` by default (§4). **Not done:** Swift Chat still waits
+  for the complete answer (no streaming to the customer); Haiku 5.5 is not the default because
+  it thinks by default, which adds delay and generally cannot combine with the forced tool call,
+  and the Anthropic adapter sends no thinking setting yet.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST

@@ -155,6 +155,9 @@ class ChatContext:
     off_topic_count: int = 0
     # The business clock's "now". None means the real clock; tests pin it.
     now: datetime | None = None
+    # The chat bot's own model (`config.chat_llm_model` / `settings.chat_model`), passed to every
+    # call this engine makes; llm swaps it in only on our own Anthropic connection.
+    chat_model: str | None = None
 
 
 def _cfg(cfg: dict, key: str):
@@ -380,6 +383,7 @@ async def _handoff_with_summary(reason: str, ctx: ChatContext, stages: dict) -> 
         raw = await llm.call_tool(
             feature="handoff", client_id=ctx.client_id, integration_id=ctx.integration_id,
             api_key=ctx.api_key, model=ctx.model,
+            model_override=ctx.chat_model,
             system=chat_prompts.build_handoff_system(ctx.locale),
             user=chat_prompts.build_handoff_user(messages, reason),
             tool=chat_prompts.HANDOFF_TOOL, opts=llm.ANSWER, max_tokens=400,
@@ -527,6 +531,7 @@ async def run_suggest(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         raw = await llm.call_tool(
             feature="copilot", client_id=ctx.client_id, integration_id=ctx.integration_id,
             api_key=ctx.api_key, model=ctx.model, system=system, user=user,
+            model_override=ctx.chat_model,
             tool=chat_prompts.SUGGEST_TOOL, opts=llm.COPILOT,
             max_tokens=int(_num(_cfg(ctx.cfg, "max_tokens"), DEFAULTS["max_tokens"])),
             # The system prompt is tenant-stable across every turn, so it caches; the user
@@ -841,6 +846,7 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
             async for delta in llm.stream_text(
                     feature="autopilot", client_id=ctx.client_id,
                     integration_id=ctx.integration_id, api_key=ctx.api_key, model=ctx.model,
+                    model_override=ctx.chat_model,
                     system=system, user=user, opts=llm.ANSWER, max_tokens=max_tokens,
                     conversation_id=ctx.conversation_id, turn_id=ctx.turn_id,
                     suggest_ref=ctx.suggest_ref):
@@ -927,6 +933,7 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
         raw = await llm.call_tool(
             feature="triage", client_id=ctx.client_id, integration_id=ctx.integration_id,
             api_key=ctx.api_key, model=ctx.model,
+            model_override=ctx.chat_model,
             system=chat_prompts.build_triage_system(
                 ctx.cfg, locale=ctx.locale, policy=policy,
                 business_name=ctx.business_name, industry=ctx.industry),

@@ -19,6 +19,11 @@ class Settings(BaseSettings):
 
     # Default model / voice choices (also overridable via the admin panel).
     llm_model: str = "claude-opus-4-8"
+    # The chat bot's own model: triage, answers, copilot drafts and handover summaries. A
+    # customer waits through up to three of these calls in a row, so the bot runs on a fast
+    # model while call analysis keeps `llm_model`. The Default bot tab can override it
+    # (`settings.chat_model`); an empty value here means the bot uses `llm_model` too.
+    chat_llm_model: str = "claude-haiku-4-5"
     stt_model: str = "scribe_v1"
     tts_model: str = "eleven_multilingual_v2"
     tts_voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel" (default voice)

@@ -678,7 +678,10 @@ def test_what_day_is_it_is_answered_from_the_business_clock(monkeypatch):
     calls = _fake_triage(monkeypatch, "chitchat", "Today is Monday, 14 September.", capture=seen)
 
     done = _run(dataclasses.replace(_ctx(CID, cfg=ON, text="hey what day is today?"),
-                                    now=PINNED_NOW))
+                                    now=PINNED_NOW, chat_model="claude-haiku-4-5"))
+
+    # The bot's own fast model rides on the call; llm swaps it in after resolution.
+    assert seen["model_override"] == "claude-haiku-4-5"
 
     assert "Monday, 14 September 2026, 15:42 (Asia/Tbilisi, UTC+04:00)" in seen["user"]
     assert done["reply"]["text"].startswith("Today is Monday, 14 September.")
