@@ -1088,6 +1088,7 @@ async def answer(
     webhook retries) re-reads the finished answer instead of paying for a second one and
     sending the customer a second, differently-worded reply.
     """
+    received = time.monotonic()
     assert_expected_tenant(p, x_cq_expect_tenant)
     content = (body.content or "").strip()
     if not content:
@@ -1157,6 +1158,7 @@ async def answer(
         envelope={"channel": body.channel, "text": content,
                   "display_name": body.display_name, "subject": body.subject,
                   "attachment": body.attachment})
+    ctx.prep_ms = int((time.monotonic() - received) * 1000)
 
     _INFLIGHT.add(key)
     if as_stream:

@@ -19,6 +19,7 @@ Nothing request-supplied is interpolated: filters go through `usage.where_sql` a
 sort keys through `usage.page_params`' whitelist, and the one interpolated group label comes from
 `usage.GROUP_ORDER` after that whitelist has accepted it.
 """
+import json
 from ..db import pool
 from . import usage
 
@@ -412,6 +413,18 @@ async def conversations(f: usage.UsageFilter, *, channel: str | None, sort: str 
     return _page(p, total, out)
 
 
+def _bot_timing(row) -> dict | None:
+    """`{stages: {step: ms}, source, kind}` for a turn the public bot answered, else None."""
+    if row is None:
+        return None
+    try:
+        stages = json.loads(row["stages"] or "{}")
+    except (TypeError, ValueError):
+        stages = {}
+    return {"stages": stages if isinstance(stages, dict) else {},
+            "source": row["source"], "kind": row["kind"]}
+
+
 async def conversation_detail(conversation_id: str) -> dict | None:
     """One conversation, all time, message by message: each turn and the AI calls it caused.
 
@@ -434,7 +447,7 @@ async def conversation_detail(conversation_id: str) -> dict | None:
         if conv is None and not total["calls"]:
             return None
 
-        turns, per_turn = [], {}
+        turns, per_turn, timing = [], {}, {}
         if conv is not None:
             conversation = usage.record(conv)
             owner = conv["client_id"]
@@ -453,6 +466,16 @@ async def conversation_detail(conversation_id: str) -> dict | None:
                      WHERE u.conversation_id = $1::uuid AND u.client_id = $2::uuid
                        AND u.turn_id = ANY($3::uuid[])
                      GROUP BY u.turn_id
+                """, conversation_id, owner, [t["turn_id"] for t in turns])}
+                # How long the bot took, step by step, for each customer message it answered:
+                # the engine's own stage timings, stored on the reply's envelope.
+                timing = {str(r["turn_id"]): r for r in await conn.fetch("""
+                    SELECT s.turn_id, (s.envelope->'usage'->'latency_ms')::text AS stages,
+                           s.envelope->'scope'->>'source' AS source,
+                           s.envelope->'scope'->>'kind' AS kind
+                      FROM copilot_suggestions s
+                     WHERE s.conversation_id = $1::uuid AND s.client_id = $2::uuid
+                       AND s.mode = 'autopilot' AND s.turn_id = ANY($3::uuid[])
                 """, conversation_id, owner, [t["turn_id"] for t in turns])}
         else:
             # Purged conversation (turns cascade with it): the usage rows are all that is left.
@@ -481,6 +504,7 @@ async def conversation_detail(conversation_id: str) -> dict | None:
         "conversation": conversation,
         "total": _totals(total),
         "turns": [{**usage.record(t), "total": _totals(per_turn.get(str(t["turn_id"]))),
-                   "calls": by_turn[str(t["turn_id"])]} for t in turns],
+                   "calls": by_turn[str(t["turn_id"])],
+                   "bot_timing": _bot_timing(timing.get(str(t["turn_id"])))} for t in turns],
         "unattached": unattached,
     }

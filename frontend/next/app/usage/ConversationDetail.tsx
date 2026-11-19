@@ -42,6 +42,28 @@ function roleLabel(t: T, role: string): string {
   return s === key ? role : s;
 }
 
+/** Where the bot's reply time went, step by step, in the order the engine runs them: what the
+    API did before the engine (`prep`), document search, the model calls, validation, and the
+    engine's own total. Time the chat service adds on its side is not in here. */
+const STEP_ORDER = ['prep', 'kill_switch', 'retrieval', 'gate', 'triage', 'llm', 'handoff_summary', 'validate', 'total'];
+
+function BotTiming({ timing, t }: {
+  timing: { stages: Record<string, number>; source: string | null; kind: string | null };
+  t: T;
+}): JSX.Element {
+  const s = timing.stages || {};
+  const steps = [...STEP_ORDER.filter(k => k in s), ...Object.keys(s).filter(k => !STEP_ORDER.includes(k))];
+  const server = (s.prep || 0) + (s.total || 0);
+  return (
+    <div className="muted" style={{ marginTop: 6, fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
+      <b>{t('ul.timing.title')}</b>
+      {timing.source ? <> · {timing.source}{timing.kind ? ` / ${timing.kind}` : ''}</> : null}
+      {' · '}{steps.map(k => `${k} ${fmt(s[k])}`).join(' · ')}
+      {s.total !== undefined ? <> · <b>{t('ul.timing.server', { ms: fmt(server) })}</b></> : null}
+    </div>
+  );
+}
+
 export default function ConversationDetail({ conversationId, t, onBack, backLabel }: {
   conversationId: string;
   t: T;
@@ -123,6 +145,7 @@ export default function ConversationDetail({ conversationId, t, onBack, backLabe
                       {turn.total.failed ? <> · <span className="warn-flag">{t('ul.failed.n', { n: fmt(turn.total.failed) })}</span></> : null}
                     </div>
                     <CallsTable rows={turn.calls} cols={TURN_COLS} t={t} compact />
+                    {turn.bot_timing ? <BotTiming timing={turn.bot_timing} t={t} /> : null}
                   </div>
                 ) : (
                   <div className="hint">{t('ul.turn.nocalls')}</div>

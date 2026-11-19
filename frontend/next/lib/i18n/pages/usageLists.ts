@@ -7,6 +7,8 @@
 import type { Dict } from '../index';
 
 export const en: Dict = {
+  'ul.timing.title': 'Reply time, ms',
+  'ul.timing.server': 'CQ total {ms} ms',
   'ul.loading': 'Loading…',
   'ul.retry': 'Retry',
   'ul.search.recordings': 'Search by file name',
@@ -101,6 +103,8 @@ export const en: Dict = {
 };
 
 export const ka: Dict = {
+  'ul.timing.title': 'პასუხის დრო, მწმ',
+  'ul.timing.server': 'CQ სულ {ms} მწმ',
   'ul.loading': 'იტვირთება…',
   'ul.retry': 'ხელახლა ცდა',
   'ul.search.recordings': 'ძიება ფაილის სახელით',
@@ -195,6 +199,8 @@ export const ka: Dict = {
 };
 
 export const ru: Dict = {
+  'ul.timing.title': 'Время ответа, мс',
+  'ul.timing.server': 'CQ всего {ms} мс',
   'ul.loading': 'Загрузка…',
   'ul.retry': 'Повторить',
   'ul.search.recordings': 'Поиск по имени файла',

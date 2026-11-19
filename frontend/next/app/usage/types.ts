@@ -200,6 +200,8 @@ export interface ConversationDetail {
   turns: {
     turn_id: string; turn_ref: string | null; role: string; content: string | null;
     created_at: string | null; grounded: boolean | null; total: Totals; calls: CallRow[];
+    /** The public bot's step timings (ms) for a customer message it answered, else null. */
+    bot_timing: { stages: Record<string, number>; source: string | null; kind: string | null } | null;
   }[];
   unattached: CallRow[];
 }

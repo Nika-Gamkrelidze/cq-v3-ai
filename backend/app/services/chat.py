@@ -155,6 +155,9 @@ class ChatContext:
     off_topic_count: int = 0
     # The business clock's "now". None means the real clock; tests pin it.
     now: datetime | None = None
+    # Milliseconds the router spent before the engine started (config, mirror write, metering,
+    # context reads), recorded as the `prep` stage so a turn's timings cover the whole request.
+    prep_ms: int | None = None
     # The chat bot's own model (`config.chat_llm_model` / `settings.chat_model`), passed to every
     # call this engine makes; llm swaps it in only on our own Anthropic connection.
     chat_model: str | None = None
@@ -746,7 +749,7 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     """
     ev = _Seq()
     started = time.monotonic()
-    stages: dict = {}
+    stages: dict = {} if ctx.prep_ms is None else {"prep": ctx.prep_ms}
     yield ev("open", {"suggest_ref": ctx.suggest_ref, "mode": ctx.mode,
                       "conversation_ref": ctx.conversation_ref or ctx.conversation_id,
                       "locale": chat_prompts.normalize_locale(ctx.locale), "proto": PROTO})
