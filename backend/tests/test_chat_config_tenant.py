@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 
+from app.config import settings
 from app.services import auth
 from conftest import sql
 
@@ -167,3 +168,30 @@ def test_tenant_b_never_sees_tenant_a_persona(api, seed, reset_a):
     assert api.get(CFG, headers=_key(seed, "a")).json()["persona"] == persona
     # Leave B on the defaults too; the seed is shared across files.
     assert api.put(CFG, headers=_key(seed, "b"), json=_body()).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# The bot's model: the operator's to set per workspace, never the customer's
+# --------------------------------------------------------------------------- #
+def test_chat_model_is_set_by_the_operator_and_kept_through_a_customer_save(api, seed):
+    """The bot's model is billed to the deployment's key. An operator (acting as the workspace)
+    sets it; the customer's own key neither sets nor clears it; empty means "inherit"."""
+    operator = {"X-Admin-Token": settings.admin_token, "X-Act-As-Tenant": seed["a"]["client_id"]}
+    customer = _key(seed, "a")
+    try:
+        r = api.put(CFG, headers=operator, json=_body(settings={"chat_model": "claude-sonnet-5"}))
+        assert r.status_code == 200, r.text
+        assert r.json()["settings"]["chat_model"] == "claude-sonnet-5"
+
+        # The customer tries to change it, then saves without it: the operator's choice stays.
+        r = api.put(CFG, headers=customer, json=_body(settings={"chat_model": "claude-opus-4-8"}))
+        assert r.json()["settings"]["chat_model"] == "claude-sonnet-5", r.text
+        r = api.put(CFG, headers=customer, json=_body())
+        assert r.json()["settings"]["chat_model"] == "claude-sonnet-5", r.text
+
+        # Empty from the operator clears it: the workspace inherits again.
+        r = api.put(CFG, headers=operator, json=_body(settings={"chat_model": ""}))
+        cfg = r.json()
+        assert cfg["settings"].get("chat_model") in (None, cfg["chat_model_inherited"]), cfg
+    finally:
+        api.put(CFG, headers=operator, json=_body())

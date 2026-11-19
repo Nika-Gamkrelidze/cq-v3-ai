@@ -39,6 +39,7 @@ interface Settings {
   handoff_summary?: boolean;
   disclosure_mode?: string;
   disclosure?: Record<string, string>;
+  chat_model?: string;
   [k: string]: unknown;
 }
 interface BotConfig {
@@ -52,6 +53,8 @@ interface BotConfig {
   settings?: Settings;
   /** The engine's own wording per language, shown as placeholders in the copy boxes. */
   builtin_copy?: unknown;
+  /** What this workspace's bot runs on when it has no model of its own. */
+  chat_model_inherited?: string;
   version?: number | null;
   is_default?: boolean;
   killed?: boolean;
@@ -88,6 +91,7 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
   // Policy, business scope, hours and off-topic: one sub-form, shared with the console.
   const [botScope, setBotScope] = useState<ScopeForm>(() => scopeFormFrom(null));
   const [handoff, setHandoff] = useState(true);
+  const [chatModel, setChatModel] = useState('');
 
   const [needPublic, setNeedPublic] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: '' | 'ok' | 'err' }>({ text: '', kind: '' });
@@ -119,6 +123,9 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
     // legacy `allow_general_knowledge === true`, else `kb_only`.
     setBotScope(scopeFormFrom(s));
     setHandoff(s.handoff_summary !== false);
+    // The read is merged, so the inherited model shows up here too: only a different value is
+    // this workspace's own, and only that one belongs in the box.
+    setChatModel(s.chat_model && s.chat_model !== c.chat_model_inherited ? s.chat_model : '');
     // An unknown mode falls back to the engine's own default rather than a blank trigger.
     setDiscMode(DISCLOSURE_MODES.includes(s.disclosure_mode as typeof DISCLOSURE_MODES[number])
       ? (s.disclosure_mode as string) : 'first');
@@ -202,9 +209,9 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
         handoff_summary: handoff,
         disclosure_mode: DISCLOSURE_MODES.includes(discMode as typeof DISCLOSURE_MODES[number]) ? discMode : 'first',
         disclosure, limits,
-        // The bot's model is the operator's choice (Default bot tab). The read is merged, so the
-        // spread above carries the default's value; dropping it keeps a save from freezing it here.
-        chat_model: undefined,
+        // Empty means "inherit": the key is left out so a later global change still reaches
+        // this workspace. The server keeps the operator's value on a customer's save.
+        chat_model: chatModel.trim() || undefined,
       }, botScope),
     };
 
@@ -364,6 +371,19 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
           <div className="card">
             <AnswerPolicyField form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" />
             <BusinessScopeField form={botScope} update={setBotScope} t={t} readonly={readonly} idPrefix="b" />
+            {/* The bot's model is billed to our key, so only the operator sees and sets it. */}
+            {ws.operator ? (
+              <>
+                <label htmlFor="b_chat_model" style={{ marginTop: 14 }}>
+                  <span>{t('bot.chatmodel')}</span> <Tip text={t('bot.chatmodel.tenant.hint')} />
+                </label>
+                <input
+                  id="b_chat_model" value={chatModel} spellCheck={false} autoComplete="off"
+                  placeholder={cfg?.chat_model_inherited || ''}
+                  onChange={e => setChatModel(e.target.value)}
+                />
+              </>
+            ) : null}
             <label className="inline" style={{ gap: 8, marginTop: 14 }}>
               <input
                 type="checkbox" style={{ width: 'auto' }} checked={handoff} disabled={readonly}

@@ -88,11 +88,21 @@ async def put_config(body: ChatConfigBody, principal: Principal = Depends(_bot_e
             status_code=409,
             detail="Cannot enable autopilot: this tenant has no public knowledge-base "
                    "documents. Publish at least one document (visibility='public') first.")
+    settings = dict(body.settings or {})
+    if not principal.is_operator:
+        # The bot's model is billed to the deployment's key, so it is the operator's to choose
+        # (from this same tab, acting as the workspace). A customer's save neither sets nor
+        # clears it: whatever the operator chose for this workspace is carried over.
+        settings.pop("chat_model", None)
+        current = await chat_store.get_chat_config(principal.client_id)
+        own = (current.get("settings") or {}).get("chat_model")
+        if own and own != current.get("chat_model_inherited"):
+            settings["chat_model"] = own
     try:
         cfg = await chat_store.save_chat_config(
             principal.client_id, persona=body.persona, greeting=body.greeting,
             refusal_copy=body.refusal_copy, languages=body.languages, canned=body.canned,
-            autopilot_enabled=body.autopilot_enabled, settings=body.settings,
+            autopilot_enabled=body.autopilot_enabled, settings=settings,
             # `tenant:<user_id>` for a person, `tenant:apikey` for a key, `tenant:superadmin`
             # for an operator — the vocabulary kb_events already uses, so the console can say
             # who last changed the bot without guessing.

@@ -533,6 +533,11 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
     connection and key, only on our own Anthropic connection: a workspace on its own
     subscription (`source == "byo"`) or another provider keeps its model. Passing a model into
     `_resolve` would do nothing — it is the bottom of the chain, under the default connection.
+    **Per workspace:** the operator sets it in that workspace's BOT tab (shown only under
+    `X-Act-As-Tenant`); `routers/chat_config.py` makes a customer's save neither set nor clear
+    it. Empty means "inherit" at every layer and is stored as an absent key (never `""`, which
+    would shadow the layer below); config reads carry `chat_model_inherited` so the tab can
+    tell a workspace's own value from the merged one.
   - **Envelope:** `turn.scope` (policy, source, kind, answered, off_topic); `state` is `ready`
     when grounded OR `scope.answered`. New handoff reasons `risky`, `related_not_in_kb`; new
     grounding reason `weak_match`; `ungrounded_answer` is no longer produced.

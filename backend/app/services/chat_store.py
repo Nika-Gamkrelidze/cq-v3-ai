@@ -748,10 +748,14 @@ def _validated_scope_settings(settings) -> dict:
         out["emergency_number"] = number
     if out.get("chat_model") is not None:
         model = str(out["chat_model"]).strip()
-        # Empty is allowed and means "the deployment's default chat model".
         if model and not _MODEL_ID_RE.fullmatch(model):
             raise ValueError("settings.chat_model must be a model id such as claude-haiku-4-5")
-        out["chat_model"] = model
+        if model:
+            out["chat_model"] = model
+        else:
+            # Empty means "inherit" at every layer. Stored as "", it would shadow the layer
+            # below it in `_merge_settings` instead.
+            out.pop("chat_model")
     return out
 
 
@@ -792,6 +796,9 @@ def _default_config_from(stored: dict) -> dict:
         "builtin_copy": chat_copy.builtin_copy(),
         # What an empty "Chat model" box resolves to — the console shows it as the placeholder.
         "chat_model_default": config_settings.chat_llm_model,
+        # What a workspace with no model of its own runs on: the Default bot tab's choice, else
+        # the deployment's. The BOT tab shows a workspace's own value only when it differs.
+        "chat_model_inherited": settings_blob.get("chat_model") or config_settings.chat_llm_model,
     })
     for knob in _LIFTED_KNOBS:
         if settings_blob.get(knob) is not None:
