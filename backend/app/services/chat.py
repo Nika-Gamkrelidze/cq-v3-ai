@@ -225,6 +225,11 @@ def gate(r: dict, cfg: dict) -> tuple[bool, str]:
 # --- query building (no LLM hop) ----------------------------------------------
 
 MAX_QUERY_CHARS = 512
+# How much of the agent's last line goes into the window. Its opening names the subject a
+# follow-up refers to; the rest only costs embedding time (TEI on CPU is linear in tokens —
+# measured 0.6 s after a short reply, 3.2 s after a long one) and, with the agent's line first
+# and the window cut at MAX_QUERY_CHARS, pushed the customer's own words out of the window.
+AGENT_LINE_CHARS = 160
 
 
 def build_query(messages: list[dict]) -> list[str]:
@@ -253,8 +258,8 @@ def build_query(messages: list[dict]) -> list[str]:
             text = str(m.get("content") or "").strip()
             if text:
                 # Prepended: the agent's line usually names the subject the customer then
-                # refers to with a pronoun.
-                window_parts.insert(0, text)
+                # refers to with a pronoun. Its opening only — see AGENT_LINE_CHARS.
+                window_parts.insert(0, text[:AGENT_LINE_CHARS].strip())
             break
 
     queries = []

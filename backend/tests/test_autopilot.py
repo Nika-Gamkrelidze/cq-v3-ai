@@ -1074,3 +1074,17 @@ def test_streamed_done_envelope_is_byte_identical_to_the_blocking_answer(monkeyp
     assert "evil.example" not in blocking["reply"]["text"]
     assert blocking["reply"]["text"] != streamed.strip()
     assert [c["n"] for c in blocking["reply"]["citations"]] == [1]
+
+
+def test_the_window_keeps_the_customers_words_after_a_long_bot_reply():
+    """Only the opening of the agent's last line goes into the retrieval window. A long bot
+    reply used to fill the 512-character window on its own — 3.2 s of CPU embedding in
+    production — and push the customer's actual follow-up out of it."""
+    msgs = [{"role": "customer", "content": "what are your prices?"},
+            {"role": "bot", "content": "Basic plan, 25 USD. " + "More detail. " * 80},
+            {"role": "customer", "content": "and the enterprise one?"}]
+    raw, window = chat.build_query(msgs)
+    assert raw == "and the enterprise one?"
+    assert window.startswith("Basic plan, 25 USD.")
+    assert "what are your prices?" in window and "and the enterprise one?" in window
+    assert len(window) <= chat.AGENT_LINE_CHARS + 60
