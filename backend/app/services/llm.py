@@ -412,15 +412,18 @@ async def stream_text(*, feature: str, client_id: str | None, api_key: str, mode
             raise
         except (GeneratorExit, asyncio.CancelledError):
             _record(feature=feature, client_id=client_id, integration_id=integration_id,
-                    model=holder.model or res.model, usage=holder.usage,
+                    model=res.model, usage=holder.usage,
                     latency_ms=int((time.monotonic() - started) * 1000), ok=False,
                     byo=res.byo, provider=res.provider, connection_id=res.connection_id,
                     conversation_id=conversation_id, turn_id=turn_id,
                     suggest_ref=suggest_ref)
             raise
 
+    # The model we ASKED for, as `call_tool` records it, not the dated snapshot the stream
+    # reports back (`claude-haiku-4-5-20251001`): the price list is keyed by the requested id,
+    # and one model under two names showed up unpriced and split on the usage page.
     _record(feature=feature, client_id=client_id, integration_id=integration_id,
-            model=holder.model or res.model, usage=holder.usage,
+            model=res.model, usage=holder.usage,
             latency_ms=int((time.monotonic() - started) * 1000), ok=True,
             byo=res.byo, provider=res.provider, connection_id=res.connection_id,
             conversation_id=conversation_id, turn_id=turn_id, suggest_ref=suggest_ref)
