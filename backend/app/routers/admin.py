@@ -9,7 +9,8 @@ import json
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -387,7 +388,30 @@ async def health_overview():
 # The NOC page: one read of everything that can take the platform down (services/noc.py).
 @router.get("/noc/overview", dependencies=[Depends(require_admin)])
 async def noc_overview():
-    return await noc.overview()
+    return await noc.current()
+
+
+def _noc_frame(snap: dict) -> str:
+    return f"event: snapshot\ndata: {json.dumps(jsonable_encoder(snap), separators=(',', ':'))}\n\n"
+
+
+async def _noc_stream_body():
+    # Subscribe before the first read so a cycle that lands in between is not missed.
+    async with noc.hub.subscribe() as q:
+        yield _noc_frame(await noc.current())
+        while True:
+            try:
+                snap = await asyncio.wait_for(q.get(), 15)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield _noc_frame(snap)
+
+
+@router.get("/noc/stream", dependencies=[Depends(require_admin)])
+async def noc_stream():
+    return StreamingResponse(_noc_stream_body(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
 
 @router.get("/health/series", dependencies=[Depends(require_admin)])

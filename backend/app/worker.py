@@ -51,8 +51,8 @@ import time
 
 from . import db
 from .config import settings
-from .services import (audio_convert, chat_store, health_metrics, kb_reembed, retention,
-                       settings_store)
+from .services import (audio_convert, chat_store, health_metrics, kb_reembed, noc_history,
+                       retention, settings_store)
 from .services.curation import apply as curation_apply
 from .services.curation import runner as curation_runner
 
@@ -145,7 +145,7 @@ REQUIRED_TABLES = ("copilot_suggestions", "curation_runs", "curation_proposals",
                    # and logged UndefinedColumnError.
                    "tts_requests",
                    # health.sql — read by health_purge.
-                   "system_metrics", "tenant_load")
+                   "system_metrics", "tenant_load", "noc_snapshots")
 # Bounded wait for those tables. Backs off 1 -> 2 -> 4 -> 8 s, capped, and gives up after this
 # long: if the api is genuinely broken the worker should start anyway and let each duty fail
 # loudly on its own interval, rather than sit silent forever pretending to be healthy.
@@ -392,6 +392,9 @@ async def _health_purge() -> None:
         # hides a real error in this log.
         log.info("health purge: %s metric row(s) + %s load row(s) older than %s day(s)",
                  result.get("metrics_deleted", 0), result.get("load_deleted", 0), days)
+    noc_deleted = await noc_history.purge(settings.noc_retention_days)
+    if noc_deleted:
+        log.info("noc purge: %s snapshot(s) older than %s day(s)", noc_deleted, settings.noc_retention_days)
 
 
 _HEARTBEAT_SQL = """

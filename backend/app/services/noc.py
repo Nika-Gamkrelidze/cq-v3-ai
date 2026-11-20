@@ -26,11 +26,13 @@ hour of RTT/loss; persist it in a table only if the NOC needs yesterday's networ
 shortcut: thresholds are constants; move them to app_settings when two operators disagree.
 """
 import asyncio
+import contextlib
 import logging
 import socket
 import ssl
 import time
 from collections import deque
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -485,3 +487,71 @@ async def overview() -> dict:
         "checks": checks, "ai": ai_rows, "probes": probe_rows, "workers": worker_rows,
         "sampler_interval_s": ov["sampler"].get("interval_s"),
     }
+
+
+# --------------------------------------------------------------------------- #
+# The live feed: ONE computation every cycle, shared by every viewer
+# --------------------------------------------------------------------------- #
+MIN_INTERVAL_S = 5.0
+
+
+def interval_s() -> float:
+    return max(float(getattr(settings, "noc_interval_s", 10.0)), MIN_INTERVAL_S)
+
+
+class Hub:
+    """The latest snapshot plus one size-1 queue per open stream. A newer snapshot REPLACES an
+    unsent one, so a slow reader sees the latest state and never accumulates a backlog."""
+
+    def __init__(self) -> None:
+        self.latest: dict | None = None
+        self.at = 0.0                       # time.monotonic() of `latest`
+        self._subs: set[asyncio.Queue] = set()
+
+    def publish(self, snap: dict) -> None:
+        self.latest, self.at = snap, time.monotonic()
+        for q in self._subs:
+            if q.full():
+                q.get_nowait()
+            q.put_nowait(snap)
+
+    @contextlib.asynccontextmanager
+    async def subscribe(self):
+        q: asyncio.Queue = asyncio.Queue(maxsize=1)
+        self._subs.add(q)
+        try:
+            yield q
+        finally:
+            self._subs.discard(q)
+
+
+hub = Hub()
+# Called with every fresh snapshot (the history writer registers itself here); a sink's failure
+# is logged and never reaches the loop or the other sinks.
+sinks: list[Callable[[dict], Awaitable[None]]] = []
+
+
+async def current() -> dict:
+    """The hub's snapshot while it is younger than 3 cycles, else computed on the spot (the
+    collector is off in tests and may be stalled in production)."""
+    if hub.latest is not None and time.monotonic() - hub.at < 3 * interval_s():
+        return hub.latest
+    return {**await overview(), "interval_s": interval_s()}
+
+
+async def collect_loop(every_s: float | None = None) -> None:
+    """Started by the api lifespan. `every_s` is for tests; production reads the setting."""
+    while True:
+        t0 = time.monotonic()
+        every = every_s if every_s is not None else interval_s()
+        try:
+            snap = {**await overview(), "interval_s": every}
+            hub.publish(snap)
+            for sink in list(sinks):
+                try:
+                    await sink(snap)
+                except Exception:  # noqa: BLE001
+                    log.exception("noc sink %s failed; continuing", getattr(sink, "__name__", sink))
+        except Exception:  # noqa: BLE001
+            log.exception("noc collect cycle failed; continuing")
+        await asyncio.sleep(max(every - (time.monotonic() - t0), 1 if every_s is None else 0))

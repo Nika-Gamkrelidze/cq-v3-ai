@@ -260,6 +260,18 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   **The server decides every colour** from the thresholds `noc.T` (ok / warn / crit; `unknown`
   = no data or not configured and never turns the overall status red; a failure rate or 5xx
   share needs a minimum number of calls before it means anything) — the page only labels.
+  **Live, not polled:** the api computes ONE snapshot every `NOC_INTERVAL_S` (10 s, min 5) in
+  `noc.collect_loop` and pushes it over `GET /admin/noc/stream` (SSE; `X-Accel-Buffering: no`,
+  a keep-alive after 15 s of silence, a size-1 queue per viewer so a slow reader never queues);
+  the page (`useNocStream`) paints from `/admin/noc/overview`, then listens, reconnects with
+  backoff, holds no connection in a background tab, and falls back to polling on a backend
+  without the route. **History:** `noc_history.record` (a `noc.sinks` entry registered in
+  `main.py`) stores a compact snapshot in `noc_snapshots` every `NOC_STORE_EVERY_S` (60 s) and at
+  once when the overall status changes, for `NOC_RETENTION_DAYS` (30; the worker's `health_purge`
+  trims it). `GET /admin/noc/history/days|history|snapshot` feed the page's **History** mode: a
+  date picker, a 31-day strip, a 5-minute timeline of the day, an incident list, the day's charts
+  and the full board as it was at any stored minute. A stored snapshot has `probes[].history`
+  emptied (the live ring is not kept).
   Probe history is **in memory** (one api process), so a deploy resets the last hour of RTT/loss.
   `NOC_TLS_HOSTS` (env, comma list, empty by default) names the host(s) whose certificate expiry
   is watched; it is probed from inside the api container, so the name must resolve there.
@@ -733,6 +745,14 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   browser: the page was type-checked, built and its API exercised by tests, not looked at.
   Four unrelated backend tests (`test_audio_convert` line-break message, three `test_llm_providers`
   stream-usage model names) already failed on `main` before this change.
+- **2026-11-20 (later) — the NOC went live and keeps a month.** The owner found `/noc` needed a
+  refresh (it polled every 10 s but nothing on the page ticked, so it looked dead) and asked for a
+  month of history with a date picker. Built as §3 describes: the push stream + ticking clocks,
+  `noc_snapshots` (≈2 KB a row after compression, ~90 MB a month at one a minute), the three
+  history routes and the History mode. **Not done:** still no alerting; a snapshot is stored once
+  a minute, so a spike shorter than that is only visible if it flipped the overall status; probe
+  history is still memory-only. Verified at API level with a real uvicorn (stream cadence, storage,
+  history and 401s); the page itself is type-checked and built, not looked at in a browser.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST

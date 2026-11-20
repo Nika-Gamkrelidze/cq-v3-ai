@@ -12,8 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .routers import (admin, ai_admin, ai_tenant, analyze, auth, calls, chat, chat_config,
-                     convert, crm, curation, kb, kb_admin, partner, recordings, scoring, sentiment,
-                     tenants, transcription as transcription_router, tts, usage_admin)
+                     convert, crm, curation, kb, kb_admin, noc_history as noc_history_router,
+                     partner, recordings, scoring, sentiment, tenants,
+                     transcription as transcription_router, tts, usage_admin)
 from .config import settings
 from .services import ai_registry, ai_resolve, analysis, settings_store
 from .services import auth as auth_service
@@ -192,7 +193,9 @@ async def lifespan(app: FastAPI):
     health_metrics = None
     if settings.health_sampler_enabled:
         try:
-            from .services import health_metrics, noc
+            from .services import health_metrics, noc, noc_history
+            if noc_history.record not in noc.sinks:
+                noc.sinks.append(noc_history.record)       # one stored snapshot a minute, see noc_history
             cfg = await settings_store.get_health_config()
             _load = health_metrics.LoadAccumulator()
             health_tasks = [
@@ -200,6 +203,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_health_flush_loop(health_metrics, _load),
                                     name="health_flush"),
                 asyncio.create_task(noc.probe_loop(), name="noc_probe"),
+                asyncio.create_task(noc.collect_loop(), name="noc_collect"),
             ]
             log.info("startup health: sampler every %ss, load flush every %.0fs, "
                      "retention %s day(s)", cfg["sample_interval_s"], HEALTH_FLUSH_INTERVAL_S,
@@ -340,6 +344,7 @@ app.include_router(ai_admin.router)
 app.include_router(ai_tenant.router)
 # Detailed AI usage (superadmin): /admin/usage/{overview,calls,recordings,conversations}.
 app.include_router(usage_admin.router)
+app.include_router(noc_history_router.router)         # /admin/noc/history*, /admin/noc/snapshot
 
 # ---- B2B partner API (versioned) -------------------------------------------
 # New partner-facing endpoints (account, transcriptions, async + bulk analysis, jobs,

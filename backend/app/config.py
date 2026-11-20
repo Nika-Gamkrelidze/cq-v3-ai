@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     # Hostnames whose TLS certificate the NOC page watches (comma separated), e.g. ai.communiq.ge.
     # Empty = no certificate check. Probed from inside the api container, so the name must resolve there.
     noc_tls_hosts: str = ""
+    # NOC cadence (services/noc.py, services/noc_history.py): the collector computes ONE snapshot
+    # every `noc_interval_s` for every viewer; it is stored every `noc_store_every_s` (and at once
+    # when the overall status changes) and kept `noc_retention_days`.
+    noc_interval_s: float = 10.0
+    noc_store_every_s: float = 60.0
+    noc_retention_days: int = 30
 
 
 settings = Settings()

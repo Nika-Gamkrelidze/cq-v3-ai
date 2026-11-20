@@ -6,7 +6,7 @@ import type { Dict } from '../index';
 
 export const en: Dict = {
   'noc.title': 'NOC',
-  'noc.lead': 'Is the platform healthy right now — and if not, which part. Refreshes every 10 seconds.',
+  'noc.lead': 'Is the platform healthy right now — and if not, which part. Updates live.',
   'noc.adminonly': 'This page is for CommuniQ operators. Sign in with an administrator account.',
   'noc.loadfail': 'Could not load the monitoring data.',
   'noc.unavailable': 'The monitoring API is not available on this server yet.',
@@ -131,11 +131,21 @@ export const en: Dict = {
   'noc.s.errs': 'errors %',
 
   'noc.foot': 'Statuses are computed by the server from fixed thresholds. Network probes run from the api container and their history is kept in memory, so it restarts with the api.',
+
+  'noc.mode.label': 'View',
+  'noc.mode.live': 'Live',
+  'noc.mode.history': 'History',
+  'noc.live.live': 'Live',
+  'noc.live.connecting': 'Connecting…',
+  'noc.live.retrying': 'Reconnecting…',
+  'noc.live.paused': 'Paused (tab hidden)',
+  'noc.live.polling': 'Every 10 s',
+  'noc.history.soon': 'History is coming soon.',
 };
 
 export const ka: Dict = {
   'noc.title': 'NOC',
-  'noc.lead': 'ჯანსაღია თუ არა პლატფორმა ახლა და, თუ არა, რომელი ნაწილი ჭირს. ახლდება ყოველ 10 წამში.',
+  'noc.lead': 'ჯანსაღია თუ არა პლატფორმა ახლა და, თუ არა, რომელი ნაწილი ჭირს. ახლდება ცოცხლად.',
   'noc.adminonly': 'ეს გვერდი CommuniQ-ის ოპერატორებისთვისაა. შედით ადმინისტრატორის ანგარიშით.',
   'noc.loadfail': 'მონიტორინგის მონაცემების ჩატვირთვა ვერ მოხერხდა.',
   'noc.unavailable': 'მონიტორინგის API ამ სერვერზე ჯერ ხელმისაწვდომი არ არის.',
@@ -260,11 +270,21 @@ export const ka: Dict = {
   'noc.s.errs': 'დაზიანებული %',
 
   'noc.foot': 'სტატუსებს სერვერი ითვლის ფიქსირებული ზღვრებით. ქსელის შემოწმებები api კონტეინერიდან სრულდება და მათი ისტორია მეხსიერებაშია, ამიტომ api-სთან ერთად იწყება თავიდან.',
+
+  'noc.mode.label': 'ხედი',
+  'noc.mode.live': 'ცოცხალი',
+  'noc.mode.history': 'ისტორია',
+  'noc.live.live': 'ცოცხალი',
+  'noc.live.connecting': 'უკავშირდება…',
+  'noc.live.retrying': 'თავიდან უკავშირდება…',
+  'noc.live.paused': 'შეჩერებულია (ჩანართი დამალულია)',
+  'noc.live.polling': 'ყოველ 10 წმ',
+  'noc.history.soon': 'ისტორია მალე დაემატება.',
 };
 
 export const ru: Dict = {
   'noc.title': 'NOC',
-  'noc.lead': 'Здорова ли платформа прямо сейчас — и если нет, то какая её часть. Обновляется каждые 10 секунд.',
+  'noc.lead': 'Здорова ли платформа прямо сейчас — и если нет, то какая её часть. Обновляется в реальном времени.',
   'noc.adminonly': 'Эта страница для операторов CommuniQ. Войдите под учётной записью администратора.',
   'noc.loadfail': 'Не удалось загрузить данные мониторинга.',
   'noc.unavailable': 'API мониторинга на этом сервере пока недоступен.',
@@ -389,4 +409,14 @@ export const ru: Dict = {
   'noc.s.errs': 'повреждено %',
 
   'noc.foot': 'Статусы считает сервер по фиксированным порогам. Сетевые проверки выполняются из контейнера api, а их история хранится в памяти, поэтому начинается заново вместе с api.',
+
+  'noc.mode.label': 'Вид',
+  'noc.mode.live': 'Онлайн',
+  'noc.mode.history': 'История',
+  'noc.live.live': 'Онлайн',
+  'noc.live.connecting': 'Подключение…',
+  'noc.live.retrying': 'Переподключение…',
+  'noc.live.paused': 'Пауза (вкладка скрыта)',
+  'noc.live.polling': 'Каждые 10 с',
+  'noc.history.soon': 'История скоро появится.',
 };

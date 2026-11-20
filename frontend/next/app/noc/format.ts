@@ -25,11 +25,11 @@ export function span(sec: number | null, t: T): string {
   return `${Math.round(s / 86400)} ${t('hl.u.d')}`;
 }
 
-/** "3 m ago" for an ISO timestamp or epoch seconds. */
-export function ago(at: string | number | null, t: T): string {
+/** "3 m ago" for an ISO timestamp or epoch seconds, against `now` (ms) so a ticking clock moves it. */
+export function ago(at: string | number | null, t: T, now: number = Date.now()): string {
   if (at === null || at === undefined) return EMPTY;
   const ms = typeof at === 'number' ? at * 1000 : Date.parse(at);
-  return Number.isNaN(ms) ? EMPTY : span((Date.now() - ms) / 1000, t);
+  return Number.isNaN(ms) ? EMPTY : span((now - ms) / 1000, t);
 }
 
 const pct = (v: number) => `${v === 0 ? '0' : v < 0.1 ? v.toFixed(3) : v < 10 ? v.toFixed(2) : v.toFixed(0)}%`;

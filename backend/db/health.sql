@@ -92,3 +92,18 @@ CREATE TABLE IF NOT EXISTS worker_heartbeat (
     last_error_at timestamptz,
     took_ms       integer
 );
+
+-- ---- NOC history ------------------------------------------------------------------------------
+-- The NOC's snapshot (services/noc.py `overview()`, minus the in-memory probe history) stored once
+-- a minute and at once when the overall status changes, kept `noc_retention_days` (worker
+-- `health_purge`). `status` / `crit` / `warn` / `bad` are denormalised out of the payload so the
+-- date picker's day summary and the timeline never have to open a payload. Superadmin-only data
+-- about the platform itself; client_id is not involved, like the other health tables.
+CREATE TABLE IF NOT EXISTS noc_snapshots (
+    ts      timestamptz PRIMARY KEY,
+    status  text NOT NULL,
+    crit    smallint NOT NULL DEFAULT 0,
+    warn    smallint NOT NULL DEFAULT 0,
+    bad     text[] NOT NULL DEFAULT '{}',
+    payload jsonb NOT NULL
+);
