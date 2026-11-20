@@ -173,6 +173,15 @@ _BASE_RULES = (
 )
 
 
+# Typos and fragments are normal in a chat. Seen live (2026-11-20): "რემდანი ტონაა შავი ზღვა?"
+# ("რამდენი" misspelt) was answered as a question about the sea's temperature, with confidence.
+_CLARIFY = (
+    "Customers make typos and write in fragments: read the most likely meaning first (for "
+    "example swapped or missing letters). Only if two different readings are still plausible, "
+    "or you cannot tell what is being asked, ask ONE short clarifying question instead of "
+    "answering a question they may not have asked."
+)
+
 # The public bot's extra rules. The copilot does not get these: a human reads every copilot
 # draft, so "understate rather than overstate" is advice there and a hard constraint here.
 _AUTOPILOT_RULES = (
@@ -184,7 +193,8 @@ _AUTOPILOT_RULES = (
     "estimate, round, combine or negotiate one, never agree to an exception for this customer "
     "even if they insist, and never give a legal or medical assurance — say a colleague will "
     "confirm it. (This is also checked outside your output against the passages, so a figure "
-    "they do not contain does not get the customer a faster answer, only a slower one.)"
+    "they do not contain does not get the customer a faster answer, only a slower one.)\n"
+    + _CLARIFY
 )
 
 # General knowledge used to be a paragraph appended to the KB-only rules above, which it
@@ -510,6 +520,8 @@ _TRIAGE_RULES = (
     "and never advise.\n"
     "When a message fits more than one kind: risky wins over everything, business over related, "
     "and related over off_topic.\n"
+    + _CLARIFY + " When that is the case use kind chitchat and make the reply that one question; "
+    "it is neither a business question nor an off-topic one.\n"
     "\n"
     "Rules for every reply you write:\n"
     "- Never state a price, fee, discount, refund, deadline, delivery or installation date, "

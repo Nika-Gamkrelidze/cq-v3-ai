@@ -590,7 +590,11 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
     built-in text IN THAT LANGUAGE, never the tenant's text for another one — the Default bot's
     English-only disclosure used to be read to every Georgian customer. `disclosure[lang] = ""`
     still means suppressed, for that language only. The console shows the built-in disclosure as
-    a placeholder (`builtin_copy.disclosure`). Latency/limit: a Latin-script message on a
+    a placeholder (`builtin_copy.disclosure`). A shared `_CLARIFY` sentence (public-bot answer rules
+    and triage rules, not the copilot's) tells the model to read a typo'd message for its likely
+    meaning and, only if two readings stay plausible, ask ONE clarifying question (triage: kind
+    `chitchat`) instead of answering another question — "რემდანი ტონაა შავი ზღვა?" was answered
+    as the sea's temperature. Latency/limit: a Latin-script message on a
     zero-token exit (cut-off, escalation keyword) has only the hint to go on.
   - **Envelope:** `turn.scope` (policy, source, kind, answered, off_topic); `state` is `ready`
     when grounded OR `scope.answered`. New handoff reasons `risky`, `related_not_in_kb`; new

@@ -168,3 +168,20 @@ def test_a_triage_reply_without_a_language_changes_nothing(monkeypatch):
     _triage_says(monkeypatch, None, "chitchat", "Hello!")
     done = _run(_ctx(CID, cfg=ON, text="hello", locale="ru"))
     assert chat_copy.DEFAULT_DISCLOSURE["ru"] in done["reply"]["text"] and done["locale"] == "ru"
+
+
+# --------------------------------------------------------------------------- #
+# A typo'd question is read for its likely meaning, then clarified — not answered as another one
+# --------------------------------------------------------------------------- #
+def test_the_public_bot_and_triage_are_told_to_clarify_rather_than_answer_a_different_question():
+    """Seen live: "რემდანი ტონაა შავი ზღვა?" ("რამდენი" misspelt) was answered as a question
+    about the sea's temperature. The copilot is not told: a person reads its drafts."""
+    auto = chat_prompts.build_system({}, mode="autopilot", locale="en")
+    triage = chat_prompts.build_triage_system({}, locale="en", policy="kb_only")
+    assist = chat_prompts.build_system({}, mode="assist", locale="en")
+    for system in (auto, triage):
+        assert "most likely meaning" in system and "ONE short clarifying question" in system
+    assert "use kind chitchat" in triage
+    assert "clarifying question" not in assist
+    # the triage template still formats: the new sentence adds no stray braces
+    assert "{" not in triage and "}" not in triage
