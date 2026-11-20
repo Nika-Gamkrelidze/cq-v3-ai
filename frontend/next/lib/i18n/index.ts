@@ -50,6 +50,7 @@
      pages/aicfg.ts         aicfg.         (new page      -> /ai-config)
      pages/console.ts       adm. pb. cred. kill. v.   (admin.html -> /console)
      pages/home.ts          hero.          (index.html    -> /)
+     pages/noc.ts           noc.           (new page      -> /noc)
      pages/usage.ts         usage.         (new page      -> /usage)
      pages/usageLists.ts    ul.            (the /usage lists and drill-downs)
      pages/usageMoney.ts    um.            (the /usage cost columns and Prices tab)
@@ -86,6 +87,7 @@ import * as aicfg from './pages/aicfg';
 import * as consolePage from './pages/console';
 import * as copilot from './pages/copilot';
 import * as home from './pages/home';
+import * as noc from './pages/noc';
 import * as usage from './pages/usage';
 import * as usageLists from './pages/usageLists';
 import * as usageMoney from './pages/usageMoney';
@@ -101,7 +103,7 @@ const MODULES: Record<Lang, Dict>[] = [
   ai, analysis, bot, convert, crm, curation, editor, kb, retrieval, scoring, sentimentTab, timeline,
   transcription,
   tts, workbench,
-  account, aicfg, consolePage, copilot, home, usage, usageLists, usageMoney, workspace,
+  account, aicfg, consolePage, copilot, home, noc, usage, usageLists, usageMoney, workspace,
 ];
 
 function assemble(lang: Lang): Dict {

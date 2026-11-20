@@ -69,3 +69,26 @@ COMMENT ON COLUMN tenant_load.client_key IS
   'new row per request.';
 COMMENT ON COLUMN tenant_load.client_id IS
   'Deliberately no FK: a deleted tenant keeps its share of the past hour''s load.';
+
+-- ---- NOC additions ---------------------------------------------------------------------------
+-- Packet counters of the api container's own interface, as per-second rates between two samples
+-- (the same derivation as the MB/s columns): `net_pkts_s` packets in + out, `net_errs_s` errors
+-- in + out, `net_drops_s` drops in + out. Loss % is drops / packets over a window — the NOC page
+-- divides the sums, never averages per-sample ratios, so a quiet second cannot outweigh a busy one.
+ALTER TABLE system_metrics
+    ADD COLUMN IF NOT EXISTS net_pkts_s  real,
+    ADD COLUMN IF NOT EXISTS net_errs_s  real,
+    ADD COLUMN IF NOT EXISTS net_drops_s real;
+
+-- One row per worker duty (cq-worker `_run_duty`), rewritten at most every 30 s. The NOC reads
+-- it to tell a worker that is gone or hung (last_run_at stops moving) from one whose duty keeps
+-- failing (last_error_at newer than last_ok_at). Not tenant data — superadmin-only like the rest.
+CREATE TABLE IF NOT EXISTS worker_heartbeat (
+    duty          text PRIMARY KEY,
+    interval_s    real,
+    last_run_at   timestamptz NOT NULL,
+    last_ok_at    timestamptz,
+    last_error    text,
+    last_error_at timestamptz,
+    took_ms       integer
+);

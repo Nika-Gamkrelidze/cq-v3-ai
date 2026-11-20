@@ -394,6 +394,35 @@ async def _health_purge() -> None:
                  result.get("metrics_deleted", 0), result.get("load_deleted", 0), days)
 
 
+_HEARTBEAT_SQL = """
+INSERT INTO worker_heartbeat (duty, interval_s, last_run_at, last_ok_at, last_error, last_error_at, took_ms)
+VALUES ($1, $2, now(), CASE WHEN $4::text IS NULL THEN now() END, $4,
+        CASE WHEN $4::text IS NULL THEN NULL ELSE now() END, $3)
+ON CONFLICT (duty) DO UPDATE SET
+    interval_s = $2, last_run_at = now(), took_ms = $3,
+    last_ok_at    = CASE WHEN $4::text IS NULL THEN now() ELSE worker_heartbeat.last_ok_at END,
+    last_error    = CASE WHEN $4::text IS NULL THEN worker_heartbeat.last_error ELSE $4 END,
+    last_error_at = CASE WHEN $4::text IS NULL THEN worker_heartbeat.last_error_at ELSE now() END
+"""
+HEARTBEAT_EVERY_S = 30.0
+_last_beat: dict[str, float] = {}
+
+
+async def _heartbeat(name: str, interval_s: float, elapsed_s: float, error: str | None) -> None:
+    """Tell the NOC this duty is alive (api: services/noc.py `_workers`). Successes are written at
+    most every 30 s — `apply_accepted_proposals` ticks every 5 — failures always, so a broken duty
+    shows at once. Never raises: monitoring must not be able to stop the thing it watches."""
+    now_m = time.monotonic()
+    if error is None and now_m - _last_beat.get(name, -HEARTBEAT_EVERY_S) < HEARTBEAT_EVERY_S:
+        return
+    _last_beat[name] = now_m
+    try:
+        async with db.pool().acquire() as conn:
+            await conn.execute(_HEARTBEAT_SQL, name, interval_s, int(elapsed_s * 1000), error)
+    except Exception:  # noqa: BLE001 — the table is created by the api's migration, possibly after us
+        log.debug("heartbeat for duty %s not written", name, exc_info=True)
+
+
 async def _run_duty(name: str, interval_s: float, fn) -> None:
     """Run one duty forever on a fixed interval until the stop flag is set.
 
@@ -404,11 +433,14 @@ async def _run_duty(name: str, interval_s: float, fn) -> None:
     """
     while not _stop.is_set():
         started = time.monotonic()
+        error = None
         try:
             await fn()
-        except Exception:  # noqa: BLE001 — a duty must never take the process down
+        except Exception as exc:  # noqa: BLE001 — a duty must never take the process down
             log.exception("duty %s failed; continuing", name)
+            error = f"{type(exc).__name__}: {exc}"[:300]
         elapsed = time.monotonic() - started
+        await _heartbeat(name, interval_s, elapsed, error)
         if elapsed > interval_s:
             log.warning("duty %s took %.1fs, longer than its %.0fs interval", name, elapsed, interval_s)
         try:

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..db import pool
 from ..services import (ai_config, ai_registry, chat_credentials, chat_store, claude,
-                        health_metrics, limits, sentiment, settings_store, usage, voice)
+                        health_metrics, limits, noc, sentiment, settings_store, usage, voice)
 from ..services import transcription as transcription_svc
 from .kb import count_public_documents
 
@@ -382,6 +382,12 @@ class HealthSettingsPatch(BaseModel):
 @router.get("/health/overview", dependencies=[Depends(require_admin)])
 async def health_overview():
     return await health_metrics.overview()
+
+
+# The NOC page: one read of everything that can take the platform down (services/noc.py).
+@router.get("/noc/overview", dependencies=[Depends(require_admin)])
+async def noc_overview():
+    return await noc.overview()
 
 
 @router.get("/health/series", dependencies=[Depends(require_admin)])

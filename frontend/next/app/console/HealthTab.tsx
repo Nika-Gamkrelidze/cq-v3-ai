@@ -1,9 +1,10 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 import { LineChart, type ChartSeries } from '@/components/ui/LineChart';
 import { Tip } from '@/components/ui/Tip';
 import { toast } from '@/components/ui/Toast';
 import { EMPTY, bytes, count } from '@/lib/format';
+import { usePoll } from '@/lib/usePoll';
 import { ApiError } from '@/lib/session';
 import { useI18n } from '@/lib/useI18n';
 import { SessionExpired, adminGet, adminSend, errText } from './api';
@@ -143,26 +144,6 @@ function Bar({ pct: p, tone }: { pct: number | null; tone: string }): JSX.Elemen
 function tone(p: number | null): string {
   if (p === null) return 'var(--muted)';
   return p >= 90 ? 'var(--alert)' : p >= 70 ? 'var(--pending)' : 'var(--ok)';
-}
-
-/* Polling that stops with the tab. `document.hidden` gates every tick; coming back into view
-   fires one at once so the operator never looks at a strip that is minutes stale after an
-   alt-tab. The callback is read through a ref so a language switch or a range change does
-   not tear the interval down and up again. */
-function usePoll(fn: () => void, intervalMs: number, deps: unknown[]) {
-  const ref = useRef(fn);
-  useEffect(() => { ref.current = fn; });
-  useEffect(() => {
-    ref.current();
-    const id = setInterval(() => { if (!document.hidden) ref.current(); }, intervalMs);
-    const onVis = () => { if (!document.hidden) ref.current(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onVis);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, ...deps]);
 }
 
 export default function HealthTab() {

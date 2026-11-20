@@ -192,13 +192,14 @@ async def lifespan(app: FastAPI):
     health_metrics = None
     if settings.health_sampler_enabled:
         try:
-            from .services import health_metrics
+            from .services import health_metrics, noc
             cfg = await settings_store.get_health_config()
             _load = health_metrics.LoadAccumulator()
             health_tasks = [
                 asyncio.create_task(_health_sampler_loop(health_metrics), name="health_sampler"),
                 asyncio.create_task(_health_flush_loop(health_metrics, _load),
                                     name="health_flush"),
+                asyncio.create_task(noc.probe_loop(), name="noc_probe"),
             ]
             log.info("startup health: sampler every %ss, load flush every %.0fs, "
                      "retention %s day(s)", cfg["sample_interval_s"], HEALTH_FLUSH_INTERVAL_S,

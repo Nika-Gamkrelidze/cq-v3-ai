@@ -22,6 +22,7 @@ interface Item {
 const ITEMS: Item[] = [
   { key: 'nav.public', href: '/', roles: 'all' },
   { key: 'nav.editor', href: '/editor', roles: 'all' },
+  { key: 'nav.noc', href: '/noc', roles: ['superadmin'] },
   { key: 'nav.usage', href: '/usage', roles: ['superadmin'] },
   { key: 'nav.aicfg', href: '/ai-config', roles: ['superadmin'] },
   { key: 'nav.console', href: '/console', roles: ['superadmin'] },

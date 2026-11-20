@@ -150,7 +150,8 @@ def test_first_reading_has_no_rates():
     clock = _Clock(100.0)
     s = hm.HostSampler(clock=clock, read_counters=_Counters((0, 0), (0, 0)), media_root="")
     assert s.rates() == {"disk_read_mb_s": None, "disk_write_mb_s": None,
-                         "net_rx_mb_s": None, "net_tx_mb_s": None}
+                         "net_rx_mb_s": None, "net_tx_mb_s": None,
+                         "net_pkts_s": None, "net_errs_s": None, "net_drops_s": None}
 
 
 def test_second_reading_derives_mb_per_second_from_the_deltas():
@@ -164,7 +165,8 @@ def test_second_reading_derives_mb_per_second_from_the_deltas():
     counters.net = (25 * MB, 1 * MB)                  # +20 MB in, nothing out
     r = s.rates()
     assert r == {"disk_read_mb_s": 1.0, "disk_write_mb_s": 0.5,
-                 "net_rx_mb_s": 2.0, "net_tx_mb_s": 0.0}
+                 "net_rx_mb_s": 2.0, "net_tx_mb_s": 0.0,
+                 "net_pkts_s": None, "net_errs_s": None, "net_drops_s": None}                # no packet counters in this fake: None, not a crash
 
 
 def test_a_counter_that_went_backwards_is_a_gap_not_a_negative_rate():

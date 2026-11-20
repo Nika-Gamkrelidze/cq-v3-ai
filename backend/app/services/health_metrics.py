@@ -134,6 +134,15 @@ def derive_rate(prev: tuple[float, float] | None, cur: tuple[float, float] | Non
     return da / _MB / dt_s, db / _MB / dt_s
 
 
+def derive_per_s(prev: tuple | None, cur: tuple | None, dt_s: float) -> tuple | None:
+    """Per-second rates for a tuple of cumulative counters; None on the same conditions as
+    `derive_rate` (no previous reading, no time passed, any counter went backwards)."""
+    if prev is None or cur is None or dt_s <= 0 or len(prev) != len(cur):
+        return None
+    deltas = [c - p for p, c in zip(prev, cur)]
+    return None if any(d < 0 for d in deltas) else tuple(d / dt_s for d in deltas)
+
+
 class HostSampler:
     """One instance per api process. `sample()` never raises.
 
@@ -150,6 +159,7 @@ class HostSampler:
         self._prev_t: float | None = None
         self._prev_disk: tuple[float, float] | None = None
         self._prev_net: tuple[float, float] | None = None
+        self._prev_netp: tuple | None = None
         self._proc = _safe(psutil.Process) if psutil else None
         # Priming: the first cpu_percent() after start is 0.0 by definition; call it now so the
         # first real sample reports the interval since here.
@@ -166,6 +176,9 @@ class HostSampler:
         return {
             "disk": (disk.read_bytes, disk.write_bytes) if disk else None,
             "net": (net.bytes_recv, net.bytes_sent) if net else None,
+            # packets, errors, drops — each in + out; what a NOC calls "packet loss" here.
+            "netp": (net.packets_recv + net.packets_sent, net.errin + net.errout,
+                     net.dropin + net.dropout) if net else None,
         }
 
     def rates(self) -> dict:
@@ -177,12 +190,17 @@ class HostSampler:
         dt = (now - self._prev_t) if self._prev_t is not None else 0.0
         read_mb_s, write_mb_s = derive_rate(self._prev_disk, disk, dt)
         rx_mb_s, tx_mb_s = derive_rate(self._prev_net, net, dt)
-        self._prev_t, self._prev_disk, self._prev_net = now, disk, net
+        netp = counters.get("netp")
+        pkts = derive_per_s(self._prev_netp, netp, dt) or (None, None, None)
+        self._prev_t, self._prev_disk, self._prev_net, self._prev_netp = now, disk, net, netp
         return {
             "disk_read_mb_s": _round(read_mb_s, 3),
             "disk_write_mb_s": _round(write_mb_s, 3),
             "net_rx_mb_s": _round(rx_mb_s, 3),
             "net_tx_mb_s": _round(tx_mb_s, 3),
+            "net_pkts_s": _round(pkts[0], 2),
+            "net_errs_s": _round(pkts[1], 3),
+            "net_drops_s": _round(pkts[2], 3),
         }
 
     # -- host readings ------------------------------------------------------------------
@@ -277,6 +295,7 @@ _SAMPLE_COLUMNS = (
     "mem_available_mb", "swap_used_mb", "disk", "disk_read_mb_s", "disk_write_mb_s",
     "net_rx_mb_s", "net_tx_mb_s", "api_rss_mb", "api_cpu_pct", "api_open_fds", "db_size_mb",
     "db_pool_size", "db_pool_used", "active_jobs", "uptime_s",
+    "net_pkts_s", "net_errs_s", "net_drops_s",
 )
 _INSERT_SAMPLE_SQL = (
     f"INSERT INTO system_metrics ({', '.join(_SAMPLE_COLUMNS)}) VALUES ("
@@ -431,6 +450,7 @@ SELECT date_bin($1::interval, ts, $2::timestamptz) AS b,
        avg(swap_used_mb) AS swap_used_mb,
        avg(disk_read_mb_s) AS disk_read_mb_s, avg(disk_write_mb_s) AS disk_write_mb_s,
        avg(net_rx_mb_s) AS net_rx_mb_s, avg(net_tx_mb_s) AS net_tx_mb_s,
+       avg(net_pkts_s) AS net_pkts_s, avg(net_errs_s) AS net_errs_s, avg(net_drops_s) AS net_drops_s,
        avg(api_rss_mb) AS api_rss_mb, avg(api_cpu_pct) AS api_cpu_pct,
        avg(db_size_mb) AS db_size_mb, avg(db_pool_used) AS db_pool_used,
        max(active_jobs) AS active_jobs
@@ -447,8 +467,8 @@ GROUP BY b ORDER BY b
 """
 _SERIES_FIELDS = ("cpu_pct", "load1", "load5", "load15", "mem_used_mb", "mem_total_mb",
                   "swap_used_mb", "disk_read_mb_s", "disk_write_mb_s", "net_rx_mb_s",
-                  "net_tx_mb_s", "api_rss_mb", "api_cpu_pct", "db_size_mb", "db_pool_used",
-                  "active_jobs")
+                  "net_tx_mb_s", "net_pkts_s", "net_errs_s", "net_drops_s", "api_rss_mb",
+                  "api_cpu_pct", "db_size_mb", "db_pool_used", "active_jobs")
 
 
 async def series(range_: str) -> dict:

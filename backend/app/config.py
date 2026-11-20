@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # test suite (conftest sets it), where a TestClient app has no business writing metric rows
     # into a developer's database on a timer; on everywhere else. env: HEALTH_SAMPLER_ENABLED
     health_sampler_enabled: bool = True
+    # Hostnames whose TLS certificate the NOC page watches (comma separated), e.g. ai.communiq.ge.
+    # Empty = no certificate check. Probed from inside the api container, so the name must resolve there.
+    noc_tls_hosts: str = ""
 
 
 settings = Settings()

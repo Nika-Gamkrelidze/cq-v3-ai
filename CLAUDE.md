@@ -246,6 +246,23 @@ One principal resolver produces `superadmin | tenant | anonymous`:
   audio jobs/ms) where **share = request wall time** — the honest attribution, because analyze and
   AI work run inside the request. **Retention days** (1–365, default 7) and **sample interval**
   (5–300 s, default 10) are settable in the tab (`app_settings` key `health`).
+- **NOC (superadmin)** (`/noc`; `services/noc.py` → `GET /admin/noc/overview`; page `app/noc/`;
+  strings `noc.*`). One screen answering "is the platform healthy right now, and which part is
+  not", in the order of how badly it hurts: what needs attention, the **AI providers** (per
+  active connection: calls / failure rate / p50-p95 from `llm_usage` over 15 min, last success and
+  failure, last manual *Test connection*, plus the network path to its host), the **network**
+  (packet drops and errors from the container's interface counters, and a **TCP-connect probe**
+  of every provider host plus an internet baseline every 30 s — no credential, no tokens; a
+  baseline that fails with the provider tells "our network" from "their outage"), **services**
+  (Postgres latency / connections / pool, the embeddings service, the voice-tone sidecar, and
+  every `cq-worker` duty from `worker_heartbeat`), the **host** (the Health tab's sampler),
+  **workload** (5xx rate, stuck analysis jobs, the re-embed queue) and the TLS certificate.
+  **The server decides every colour** from the thresholds `noc.T` (ok / warn / crit; `unknown`
+  = no data or not configured and never turns the overall status red; a failure rate or 5xx
+  share needs a minimum number of calls before it means anything) — the page only labels.
+  Probe history is **in memory** (one api process), so a deploy resets the last hour of RTT/loss.
+  `NOC_TLS_HOSTS` (env, comma list, empty by default) names the host(s) whose certificate expiry
+  is watched; it is probed from inside the api container, so the name must resolve there.
 - **AI usage, down to one call** (`/usage`, superadmin; `routers/usage_admin.py` →
   `services/usage_report.py` (overview, call log) and `services/usage_drill.py` (recordings,
   conversations), shared filter/group/totals helpers at the bottom of `services/usage.py`;
@@ -443,6 +460,15 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   presses on production (2026-11-10) showed three faults — an ambiguous audio rule picked a
   different per-minute figure each time, a chat model used for transcription was looked up as
   speech-only, and misquoted rows were rejected — which this design fixes.
+- **NOC rules that must not regress** (`services/noc.py`, `worker.py::_heartbeat`). The worker
+  writes `worker_heartbeat` after every duty iteration — successes at most every 30 s (the 5 s
+  `apply_accepted_proposals` tick would otherwise write constantly), failures always — and never
+  raises; the NOC calls a duty **gone** when `last_run_at` is older than max(3 × interval, 120 s)
+  and **failing** when `last_error_at` is newer than `last_ok_at`, and an EMPTY table is itself red
+  (the worker is down, not "unknown"). Packet loss is `drops / packets` summed over the window from
+  `system_metrics.net_{pkts,errs,drops}_s` — never an average of per-sample ratios. Provider
+  statistics skip `feature = 'probe'` (an operator pressing *Test connection* with a bad key must
+  not turn the board red) and the `local` voice-tone provider (no network path to measure).
 - **Usage units and attribution (`/usage`).** Providers bill in different units and the page
   never adds them together: ElevenLabs Scribe reports **no tokens**, so a transcription row
   carries `audio_seconds`; Gemini and OpenAI speech-to-text carry tokens when the response has
@@ -695,6 +721,18 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   for the complete answer (no streaming to the customer); Haiku 5.5 is not the default because
   it thinks by default, which adds delay and generally cannot combine with the forced tool call,
   and the Anthropic adapter sends no thinking setting yet.
+- **2026-11-20 — a NOC page.** The owner asked for one screen for everything worth monitoring.
+  The Health tab already had host CPU/memory/disk/throughput and per-tenant load; what was
+  missing was packet loss, the state of each AI provider connection, the dependencies, and whether
+  the worker is alive at all. Built as §3/§4 describe: `/noc`, nav link for the superadmin,
+  `services/noc.py`, the packet columns on `system_metrics`, the `worker_heartbeat` table, the
+  in-api provider probe. `HealthTab` now shares `lib/usePoll.ts`. **Not done:** no alerting (the
+  page is a board somebody has to look at — email/Telegram on a red check is the obvious next
+  step), no persisted probe history, thresholds are constants, and `NOC_TLS_HOSTS` must be set in
+  the server `.env` (e.g. `ai.communiq.ge`) before the certificate tile appears. Unverified in a
+  browser: the page was type-checked, built and its API exercised by tests, not looked at.
+  Four unrelated backend tests (`test_audio_convert` line-break message, three `test_llm_providers`
+  stream-usage model names) already failed on `main` before this change.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST
