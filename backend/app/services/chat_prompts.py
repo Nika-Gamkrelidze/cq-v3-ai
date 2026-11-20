@@ -119,15 +119,43 @@ def normalize_locale(locale: str | None) -> str:
     return loc if loc in LANG_NAMES else "en"
 
 
+_GEORGIAN_LETTERS = re.compile("[\u10a0-\u10ff\u1c90-\u1cbf\u2d00-\u2d2f]")
+_CYRILLIC_LETTERS = re.compile("[\u0400-\u04ff]")
+
+
+def script_locale(text: str | None) -> str | None:
+    """'ka' or 'ru' from the letters the customer typed, else None.
+
+    Latin script is English OR Georgian typed in Latin letters, which only the model can tell
+    apart (triage `language`), so it answers None and the caller's own hint stays in force.
+    """
+    s = str(text or "")
+    ka, ru = len(_GEORGIAN_LETTERS.findall(s)), len(_CYRILLIC_LETTERS.findall(s))
+    if not ka and not ru:
+        return None
+    return "ka" if ka >= ru else "ru"
+
+
+def ai_language(value) -> str | None:
+    """The triage call's `language`, if it is one we hold built-in wording for ('other' is not)."""
+    v = str(value or "").strip().lower()[:2]
+    return v if v in LANG_NAMES else None
+
+
+def decide_locale(hint: str | None, *, text: str = "", ai=None) -> str:
+    """The language this turn's built-in copy is written in.
+
+    The model's own reading of the customer's message first, then the script they typed, and
+    only then the caller's `locale` — a hint (the chat widget's UI language, the tenant's first
+    language), never the truth about who is writing.
+    """
+    return ai_language(ai) or script_locale(text) or normalize_locale(hint)
+
+
 def refusal_text(cfg: dict, locale: str | None) -> str:
-    """The tenant's refusal copy for this locale, falling back to the built-in wording."""
-    loc = normalize_locale(locale)
+    """The tenant's refusal copy IN this language, else the built-in wording in it."""
     copy = cfg.get("refusal_copy") if isinstance(cfg.get("refusal_copy"), dict) else {}
-    for key in (loc, "en"):
-        text = str(copy.get(key) or "").strip()
-        if text:
-            return text
-    return DEFAULT_REFUSAL.get(loc) or DEFAULT_REFUSAL["en"]
+    return chat_copy.pick(copy, normalize_locale(locale), DEFAULT_REFUSAL)
 
 
 # --- system prompt (tenant-authored only; never any customer text) -------------
@@ -164,11 +192,7 @@ _AUTOPILOT_RULES = (
 # `answer_policy`, applied by the triage call further down — a call that never sees passages.
 
 
-DEFAULT_DISCLOSURE = {
-    "en": "(Automated assistant — a colleague can take over any time.)",
-    "ka": "(ავტომატური ასისტენტი — ნებისმიერ დროს შეგიძლიათ კოლეგას დაუკავშირდეთ.)",
-    "ru": "(Автоматический ассистент — коллега может подключиться в любой момент.)",
-}
+DEFAULT_DISCLOSURE = chat_copy.DEFAULT_DISCLOSURE
 
 # Where a tenant's disclosure copy is looked up, most specific first. `disclosure_channels`
 # exists because the obligation is channel-shaped: a web widget can render an "AI" badge in
@@ -218,9 +242,12 @@ def disclosure_text(cfg: dict, locale: str | None, channel: str | None = None) -
         sources.append(per_channel[ch])
     sources.append(_blob("disclosure") or {})
     for source in sources:
-        for key in (loc, "en"):
-            if key in source:                       # present-but-empty means "suppressed"
-                return str(source.get(key) or "").strip()
+        # Only THIS language's entry counts: present-but-empty means "suppressed", but a
+        # language the tenant never wrote falls to the built-in wording in it, not to their
+        # English line (the Default bot's English-only disclosure used to be read to every
+        # Georgian customer).
+        if loc in source:
+            return str(source.get(loc) or "").strip()
     return DEFAULT_DISCLOSURE.get(loc) or DEFAULT_DISCLOSURE["en"]
 
 
@@ -260,6 +287,36 @@ def general_knowledge_allowed(cfg: dict) -> bool:
     return answer_policy(cfg) in ("general", "open")
 
 
+def _language_rule(cfg: dict, loc: str) -> str:
+    """Which language to write in: the customer's, decided by the model from their words.
+
+    The tie-break is the tenant's first configured language, not this turn's locale: a chat
+    widget's `locale` is its UI language (a Georgian customer on an English browser is the case
+    this rule exists for), and a per-turn value here would split the tenant's cached system
+    prompt into one copy per locale.
+    """
+    langs = cfg.get("languages")
+    tie = normalize_locale(str(langs[0])) if isinstance(langs, list) and langs else loc
+    return (
+        "Write in the language the customer's latest message is written in, whatever it is "
+        "(Georgian, Russian, English or another). Georgian typed in Latin letters, such as "
+        "\"gamarjoba\", is Georgian: answer it in Georgian script. Passages in another "
+        "language are source material, not a reason to switch. If you truly cannot tell, "
+        f"write in {LANG_NAMES[tie]}."
+    )
+
+
+# Static on purpose (no locale, no per-turn value), so it never costs the system prompt its
+# cache. Written for the failures a smaller model showed in Georgian: invented words and
+# English phrases translated word for word.
+_GEORGIAN_STYLE = (
+    "When you write Georgian: use short sentences and plain everyday words, address the "
+    "customer politely in the plural (თქვენ), and never invent a word or translate an English "
+    "phrase word for word. If you are not sure how to say something, say it more simply. Copy "
+    "the company's own product and service names exactly as the passages spell them."
+)
+
+
 def build_system(cfg: dict, *, mode: str, locale: str | None) -> str:
     """Tenant persona + rules. Deterministic, cacheable, and free of customer input.
 
@@ -284,10 +341,8 @@ def build_system(cfg: dict, *, mode: str, locale: str | None) -> str:
         lines.append(_AUTOPILOT_RULES)
 
     lines.append(_BASE_RULES)
-    lines.append(
-        f"Write in the SAME language as the customer's message (the conversation locale is "
-        f"{LANG_NAMES[loc]}). Georgian in, Georgian out."
-    )
+    lines.append(_language_rule(cfg, loc))
+    lines.append(_GEORGIAN_STYLE)
     extra = str(cfg.get("tone") or "").strip()
     if extra:
         lines.append(extra)
@@ -398,7 +453,20 @@ TRIAGE_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            # `kind` first: the reply depends on it, and models fill fields in order.
+            # `language` first: it is one cheap fact the reply and every built-in line around
+            # it depend on, and models fill fields in order. The model decides it from the
+            # customer's words — a locale hint from the chat widget is often the browser's
+            # UI language, not the customer's, and Georgian typed in Latin letters
+            # ("gamarjoba") has no script for code to read.
+            "language": {
+                "type": "string",
+                "enum": ["ka", "ru", "en", "other"],
+                "description": "The language the customer's LATEST message is written in: ka "
+                               "for Georgian (Georgian letters, or Georgian typed in Latin "
+                               "letters), ru for Russian, en for English, other for anything "
+                               "else. Write the reply in this language.",
+            },
+            # `kind` next: the reply depends on it too.
             "kind": {
                 "type": "string",
                 "enum": list(TRIAGE_KINDS),
@@ -410,7 +478,7 @@ TRIAGE_TOOL = {
                                "where the kind's rule says so.",
             },
         },
-        "required": ["kind", "reply"],
+        "required": ["language", "kind", "reply"],
         "additionalProperties": False,
     },
 }
@@ -502,10 +570,8 @@ def build_triage_system(cfg: dict, *, locale: str | None, policy: str,
         related_rule=_RELATED_RULE.get(policy, _RELATED_RULE["kb_only"]),
         off_topic_rule=_OFF_TOPIC_RULE.get(policy, _OFF_TOPIC_RULE["kb_only"]),
         number=emergency_number(cfg)))
-    lines.append(
-        f"Write the reply in the SAME language as the customer's message (the conversation "
-        f"locale is {LANG_NAMES[loc]}). Georgian in, Georgian out."
-    )
+    lines.append(_language_rule(cfg, loc))
+    lines.append(_GEORGIAN_STYLE)
     extra = str(cfg.get("tone") or "").strip()
     if extra:
         lines.append(extra)

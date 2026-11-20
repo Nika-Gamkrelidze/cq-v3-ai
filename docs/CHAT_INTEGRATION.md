@@ -13,6 +13,13 @@ third answer policy, `open`, as of 2026-09-16. Where
 - **Transport:** server-to-server HTTP request/response, JSON bodies. Server-Sent Events are
   optional (`?stream=1` on the answer; a ticketed stream for the copilot). **No WebSocket.**
 - **Locales:** `ka` | `ru` | `en`. Anything else is treated as `en` by the engine.
+  `locale` is a **hint**, not the conversation's language (2026-11-20): the bot answers in the
+  language the customer actually wrote, decided from their letters (Georgian / Cyrillic) and, for
+  Latin-script text such as Georgian typed as "gamarjoba", by the model itself. The built-in
+  customer lines (refusal, disclosure, off-topic copy) follow that language, and the Turn's
+  `locale` echoes the language the turn was **served in**, which may differ from the one you sent.
+  A language the workspace left empty in its copy boxes gets the built-in wording **in that
+  language** — never the workspace's text for another one.
 
 ---
 
@@ -301,7 +308,7 @@ Blocking by default; `?stream=1` returns SSE (§5.2.2).
 | `content` | **required**. Trimmed; empty → **400** `empty_content`; > **8000** chars → **413** `content_too_large`. |
 | `turn_ref` | ≤ 200 chars. **Your message id** — the idempotency key (§8). Strongly recommended. |
 | `channel` | string, default `"web"`. Accepted — and what the consumer sends: `web` \| `messenger` \| `instagram` \| `whatsapp`. **Not validated**: it is the key into the tenant's `disclosure_channels` (per-channel AI-disclosure copy), so a value CQ has never seen is stored as-is and silently gets the *default* disclosure. Spell it exactly (`facebook` is not `messenger`). |
-| `locale` | `ka` \| `ru` \| `en`. Default: the tenant's `languages[0]`. |
+| `locale` | `ka` \| `ru` \| `en`, a hint (see §1). Default: the tenant's `languages[0]`. |
 | `customer_ref` | opaque end-user id; the `X-CQ-End-User` header wins when both are present. |
 | `display_name`, `subject`, `attachment` | ≤ 200 chars each. Optional context from social channels; CQ quarantines them as untrusted input. Do **not** concatenate them into `content`. |
 

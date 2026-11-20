@@ -409,7 +409,7 @@ export function BotTab({ on, gen }: { on: boolean; gen: number }) {
               ariaLabel={t('bot.disclosure.mode')}
               options={DISCLOSURE_MODES.map(m => ({ value: m, label: t('bot.disclosure.' + m) }))}
             />
-            <div style={{ marginTop: 14 }}>{trio('b_disc', disc, setDisc)}</div>
+            <div style={{ marginTop: 14 }}>{trio('b_disc', disc, setDisc, builtin.disclosure)}</div>
             <div className="hint">{t('bot.disclosure.text')}</div>
           </div>
 

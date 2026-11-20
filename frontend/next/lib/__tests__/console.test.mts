@@ -321,7 +321,8 @@ test('timezoneOptions: the stored zone is always offered, and UTC is never missi
 });
 
 test('builtinCopyOf: the engine wording per language, blank when a server does not send it', () => {
-  const b = builtinCopyOf({ builtin_copy: { refusal: { en: 'Sorry.', ka: 'ბოდიში.' }, off_topic_cutoff: 'nope' } });
+  const b = builtinCopyOf({ builtin_copy: { refusal: { en: 'Sorry.', ka: 'ბოდიში.' }, disclosure: { ru: 'Бот.' }, off_topic_cutoff: 'nope' } });
+  assert.deepEqual(b.disclosure, { en: '', ka: '', ru: 'Бот.' });
   assert.deepEqual(b.refusal, { en: 'Sorry.', ka: 'ბოდიში.', ru: '' });
   assert.deepEqual(b.offTopicCutoff, { en: '', ka: '', ru: '' });
   assert.deepEqual(builtinCopyOf(null).offTopicWarning, { en: '', ka: '', ru: '' });

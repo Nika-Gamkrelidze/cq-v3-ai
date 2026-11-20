@@ -233,7 +233,7 @@ export default function DefaultBotTab() {
           ]}
         />
         <div className="hint" style={{ marginTop: 10 }}>{t('bot.disclosure.text')}</div>
-        <LangRow field="disclosure" form={form} onChange={setLangText} t={t} />
+        <LangRow field="disclosure" form={form} onChange={setLangText} t={t} placeholders={builtin.disclosure} />
       </div>
 
       {/* How far beyond the shared documents the bot may go — documents-only unless someone

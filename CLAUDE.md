@@ -576,6 +576,22 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
     it. Empty means "inherit" at every layer and is stored as an absent key (never `""`, which
     would shadow the layer below); config reads carry `chat_model_inherited` so the tab can
     tell a workspace's own value from the merged one.
+  - **The language is the customer's, decided per turn (2026-11-20).** The chat widget's `locale`
+    is a hint (often its UI language). `chat_prompts.decide_locale`: the triage call's own
+    `language` field (`ka|ru|en|other`, first in `TRIAGE_TOOL`; it alone can read Georgian typed
+    in Latin letters) > the script of the customer's message (Georgian / Cyrillic letters, no
+    model call, so the zero-token exits are right too) > the hint. `run_answer` carries the result
+    in `ctx.locale`, so every built-in line (refusal, redirect, warning, cut-off, disclosure) and
+    the `locale` echoed in the Turn follow it. Both system prompts ask for "the language the
+    customer's latest message is written in" — never "the conversation locale is X" — with the
+    tenant's first language as the tie-break (not the turn's locale: that would split the cached
+    system prompt per language) and a short static Georgian style block. Copy boxes are looked up
+    **per language** (`chat_copy.pick`, `refusal_text`, `disclosure_text`): empty means the
+    built-in text IN THAT LANGUAGE, never the tenant's text for another one — the Default bot's
+    English-only disclosure used to be read to every Georgian customer. `disclosure[lang] = ""`
+    still means suppressed, for that language only. The console shows the built-in disclosure as
+    a placeholder (`builtin_copy.disclosure`). Latency/limit: a Latin-script message on a
+    zero-token exit (cut-off, escalation keyword) has only the hint to go on.
   - **Envelope:** `turn.scope` (policy, source, kind, answered, off_topic); `state` is `ready`
     when grounded OR `scope.answered`. New handoff reasons `risky`, `related_not_in_kb`; new
     grounding reason `weak_match`; `ungrounded_answer` is no longer produced.
@@ -753,6 +769,20 @@ takes the `llm_usage` row type). Only the api runs migrations — `cq-worker`
   a minute, so a spike shorter than that is only visible if it flipped the overall status; probe
   history is still memory-only. Verified at API level with a real uvicorn (stream cadence, storage,
   history and 401s); the page itself is type-checked and built, not looked at in a browser.
+- **2026-11-20 — the bot's Georgian, after the move to Haiku.** The owner pasted a Haiku
+  conversation ("ხელიანი ვარ დამეხმაროთ", a Black Sea tonnage off by nine orders of magnitude) and
+  the fix had two halves. Model: the chat model went to `claude-sonnet-4-6` via the Default bot
+  tab (no deploy) — the only larger model the Anthropic adapter takes as it is: it FORCES the tool
+  (`tool_choice` tool) on every `call_tool`, which `claude-sonnet-5-5` / `claude-opus-5-5` reject
+  with a 400 (every message would degrade to refusal + handoff), and Haiku 5.5 thinks by default
+  inside the answer's 900-token cap. Code: the language is now decided per turn and empty copy
+  boxes fall to the built-in text per language (§4). **Not done:** no model has been scored on
+  Georgian (no Georgian benchmark exists for any Claude model; Anthropic's own table only shows
+  smaller tiers losing more on low-resource languages); greetings/thanks are still model-written
+  (a canned reply was dropped — Sonnet 4.6 writes them correctly and a pattern match can misfire);
+  the language is not persisted on the conversation, so a Latin-script customer on a zero-token
+  exit gets the widget's hint; Sonnet 4.6 runs at the API's default effort (the adapter sends
+  none) and the copilot's 6 s timeout is unmeasured on it.
 - **2026-09-15 - one click analyses a call end to end.** "Run all checks" transcribes first
   when nothing is loaded and runs summarise alongside the checks, with the score after
   fact-check and sentiment (section 3). New route `POST /summaries/from-recordings`; `POST

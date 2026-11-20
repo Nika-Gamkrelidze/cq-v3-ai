@@ -12,6 +12,14 @@ a policy it does not know, and always leaving a way to reach a person.
 
 SUPPORTED = ("en", "ka", "ru")
 
+# The AI-disclosure line, appended by code to the bot's replies (`chat.run_answer`). Lives here,
+# not in `chat_prompts`, so the console can show it as the placeholder of its boxes.
+DEFAULT_DISCLOSURE = {
+    "en": "(Automated assistant — a colleague can take over any time.)",
+    "ka": "(ავტომატური ასისტენტი — ნებისმიერ დროს შეგიძლიათ კოლეგას დაუკავშირდეთ.)",
+    "ru": "(Автоматический ассистент — коллега может подключиться в любой момент.)",
+}
+
 # The KB could not answer. Tenants override it in `chat_configs.refusal_copy`; ADR-001 flags that
 # copy as something a lawyer reads.
 DEFAULT_REFUSAL = {
@@ -81,25 +89,29 @@ DEFAULT_OFF_TOPIC_CUTOFF = {
 
 
 def pick(copy: dict | None, locale: str, fallback: dict) -> str:
-    """The first non-empty text for `locale`, then English, from `copy`, then from `fallback`.
+    """The text for `locale`: the tenant's own if they wrote one IN THAT LANGUAGE, else the
+    built-in wording in that language.
 
-    Empty means "use the built-in wording" for every map this module backs — unlike the
-    disclosure line, where present-but-empty is a deliberate suppression.
+    A language the tenant left empty gets the built-in text for it — never the tenant's text
+    for another language. The old order (tenant `ka`, tenant `en`, built-in `ka`) read a
+    Georgian customer the tenant's English line, because a workspace that only filled in the
+    English box had "customised" every language. English is only the last resort for a
+    language the engine has no wording for.
     """
     loc = (locale or "").strip().lower()[:2]
     loc = loc if loc in SUPPORTED else "en"
     for source in (copy if isinstance(copy, dict) else {}, fallback):
-        for key in (loc, "en"):
-            text = str(source.get(key) or "").strip()
-            if text:
-                return text
-    return ""
+        text = str(source.get(loc) or "").strip()
+        if text:
+            return text
+    return str(fallback.get("en") or "").strip()
 
 
 def builtin_copy() -> dict:
     """The placeholders the console forms show: what a customer reads when a box is empty."""
     return {
         "refusal": dict(DEFAULT_REFUSAL),
+        "disclosure": dict(DEFAULT_DISCLOSURE),
         "off_topic_warning": dict(DEFAULT_OFF_TOPIC_WARNING),
         "off_topic_cutoff": dict(DEFAULT_OFF_TOPIC_CUTOFF),
     }

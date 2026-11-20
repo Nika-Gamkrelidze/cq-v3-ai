@@ -495,6 +495,7 @@ async def run_suggest(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     ev = _Seq()
     started = time.monotonic()
     stages: dict = {}
+    ctx = _with_locale(ctx, chat_prompts.decide_locale(ctx.locale, text=_last_customer_text(ctx)))
     yield ev("open", {"suggest_ref": ctx.suggest_ref, "mode": ctx.mode,
                       "conversation_ref": ctx.conversation_ref or ctx.conversation_id,
                       "locale": chat_prompts.normalize_locale(ctx.locale), "proto": PROTO})
@@ -574,6 +575,14 @@ async def run_suggest(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     yield ev("done", _envelope_for(ctx, retrieval=r, grounded=True, reason=reason,
                                    tier1=tier1, suggestions=suggestions,
                                    handoff=handoff, stages=stages))
+
+
+def _with_locale(ctx: ChatContext, locale: str) -> ChatContext:
+    """A copy answering in `locale`. Everything customer-facing that is not model-written (the
+    refusal, the off-topic copy, the AI disclosure) is looked up by `ctx.locale`, so deciding the
+    customer's language once and carrying it here keeps those lines in the language the model is
+    writing in. See `chat_prompts.decide_locale`."""
+    return dataclasses.replace(ctx, locale=locale)
 
 
 def _with_cfg(ctx: ChatContext, cfg: dict) -> ChatContext:
@@ -755,6 +764,10 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     ev = _Seq()
     started = time.monotonic()
     stages: dict = {} if ctx.prep_ms is None else {"prep": ctx.prep_ms}
+    # The language of this turn's built-in copy is the customer's, not the widget's hint: Georgian
+    # or Cyrillic letters decide it here, with no model call; a Latin-script message keeps the
+    # hint until triage (below) reads it — the only place Georgian typed in Latin letters is seen.
+    ctx = _with_locale(ctx, chat_prompts.decide_locale(ctx.locale, text=_last_customer_text(ctx)))
     yield ev("open", {"suggest_ref": ctx.suggest_ref, "mode": ctx.mode,
                       "conversation_ref": ctx.conversation_ref or ctx.conversation_id,
                       "locale": chat_prompts.normalize_locale(ctx.locale), "proto": PROTO})
@@ -965,6 +978,13 @@ async def run_answer(ctx: ChatContext) -> AsyncIterator[ChatEvent]:
     stages["triage"] = _ms(t)
 
     raw = raw if isinstance(raw, dict) else {}
+    # The model has now read the message: its own `language` decides the language of every
+    # built-in line this turn can still send (refusal, redirect, warning, disclosure).
+    decided = chat_prompts.decide_locale(
+        ctx.locale, text=_last_customer_text(ctx), ai=raw.get("language"))
+    if decided != chat_prompts.normalize_locale(ctx.locale):
+        ctx = _with_locale(ctx, decided)
+        refusal = chat_prompts.refusal_text(ctx.cfg, ctx.locale)
     kind = str(raw.get("kind") or "").strip().lower()
     if kind not in chat_prompts.TRIAGE_KINDS:
         # A strict schema makes this unlikely, never impossible. "business" is the reading that

@@ -392,6 +392,7 @@ export interface ScopeForm {
 /** `builtin_copy` from the config response, normalised to three strings per field. */
 export interface BuiltinCopy {
   refusal: LangText;
+  disclosure: LangText;
   offTopicWarning: LangText;
   offTopicCutoff: LangText;
 }
@@ -480,6 +481,7 @@ export function builtinCopyOf(cfg: unknown): BuiltinCopy {
   const b = obj(obj(cfg).builtin_copy);
   return {
     refusal: langText(b.refusal),
+    disclosure: langText(b.disclosure),
     offTopicWarning: langText(b.off_topic_warning),
     offTopicCutoff: langText(b.off_topic_cutoff),
   };
